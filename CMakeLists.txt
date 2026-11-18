@@ -69,3 +69,20 @@ foreach(rule
         bit_field member_offset_too_large decode_const_member)
     micropb_add_compile_fail_test(${rule})
 endforeach()
+
+# Size report: not a test. `cmake --build <dir> --target size_report` prints the
+# size of one translation unit that encodes and decodes 16 and 32 message types.
+foreach(count 16 32)
+    add_library(size_report_${count} OBJECT EXCLUDE_FROM_ALL tests/size/size_report.cpp)
+    target_link_libraries(size_report_${count} PRIVATE micropb)
+    target_compile_options(size_report_${count} PRIVATE ${micropb_compile_options} -Os)
+    target_compile_definitions(size_report_${count} PRIVATE MICROPB_SIZE_TYPES=${count})
+endforeach()
+
+find_program(MICROPB_SIZE_TOOL size)
+add_custom_target(size_report
+    COMMAND ${CMAKE_COMMAND} -DSIZE_TOOL=${MICROPB_SIZE_TOOL}
+            -DOBJECT_16=$<TARGET_OBJECTS:size_report_16> -DOBJECT_32=$<TARGET_OBJECTS:size_report_32>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/size/report.cmake
+    VERBATIM)
+add_dependencies(size_report size_report_16 size_report_32)
