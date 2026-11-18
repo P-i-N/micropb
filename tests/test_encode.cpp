@@ -31,27 +31,6 @@ constexpr bool matches(const T& value, const std::array<std::uint8_t, N>& expect
            buffer[N] == guard;
 }
 
-constexpr std::array<std::int32_t, 8> full_ints{1, -2, 3, -4, 5, 300, -70000, 8};
-constexpr std::array<float, 8> full_floats{1.5f, -2.5f, 3, 4, 5, 6, 7, 8.25f};
-constexpr std::array<std::string_view, 8> full_names{"a", "", "ccc", "d", "e", "f", "g", "hh"};
-constexpr std::array<inner, 8> full_items{inner{1, "a"}, {2, {}}, {0, "c"}, {-4, "d"},
-                                          {5, {}},       {6, {}}, {7, {}},  {8, "h"}};
-constexpr std::array<std::int64_t, 8> full_zz{0, -1, 1, -2, 2, 1000000000000, -1000000000000, 9};
-
-template <typename R, typename A>
-constexpr R repeated_of(const A& source) {
-    R result;
-    for (const auto& item : source)
-        static_cast<void>(result.push_back(item));
-    return result;
-}
-
-constexpr lists lists_full() {
-    return {repeated_of<decltype(lists::ints)>(full_ints), repeated_of<decltype(lists::floats)>(full_floats),
-            repeated_of<decltype(lists::names)>(full_names), repeated_of<decltype(lists::items)>(full_items),
-            repeated_of<decltype(lists::zz)>(full_zz)};
-}
-
 /// `lists` with the container types that only the encoder accepts.
 struct lists_views {
     std::span<const std::int32_t> ints;
