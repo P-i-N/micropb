@@ -14,6 +14,7 @@
 #include <span>
 #include <string_view>
 #include <type_traits>
+#include <variant>
 
 namespace pb {
 
@@ -65,19 +66,23 @@ template <typename M>
         return static_cast<std::uint64_t>(value);
 }
 
+/// Writes the value of a scalar without a key.
 template <typename S, typename M>
-[[nodiscard]] constexpr bool emit_scalar(S& sink, std::uint32_t number, const M& value) {
+[[nodiscard]] constexpr bool emit_value(S& sink, const M& value) {
     constexpr wire_type type = wire_type_of<M>();
     const std::uint64_t bits = scalar_bits(value);
 
-    if (!sink.write_key(number, type))
-        return false;
     if constexpr (type == wire_type::FIXED32)
         return sink.write_fixed32(static_cast<std::uint32_t>(bits));
     else if constexpr (type == wire_type::FIXED64)
         return sink.write_fixed64(bits);
     else
         return sink.write_varint(bits);
+}
+
+template <typename S, typename M>
+[[nodiscard]] constexpr bool emit_scalar(S& sink, std::uint32_t number, const M& value) {
+    return sink.write_key(number, wire_type_of<M>()) && emit_value(sink, value);
 }
 
 template <typename S, typename B>
@@ -87,6 +92,20 @@ template <typename S, typename B>
 
 template <typename S, typename T>
 [[nodiscard]] constexpr bool emit_message(S& sink, const T& message);
+
+/// Size of the values of a packed field, without key and length prefix.
+template <typename E, typename R>
+[[nodiscard]] constexpr std::size_t packed_size(const R& values) {
+    constexpr std::size_t width = fixed_width<E>();
+    if constexpr (width != 0) {
+        return width * values.size();
+    } else {
+        counter size;
+        for (const E& value : values)
+            static_cast<void>(emit_value(size, value));
+        return size.size();
+    }
+}
 
 /// Encoded size of the fields of `message`, without key and length prefix.
 template <typename T>
@@ -135,8 +154,28 @@ template <typename S, typename M>
         if (!value)
             return true;
         return emit_field(sink, number, *value, true);
+    } else if constexpr (kind == field_kind::REPEATED) {
+        using element = element_t<M>;
+        if (value.size() == 0)
+            return true;
+
+        if constexpr (is_packed<element>()) {
+            if (!sink.write_key(number, wire_type::LENGTH_DELIMITED) || !sink.write_varint(packed_size<element>(value)))
+                return false;
+            for (const element& item : value) {
+                if (!emit_value(sink, item))
+                    return false;
+            }
+            return true;
+        } else {
+            for (const element& item : value) {
+                if (!emit_field(sink, number, item, true))
+                    return false;
+            }
+            return true;
+        }
     } else {
-        static_assert(false, "pb: encode: repeated fields and oneofs are not supported yet");
+        static_assert(false, "pb: encode: a oneof is written by emit_message");
     }
 }
 
@@ -145,8 +184,14 @@ template <typename S, typename T>
 [[nodiscard]] constexpr bool emit_message(S& sink, const T& message) {
     template for (constexpr field_info field : build_tag_table<T>()) {
         using member = typename[:std::meta::type_of(field.member):];
-        if (!emit_field<S, member>(sink, field.number, message.[:field.member:], false))
-            return false;
+        if constexpr (field.alternative == no_alternative) {
+            if (!emit_field<S, member>(sink, field.number, message.[:field.member:], false))
+                return false;
+        } else {
+            const auto* active = std::get_if<field.alternative>(&message.[:field.member:]);
+            if (active && !emit_field(sink, field.number, *active, true))
+                return false;
+        }
     }
     return true;
 }
