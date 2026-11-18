@@ -36,6 +36,7 @@ endfunction()
 micropb_add_test(test_wire)
 micropb_add_test(test_types)
 micropb_add_test(test_schema)
+micropb_add_test(test_codec)
 micropb_add_test(test_encode)
 micropb_add_test(test_decode)
 micropb_add_test(test_wire_compat)
@@ -48,6 +49,7 @@ foreach(rule
         optional_repeated optional_optional optional_variant
         repeated_repeated repeated_optional repeated_variant
         tag_on_variant oneof_tags_on_non_variant decode_encode_only
-        not_aggregate base_class inaccessible_member enum_too_wide)
+        not_aggregate base_class inaccessible_member enum_too_wide
+        bit_field member_offset_too_large)
     micropb_add_compile_fail_test(${rule})
 endforeach()

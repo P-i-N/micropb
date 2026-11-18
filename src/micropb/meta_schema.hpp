@@ -20,7 +20,7 @@ namespace pb {
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Category of a member type. It sets how the codec writes and reads the member.
-enum class field_kind { SCALAR, STRING, BYTES, FIXED_BYTES, MESSAGE, OPTIONAL, ONEOF, REPEATED };
+enum class field_kind : std::uint8_t { SCALAR, STRING, BYTES, FIXED_BYTES, MESSAGE, OPTIONAL, ONEOF, REPEATED };
 
 /// `field_info::alternative` of a field that is not a `std::variant` alternative.
 inline constexpr std::size_t no_alternative = std::size_t(-1);
@@ -269,7 +269,17 @@ consteval std::optional<std::meta::info> oneof_tags_annotation(std::meta::info m
     return std::nullopt;
 }
 
-/// Rejects message types of which reflection does not show all data members.
+template <typename T>
+consteval bool has_bit_field() {
+    for (std::meta::info member : std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked())) {
+        if (std::meta::is_bit_field(member))
+            return true;
+    }
+    return false;
+}
+
+/// Rejects message types of which reflection does not show all data members,
+/// and members that the codec cannot address.
 template <typename T>
 consteval void check_message_type() {
     static_assert(std::is_class_v<T> && std::is_aggregate_v<T>,
@@ -279,6 +289,7 @@ consteval void check_message_type() {
     static_assert(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()).size() ==
                       members<T>().size(),
                   "pb: inaccessible_member: all data members of a message must be public");
+    static_assert(!has_bit_field<T>(), "pb: bit_field: a message member cannot be a bit-field");
 }
 
 template <typename T>
