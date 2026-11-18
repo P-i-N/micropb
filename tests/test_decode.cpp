@@ -503,6 +503,51 @@ bool test_error_order() {
     return fails<lists>(bytes_of(bad), error::TRUNCATED) && fails<lists>(bytes_of(full), error::CAPACITY_EXCEEDED);
 }
 
+/// A second `decode` into the same object resets each kind of member: the object can be a receive buffer
+/// that the application uses again.
+bool test_reuse_resets_each_kind() {
+    text words{};
+    const auto a = decode(bytes_of(vectors::text_short), words);
+    const bool filled = a && words.name == "hi" && !words.data.empty() && words.mac == mac;
+    const auto b = decode(std::span<const std::uint8_t>(), words);
+    const bool cleared = b && words.name.empty() && words.data.empty() && words.data.data() == nullptr &&
+                         words.mac == std::array<std::uint8_t, 6>{};
+
+    outer nested{};
+    const auto c = decode(bytes_of(vectors::outer_set), nested);
+    const bool set = c && nested.child.x == 1 && nested.maybe && nested.maybe_child && nested.gap == 3;
+    const auto d = decode(std::span<const std::uint8_t>(), nested);
+    return filled && cleared && set && d && nested.child.x == 0 && !nested.maybe && !nested.maybe_child &&
+           nested.gap == 0;
+}
+
+/// On an error, the message holds the fields that were read before the error, and nothing of the field
+/// that failed.
+bool test_partial_result() {
+    constexpr std::array<std::uint8_t, 4> scalar{0x08, 0x05, 0x08, 0x80};
+    inner one{};
+    const auto a = decode(bytes_of(scalar), one);
+    const bool kept = !a && a.error() == error::TRUNCATED && one.x == 5;
+
+    constexpr std::array<std::uint8_t, 4> packed{0x0a, 0x02, 0x01, 0x80};
+    ints_only numbers{};
+    const auto b = decode(bytes_of(packed), numbers);
+    const bool one_item = !b && b.error() == error::TRUNCATED && numbers.ints.size() == 1 && numbers.ints[0] == 1;
+
+    constexpr std::array<std::uint8_t, 3> element{0x22, 0x01, 0x08};
+    lists messages{};
+    const auto c = decode(bytes_of(element), messages);
+    return kept && one_item && !c && messages.items.empty();
+}
+
+/// A second occurrence of a fixed-length bytes field replaces the first. A shorter one leaves no old bytes.
+bool test_fixed_bytes_last_wins() {
+    constexpr std::array<std::uint8_t, 12> in{0x0a, 0x06, 1, 2, 3, 4, 5, 6, 0x0a, 0x02, 9, 9};
+    constexpr std::array<std::uint8_t, 6> expected{9, 9, 0, 0, 0, 0};
+    mac_only message{};
+    return decode(bytes_of(in), message) && message.mac == expected;
+}
+
 } // namespace
 
 int main() {
@@ -536,6 +581,9 @@ int main() {
                     test_reuse_oneof() &&
                     test_span_buffer_no_storage() &&
                     test_decode_empty_message() &&
-                    test_error_order();
+                    test_error_order() &&
+                    test_reuse_resets_each_kind() &&
+                    test_partial_result() &&
+                    test_fixed_bytes_last_wins();
     return ok ? 0 : 1;
 }

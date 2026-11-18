@@ -202,13 +202,17 @@ sequence_view access_sequence(void* sequence) {
     }
 }
 
+/// A value type with a `const` member cannot be made again in its place. Such
+/// a type is encode-only (`check_decodable`), and `ENGAGE` does nothing for it.
 template <typename O>
 void* access_optional(void* optional, optional_op op) {
     O& value = *static_cast<O*>(optional);
-    if (op == optional_op::RESET)
+    if (op == optional_op::RESET) {
         value.reset();
-    else if (op == optional_op::ENGAGE && !value)
-        value.emplace();
+    } else if (op == optional_op::ENGAGE && !value) {
+        if constexpr (requires { value.emplace(); })
+            value.emplace();
+    }
     return value ? &*value : nullptr;
 }
 
@@ -219,8 +223,11 @@ void* access_variant(void* variant, std::size_t index, bool select) {
     template for (constexpr std::meta::info reflected : alternatives<V>()) {
         using alternative = typename[:reflected:];
         if (index == current) {
-            if (select && !std::holds_alternative<alternative>(value))
-                value.template emplace<alternative>();
+            // An alternative with a `const` member is encode-only: no `emplace`.
+            if (select && !std::holds_alternative<alternative>(value)) {
+                if constexpr (requires { value.template emplace<alternative>(); })
+                    value.template emplace<alternative>();
+            }
             return std::get_if<alternative>(&value);
         }
         ++current;
@@ -238,7 +245,7 @@ consteval sequence_desc describe_sequence() {
 
     if constexpr (is_instance_of<S>(^^repeated)) {
         static_assert(std::meta::offset_of(member_named(^^S, "_items")).bytes == 0);
-        constexpr std::size_t count_offset = std::meta::offset_of(member_named(^^S, "_count")).bytes;
+        constexpr auto count_offset = static_cast<std::size_t>(std::meta::offset_of(member_named(^^S, "_count")).bytes);
         static_assert(count_offset <= 65535,
                       "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less");
         return {item, nullptr, item_size, static_capacity<S>(), static_cast<std::uint16_t>(count_offset),
@@ -281,7 +288,7 @@ consteval std::span<const field_desc> describe_fields() {
     [[maybe_unused]] std::size_t index = 0;
     template for (constexpr field_info field : build_tag_table<T>()) {
         using member = std::remove_const_t<typename[:std::meta::type_of(field.member):]>;
-        constexpr std::size_t offset = std::meta::offset_of(field.member).bytes;
+        constexpr auto offset = static_cast<std::size_t>(std::meta::offset_of(field.member).bytes);
         static_assert(offset <= 65535,
                       "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less");
 
@@ -302,7 +309,10 @@ consteval value_desc describe_value() {
         return {.kind = kind, .scalar = 0, .size = 0};
     else if constexpr (kind == field_kind::FIXED_BYTES)
         return {.kind = kind, .scalar = 0, .size = static_capacity<T>()};
-    else if constexpr (kind == field_kind::BYTES && is_instance_of<T>(^^std::span))
+    else if constexpr (std::is_same_v<T, std::span<const std::uint8_t>>)
+        // Only this exact type is the bytes view that the interpreter copies as
+        // one object. A span with a static extent has a different layout: it
+        // goes through its accessor, as each other sequence.
         return {.kind = kind, .scalar = 0, .sequence = nullptr};
     else if constexpr (kind == field_kind::BYTES || kind == field_kind::REPEATED)
         return {.kind = kind, .scalar = 0, .sequence = &sequence_descriptor<T>};

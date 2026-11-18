@@ -9,6 +9,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <variant>
 
 #include <micropb/codec.hpp>
 
@@ -223,6 +224,35 @@ bool test_encode_span_buffer() {
     return matches(value, expected);
 }
 
+struct fixed_view {
+    std::span<const std::uint8_t, 6> mac;
+    std::uint32_t after;
+};
+
+/// A `std::span` with a static extent is a different type than the bytes view: it holds only a pointer.
+bool test_encode_fixed_extent_span() {
+    constexpr std::array<std::uint8_t, 6> address{1, 2, 3, 4, 5, 6};
+    constexpr std::array<std::uint8_t, 10> expected{0x0a, 0x06, 1, 2, 3, 4, 5, 6, 0x10, 0x05};
+    return matches(fixed_view{std::span<const std::uint8_t, 6>(address), 5}, expected);
+}
+
+struct const_middle {
+    const inner deep;
+    std::uint32_t m;
+};
+
+struct const_holder {
+    std::optional<const_middle> maybe;
+    std::variant<std::monostate, const_middle> choice;
+};
+
+/// A message with a `const` nested struct is encode-only, also in a `std::optional` and a `std::variant`.
+bool test_encode_const_nested() {
+    constexpr std::array<std::uint8_t, 16> expected{0x0a, 0x06, 0x0a, 0x02, 0x08, 0x01, 0x10, 0x02,
+                                                    0x12, 0x06, 0x0a, 0x02, 0x08, 0x03, 0x10, 0x04};
+    return matches(const_holder{const_middle{{1, {}}, 2}, const_middle{{3, {}}, 4}}, expected);
+}
+
 } // namespace
 
 int main() {
@@ -234,6 +264,7 @@ int main() {
                     test_encode_envelope_ping() && test_encode_envelope_long() && test_encode_spans() &&
                     test_encode_too_small() && test_encode_order() &&
                     test_encode_unsigned_enum() && test_encode_empty_message() && test_encode_deep() &&
-                    test_encode_each_short_buffer() && test_encode_span_buffer();
+                    test_encode_each_short_buffer() && test_encode_span_buffer() &&
+                    test_encode_fixed_extent_span() && test_encode_const_nested();
     return ok ? 0 : 1;
 }

@@ -73,7 +73,7 @@ struct writer {
     template <typename B>
     constexpr void write_bytes(const B& bytes) {
         if (_pos <= _out.size() && bytes.size() <= _out.size() - _pos)
-            std::copy(bytes.begin(), bytes.end(), _out.begin() + _pos);
+            std::copy(bytes.begin(), bytes.end(), _out.data() + _pos);
         advance(bytes.size());
     }
 

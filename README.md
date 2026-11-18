@@ -88,7 +88,7 @@ Type mapping:
 * Integers: use only the fixed-width aliases of `<cstdint>` (`std::int32_t`, `std::uint64_t`, ...). Only these are portable: `std::int32_t` is `int` on this host, but `long` on `arm-none-eabi`. A type such as `long` that is not the alias on the target, and `char`, do not compile. Use `pb::sint32`, `pb::sint64`, `pb::fixed32`, `pb::fixed64`, `pb::sfixed32` and `pb::sfixed64` for the other wire encodings.
 * `float`, `double` and `bool`: as in proto3.
 * `enum` and `enum class`: proto3 `enum`, which is `int32` on the wire. A negative value is a 10-byte varint. An enum wider than 32 bits does not compile.
-* `std::string_view`: `string`. `std::span<const std::uint8_t>`, `pb::repeated<std::uint8_t, N>` and `pb::span_buffer<std::uint8_t>`: `bytes`. `std::array<std::uint8_t, N>`: `bytes` with a fixed length. Decoding does not copy a `std::string_view` or a `std::span`.
+* `std::string_view`: `string`. `std::span<const std::uint8_t>`, `pb::repeated<std::uint8_t, N>` and `pb::span_buffer<std::uint8_t>`: `bytes`. `std::array<std::uint8_t, N>`: `bytes` with a fixed length. `std::span<const std::uint8_t, N>` (a static extent): `bytes` for encode only. Decoding does not copy a `std::string_view` or a `std::span`.
 * `std::optional<T>`: field with explicit presence. `std::variant<std::monostate, ...>`: `oneof`.
 * `pb::repeated<T, N>` (storage in the struct) and `pb::span_buffer<T>` (storage that the caller supplies): repeated fields. `std::array<T, N>` and `std::span<const T>` are repeated fields for encode only.
 * Nested structs: messages. A message must be an aggregate with only public data members and no base class.

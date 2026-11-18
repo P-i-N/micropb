@@ -66,7 +66,7 @@ foreach(rule
         repeated_repeated repeated_optional repeated_variant
         tag_on_variant oneof_tags_on_non_variant decode_encode_only
         not_aggregate base_class inaccessible_member enum_too_wide
-        bit_field member_offset_too_large decode_const_member)
+        bit_field member_offset_too_large decode_const_member decode_fixed_span)
     micropb_add_compile_fail_test(${rule})
 endforeach()
 
@@ -78,6 +78,13 @@ foreach(count 16 32)
     target_compile_options(size_report_${count} PRIVATE ${micropb_compile_options} -Os)
     target_compile_definitions(size_report_${count} PRIVATE MICROPB_SIZE_TYPES=${count})
 endforeach()
+
+# The headers must stay clean for a project that builds with these warnings as
+# errors. This object is part of the default build; it has no test of its own.
+add_library(micropb_strict_warnings OBJECT tests/size/size_report.cpp)
+target_link_libraries(micropb_strict_warnings PRIVATE micropb)
+target_compile_options(micropb_strict_warnings PRIVATE ${micropb_compile_options} -Wsign-conversion)
+target_compile_definitions(micropb_strict_warnings PRIVATE MICROPB_SIZE_TYPES=32)
 
 find_program(MICROPB_SIZE_TOOL size)
 add_custom_target(size_report

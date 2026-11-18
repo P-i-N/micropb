@@ -386,7 +386,8 @@ template <typename T>
 namespace detail {
 
 /// Rejects types that `decode` cannot write: a repeated field in an
-/// encode-only container, and a `const` member. It examines `T`, and each
+/// encode-only container, bytes in a span with a static extent, and a `const`
+/// member. It examines `T`, and each
 /// member, alternative, value and element of it.
 template <typename T>
 consteval void check_decodable() {
@@ -397,6 +398,10 @@ consteval void check_decodable() {
                       "pb: decode_encode_only: std::array and std::span<const T> are encode-only, "
                       "use pb::repeated or pb::span_buffer to decode");
         check_decodable<element_t<T>>();
+    } else if constexpr (kind == field_kind::BYTES) {
+        static_assert(!is_instance_of<T>(^^std::span) || std::is_same_v<T, std::span<const std::uint8_t>>,
+                      "pb: decode_fixed_span: a std::span with a static extent is encode-only, "
+                      "use std::span<const std::uint8_t> or std::array to decode");
     } else if constexpr (kind == field_kind::OPTIONAL) {
         check_decodable<typename T::value_type>();
     } else if constexpr (kind == field_kind::ONEOF) {
