@@ -40,6 +40,6 @@ foreach(rule
         span_buffer_in_variant span_buffer_in_optional span_buffer_in_repeated
         optional_repeated optional_optional optional_variant
         repeated_repeated repeated_optional repeated_variant
-        tag_on_variant oneof_tags_on_non_variant)
+        tag_on_variant oneof_tags_on_non_variant decode_encode_only)
     micropb_add_compile_fail_test(${rule})
 endforeach()

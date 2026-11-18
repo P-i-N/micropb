@@ -8,9 +8,11 @@
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string_view>
+#include <variant>
 
 using namespace pb;
 
@@ -52,6 +54,20 @@ constexpr bool same(const outer& a, const outer& b) {
            (!a.maybe_child || same(*a.maybe_child, *b.maybe_child)) && a.gap == b.gap;
 }
 
+constexpr bool same_bits(float a, float b) { return std::bit_cast<std::uint32_t>(a) == std::bit_cast<std::uint32_t>(b); }
+
+template <typename S, typename F>
+constexpr bool same_items(const S& a, const S& b, F equal) {
+    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), equal);
+}
+
+constexpr bool same(const lists& a, const lists& b) {
+    return same_items(a.ints, b.ints, std::equal_to<>{}) && same_items(a.floats, b.floats, same_bits) &&
+           same_items(a.names, b.names, std::equal_to<>{}) &&
+           same_items(a.items, b.items, [](const inner& x, const inner& y) { return same(x, y); }) &&
+           same_items(a.zz, b.zz, [](sint64 x, sint64 y) { return x.value == y.value; });
+}
+
 /// `decode` reads `in` into a `T` that equals `expected`.
 template <typename T, std::size_t N>
 constexpr bool decodes(const std::array<std::uint8_t, N>& in, const T& expected) {
@@ -74,6 +90,29 @@ struct mac_only {
 
 struct blob {
     pb::repeated<std::uint8_t, 4> bytes;
+};
+
+/// `pose` and `envelope` with the container type that `decode` accepts.
+struct pose_owned {
+    pb::repeated<float, 3> pos;
+    pb::repeated<float, 4> rot;
+};
+
+struct envelope_owned {
+    std::uint32_t id;
+    std::variant<std::monostate, pose_owned, ping, text> payload;
+};
+
+struct ints_only {
+    pb::repeated<std::int32_t, 8> ints;
+};
+
+struct floats_only {
+    pb::repeated<float, 4> floats;
+};
+
+struct int_buffer {
+    pb::span_buffer<std::int32_t> ints;
 };
 
 struct sink {
@@ -255,6 +294,137 @@ constexpr bool test_errors() {
            fails<outer>(bytes_of(submessage), error::TRUNCATED);
 }
 
+constexpr bool same(const pose_owned& a, const pose_owned& b) {
+    return same_items(a.pos, b.pos, same_bits) && same_items(a.rot, b.rot, same_bits);
+}
+
+constexpr bool same(const envelope_owned& a, const envelope_owned& b) {
+    if (a.id != b.id || a.payload.index() != b.payload.index())
+        return false;
+    if (const auto* pose = std::get_if<pose_owned>(&a.payload))
+        return same(*pose, std::get<pose_owned>(b.payload));
+    if (const auto* message = std::get_if<text>(&a.payload))
+        return same(*message, std::get<text>(b.payload));
+    if (const auto* message = std::get_if<ping>(&a.payload))
+        return message->seq == std::get<ping>(b.payload).seq;
+    return true;
+}
+
+template <std::size_t N>
+constexpr pb::repeated<float, N> floats_of(const std::array<float, N>& values) {
+    return repeated_of<pb::repeated<float, N>>(values);
+}
+
+constexpr envelope_owned envelope_pose_owned() {
+    return {2, pose_owned{floats_of<3>({1, 2, 3}), floats_of<4>({0, 0, 0, 1})}};
+}
+
+constexpr bool test_decode_lists_empty() { return decodes(vectors::lists_empty, lists{}); }
+
+bool test_decode_lists_full() { return decodes(vectors::lists_full, lists_full()); }
+
+constexpr bool test_decode_pose_zero() {
+    return decodes(vectors::pose_zero, pose_owned{floats_of<3>({}), floats_of<4>({})});
+}
+
+constexpr bool test_decode_envelope_none() { return decodes(vectors::envelope_none, envelope_owned{1, {}}); }
+
+constexpr bool test_decode_envelope_pose() { return decodes(vectors::envelope_pose, envelope_pose_owned()); }
+
+constexpr bool test_decode_envelope_ping() { return decodes(vectors::envelope_ping, envelope_owned{3, ping{}}); }
+
+bool test_decode_envelope_long() { return decodes(vectors::envelope_long, envelope_owned{4, text_long()}); }
+
+constexpr bool test_unpacked_scalars() {
+    constexpr std::array<std::uint8_t, 6> in{0x08, 10, 0x08, 20, 0x08, 30};
+    ints_only message{};
+    const auto result = decode(bytes_of(in), message);
+    return result && message.ints.size() == 3 && message.ints[0] == 10 && message.ints[1] == 20 &&
+           message.ints[2] == 30;
+}
+
+constexpr bool test_mixed_packing() {
+    constexpr std::array<std::uint8_t, 6> in{0x0a, 0x02, 1, 2, 0x08, 3};
+    ints_only message{};
+    const auto result = decode(bytes_of(in), message);
+    return result && message.ints.size() == 3 && message.ints[0] == 1 && message.ints[1] == 2 &&
+           message.ints[2] == 3;
+}
+
+constexpr bool test_capacity() {
+    constexpr std::array<std::uint8_t, 11> packed{0x0a, 9, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+    constexpr std::array<std::uint8_t, 18> unpacked{0x08, 1, 0x08, 2, 0x08, 3, 0x08, 4, 0x08,
+                                                    5,    0x08, 6, 0x08, 7, 0x08, 8, 0x08, 9};
+    constexpr std::array<std::uint8_t, 10> eight{0x0a, 8, 1, 2, 3, 4, 5, 6, 7, 8};
+    ints_only message{};
+    const auto result = decode(bytes_of(eight), message);
+    return fails<ints_only>(bytes_of(packed), error::CAPACITY_EXCEEDED) &&
+           fails<ints_only>(bytes_of(unpacked), error::CAPACITY_EXCEEDED) && result && message.ints.size() == 8;
+}
+
+constexpr bool test_packed_bad_length() {
+    constexpr std::array<std::uint8_t, 7> in{0x0a, 0x05, 0, 0, 0x80, 0x3f, 0};
+    return fails<floats_only>(bytes_of(in), error::TRUNCATED);
+}
+
+constexpr bool test_repeated_wrong_wire_type() {
+    constexpr std::array<std::uint8_t, 5> in{0x0d, 1, 2, 3, 4};
+    ints_only message{};
+    const auto result = decode(bytes_of(in), message);
+    return result && message.ints.empty();
+}
+
+constexpr bool test_repeated_message_no_merge() {
+    constexpr std::array<std::uint8_t, 6> in{0x22, 0x02, 0x08, 0x01, 0x22, 0x00};
+    lists message{};
+    const auto result = decode(bytes_of(in), message);
+    return result && message.items.size() == 2 && message.items[0].x == 1 && message.items[1].x == 0;
+}
+
+constexpr bool test_span_buffer_repeated() {
+    constexpr std::array<std::uint8_t, 4> in{0x0a, 0x02, 1, 2};
+    std::array<std::int32_t, 4> storage{};
+
+    int_buffer message{pb::span_buffer<std::int32_t>(storage)};
+    const auto first = decode(bytes_of(in), message);
+    const bool filled = first && message.ints.size() == 2 && storage[0] == 1 && storage[1] == 2;
+
+    const auto second = decode(std::span<const std::uint8_t>(), message);
+    return filled && second && message.ints.empty() && message.ints.capacity() == 4 && storage[0] == 1;
+}
+
+constexpr bool test_oneof_last_wins() {
+    std::array<std::uint8_t, 2 + vectors::envelope_pose.size()> in{0x1a, 0x00};
+    std::copy(vectors::envelope_pose.begin(), vectors::envelope_pose.end(), in.begin() + 2);
+
+    envelope_owned message{};
+    const auto result = decode(bytes_of(in), message);
+    return result && same(message, envelope_pose_owned());
+}
+
+constexpr bool test_oneof_merge() {
+    constexpr std::array<std::uint8_t, 8> in{0x1a, 0x02, 0x08, 0x01, 0x1a, 0x00, 0x08, 0x05};
+    envelope_owned message{};
+    const auto result = decode(bytes_of(in), message);
+    const auto* active = std::get_if<ping>(&message.payload);
+    return result && active && active->seq == 1 && message.id == 5;
+}
+
+constexpr bool test_oneof_replace() {
+    constexpr std::array<std::uint8_t, 10> in{0x1a, 0x02, 0x08, 0x07, 0x12, 0x00, 0x1a, 0x00, 0x08, 0x01};
+    envelope_owned message{};
+    const auto result = decode(bytes_of(in), message);
+    const auto* active = std::get_if<ping>(&message.payload);
+    return result && active && active->seq == 0 && message.id == 1;
+}
+
+constexpr bool test_oneof_wrong_wire_type() {
+    constexpr std::array<std::uint8_t, 7> in{0x1a, 0x00, 0x15, 1, 2, 3, 4};
+    envelope_owned message{};
+    const auto result = decode(bytes_of(in), message);
+    return result && std::holds_alternative<ping>(message.payload);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static_assert(test_decode_scalars_zero());
@@ -272,6 +442,22 @@ static_assert(test_repeated_bytes());
 static_assert(test_span_buffer());
 static_assert(test_span_buffer_nested());
 static_assert(test_errors());
+static_assert(test_decode_lists_empty());
+static_assert(test_decode_pose_zero());
+static_assert(test_decode_envelope_none());
+static_assert(test_decode_envelope_pose());
+static_assert(test_decode_envelope_ping());
+static_assert(test_unpacked_scalars());
+static_assert(test_mixed_packing());
+static_assert(test_capacity());
+static_assert(test_packed_bad_length());
+static_assert(test_repeated_wrong_wire_type());
+static_assert(test_repeated_message_no_merge());
+static_assert(test_span_buffer_repeated());
+static_assert(test_oneof_last_wins());
+static_assert(test_oneof_merge());
+static_assert(test_oneof_replace());
+static_assert(test_oneof_wrong_wire_type());
 
 } // namespace
 
@@ -281,6 +467,24 @@ int main() {
                     test_decode_outer_unset() && test_zero_copy() && test_reset() && test_last_wins() &&
                     test_merge() && test_unknown_skip() && test_wrong_wire_type() &&
                     test_wrong_wire_type_optional() && test_narrowing() && test_fixed_bytes() &&
-                    test_repeated_bytes() && test_span_buffer() && test_span_buffer_nested() && test_errors();
+                    test_repeated_bytes() && test_span_buffer() && test_span_buffer_nested() && test_errors() &&
+                    test_decode_lists_empty() &&
+                    test_decode_pose_zero() &&
+                    test_decode_envelope_none() &&
+                    test_decode_envelope_pose() &&
+                    test_decode_envelope_ping() &&
+                    test_unpacked_scalars() &&
+                    test_mixed_packing() &&
+                    test_capacity() &&
+                    test_packed_bad_length() &&
+                    test_repeated_wrong_wire_type() &&
+                    test_repeated_message_no_merge() &&
+                    test_span_buffer_repeated() &&
+                    test_oneof_last_wins() &&
+                    test_oneof_merge() &&
+                    test_oneof_replace() &&
+                    test_oneof_wrong_wire_type() &&
+                    test_decode_lists_full() &&
+                    test_decode_envelope_long();
     return ok ? 0 : 1;
 }
