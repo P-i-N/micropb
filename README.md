@@ -14,3 +14,5 @@ ctest --test-dir .build --output-on-failure
 ```
 
 Each test is a `constexpr` function that `static_assert` checks. `main` runs the same tests at run time.
+
+The tests in `tests/compile_fail/` must not compile. Each one is a CTest test that builds an object target, which is not part of the default build. The test passes only when the compiler output contains the `static_assert` message that names its rule (`pb: <rule>:`).
