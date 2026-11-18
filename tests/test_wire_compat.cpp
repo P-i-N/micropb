@@ -40,13 +40,40 @@ bool round_trips(const std::array<std::uint8_t, N>& wire) {
     return encoded && *encoded == N && out == wire;
 }
 
+/// A decoded message encodes into a buffer of exactly its encoded size.
+template <typename T>
+bool reencodes(const T& message) {
+    std::array<std::uint8_t, 1024> out{};
+    const std::size_t size = encoded_size(message);
+    if (size > out.size())
+        return false;
+
+    const auto encoded = encode(message, std::span(out).first(size));
+    return encoded && *encoded == size;
+}
+
 template <typename T, std::size_t N>
 bool prefixes_are_safe(const std::array<std::uint8_t, N>& wire) {
     for (std::size_t length = 0; length < N; ++length) {
         T message{};
         const auto result = decode(std::span<const std::uint8_t>(wire).first(length), message);
-        if (result ? *result != length : result.error() != error::TRUNCATED)
+        if (result ? *result != length || !reencodes(message) : result.error() != error::TRUNCATED)
             return false;
+    }
+    return true;
+}
+
+/// `decode` returns for each copy of `wire` with one changed byte. A sanitizer build finds a bad access.
+template <typename T, std::size_t N>
+bool corruptions_are_safe(const std::array<std::uint8_t, N>& wire) {
+    for (std::size_t i = 0; i < N; ++i) {
+        for (const std::uint8_t mask : {0x01, 0x80, 0xFF}) {
+            std::array<std::uint8_t, N> in = wire;
+            in[i] ^= mask;
+            T message{};
+            if (decode(std::span<const std::uint8_t>(in), message) && !reencodes(message))
+                return false;
+        }
     }
     return true;
 }
@@ -81,6 +108,20 @@ bool test_prefix_sweep_runtime() {
     return prefixes_are_safe<text>(vectors::text_short) && prefixes_are_safe<text>(vectors::text_long) &&
            prefixes_are_safe<outer>(vectors::outer_set) && prefixes_are_safe<lists>(vectors::lists_full) &&
            prefixes_are_safe<envelope_owned>(vectors::envelope_long);
+}
+
+bool test_corruption_sweep() {
+    return corruptions_are_safe<scalars>(vectors::scalars_zero) && corruptions_are_safe<scalars>(vectors::scalars_max) &&
+           corruptions_are_safe<scalars>(vectors::scalars_negative) &&
+           corruptions_are_safe<scalars>(vectors::scalars_enum_neg) &&
+           corruptions_are_safe<outer>(vectors::outer_unset) && corruptions_are_safe<outer>(vectors::outer_set) &&
+           corruptions_are_safe<lists>(vectors::lists_empty) && corruptions_are_safe<lists>(vectors::lists_full) &&
+           corruptions_are_safe<pose_owned>(vectors::pose_zero) &&
+           corruptions_are_safe<text>(vectors::text_short) && corruptions_are_safe<text>(vectors::text_long) &&
+           corruptions_are_safe<envelope_owned>(vectors::envelope_none) &&
+           corruptions_are_safe<envelope_owned>(vectors::envelope_pose) &&
+           corruptions_are_safe<envelope_owned>(vectors::envelope_ping) &&
+           corruptions_are_safe<envelope_owned>(vectors::envelope_long);
 }
 
 /// The caller frames messages: `decode` reads exactly one message from the span it gets.
@@ -122,6 +163,6 @@ bool test_envelope_stream() {
 
 int main() {
     const bool ok = test_round_trip_constexpr() && test_round_trip_runtime() && test_prefix_sweep_constexpr() &&
-                    test_prefix_sweep_runtime() && test_envelope_stream();
+                    test_prefix_sweep_runtime() && test_corruption_sweep() && test_envelope_stream();
     return ok ? 0 : 1;
 }

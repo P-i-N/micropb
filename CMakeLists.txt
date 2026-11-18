@@ -14,10 +14,26 @@ enable_testing()
 
 set(micropb_compile_options -fno-exceptions -fno-rtti -Wall -Wextra -Werror)
 
+# The codec reads and writes messages through byte offsets, so constant
+# evaluation cannot examine it. A sanitizer build of the tests does this.
+option(MICROPB_SANITIZE "Build the tests with sanitizers" OFF)
+set(micropb_sanitize_options)
+set(micropb_sanitize_link_options)
+if(MICROPB_SANITIZE)
+    if(MINGW)
+        # MinGW has no sanitizer run-time library. A trap needs none.
+        set(micropb_sanitize_options -fsanitize=undefined -fsanitize-undefined-trap-on-error)
+    else()
+        set(micropb_sanitize_options -fsanitize=address,undefined -fno-sanitize-recover=all)
+        set(micropb_sanitize_link_options -fsanitize=address,undefined)
+    endif()
+endif()
+
 function(micropb_add_test name)
     add_executable(${name} tests/${name}.cpp)
     target_link_libraries(${name} PRIVATE micropb)
-    target_compile_options(${name} PRIVATE ${micropb_compile_options})
+    target_compile_options(${name} PRIVATE ${micropb_compile_options} ${micropb_sanitize_options})
+    target_link_options(${name} PRIVATE ${micropb_sanitize_link_options})
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
 

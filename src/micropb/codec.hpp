@@ -424,10 +424,16 @@ inline void emit_bytes(writer& sink, std::uint32_t number, std::span<const std::
 
 inline void emit_message(writer& sink, const message_desc& message, const void* object);
 
+// The three entry points of the interpreter are never inlined and never cloned.
+// When the compiler puts the interpreter into its caller, it makes a copy of
+// the interpreter for each message type, which is what the tables prevent. It
+// also examines the paths of other message types against the type that it
+// knows at the call, and gives warnings about accesses that never occur.
+
 /// Encoded size of the fields of the message at `object`, without key and
 /// length prefix. A writer without a span only counts, so the size and the
 /// bytes come from one code path.
-[[nodiscard]] inline std::size_t encoded_size(const message_desc& message, const void* object) {
+[[nodiscard, gnu::noinline, gnu::noclone]] inline std::size_t encoded_size(const message_desc& message, const void* object) {
     writer sink;
     emit_message(sink, message, object);
     return sink.size();
@@ -540,8 +546,8 @@ inline void emit_message(writer& sink, const message_desc& message, const void* 
     }
 }
 
-[[nodiscard]] inline std::expected<std::size_t, error> encode(const message_desc& message, const void* object,
-                                                              std::span<std::uint8_t> out) {
+[[nodiscard, gnu::noinline, gnu::noclone]] inline std::expected<std::size_t, error>
+encode(const message_desc& message, const void* object, std::span<std::uint8_t> out) {
     writer sink(out);
     emit_message(sink, message, object);
     if (!sink.fits())
@@ -773,8 +779,8 @@ inline void decode_message(reader& in, const message_desc& message, void* object
     }
 }
 
-[[nodiscard]] inline std::expected<std::size_t, error> decode(const message_desc& message,
-                                                              std::span<const std::uint8_t> in, void* object) {
+[[nodiscard, gnu::noinline, gnu::noclone]] inline std::expected<std::size_t, error>
+decode(const message_desc& message, std::span<const std::uint8_t> in, void* object) {
     reset_message(message, object);
 
     reader source(in);
