@@ -148,9 +148,226 @@ bool test_sequence_accessor() {
     return buffer.size() == 3 && view_desc.element_size == 4 && buffer_desc.storage == d::sequence_storage::ACCESSOR;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+enum class mode : std::uint8_t { OFF, ON, MAX = 200 };
+enum class grade : std::int32_t { LOW = -5, ZERO = 0, HIGH = 5 };
+
+struct inner {
+    std::int32_t x;
+    std::string_view label;
+    pb::sint64 z;
+};
+
+struct pose {
+    pb::repeated<float, 3> pos;
+    pb::repeated<float, 4> rot;
+};
+
+struct ping {
+    std::uint32_t seq;
+};
+
+using choice = std::variant<std::monostate, pose, ping, std::uint32_t>;
+
+/// One member of each kind, with the storage types that `decode` accepts.
+struct all {
+    pb::span_buffer<std::int32_t> buffered;
+    bool flag;
+    std::int8_t i8;
+    std::int16_t i16;
+    std::int32_t i32;
+    std::int64_t i64;
+    std::uint8_t u8;
+    std::uint16_t u16;
+    std::uint32_t u32;
+    std::uint64_t u64;
+    pb::sint32 s32;
+    pb::sint64 s64;
+    pb::fixed32 fx32;
+    pb::fixed64 fx64;
+    pb::sfixed32 sfx32;
+    pb::sfixed64 sfx64;
+    float f;
+    double d;
+    mode m;
+    grade g;
+    std::string_view name;
+    std::span<const std::uint8_t> view;
+    std::array<std::uint8_t, 6> mac;
+    pb::repeated<std::uint8_t, 16> blob;
+    inner child;
+    std::optional<std::int32_t> maybe;
+    std::optional<inner> maybe_child;
+    pb::repeated<std::int32_t, 8> ints;
+    pb::repeated<pb::sint32, 4> zz;
+    pb::repeated<double, 2> ds;
+    pb::repeated<inner, 3> items;
+    pb::repeated<std::string_view, 3> names;
+    [[= pb::oneof_tags<60, 61, 62>{}]] choice payload;
+    [[= pb::tag{100}]] std::int16_t tail;
+};
+
+/// The same message, with the storage types that only `encode` accepts in the
+/// place of the sequences of scalars.
+struct all_views {
+    std::span<const std::int32_t> buffered;
+    bool flag;
+    std::int8_t i8;
+    std::int16_t i16;
+    std::int32_t i32;
+    std::int64_t i64;
+    std::uint8_t u8;
+    std::uint16_t u16;
+    std::uint32_t u32;
+    std::uint64_t u64;
+    pb::sint32 s32;
+    pb::sint64 s64;
+    pb::fixed32 fx32;
+    pb::fixed64 fx64;
+    pb::sfixed32 sfx32;
+    pb::sfixed64 sfx64;
+    float f;
+    double d;
+    mode m;
+    grade g;
+    std::string_view name;
+    std::span<const std::uint8_t> view;
+    std::array<std::uint8_t, 6> mac;
+    pb::repeated<std::uint8_t, 16> blob;
+    inner child;
+    std::optional<std::int32_t> maybe;
+    std::optional<inner> maybe_child;
+    std::span<const std::int32_t> ints;
+    std::span<const pb::sint32> zz;
+    std::array<double, 2> ds;
+    pb::repeated<inner, 3> items;
+    pb::repeated<std::string_view, 3> names;
+    [[= pb::oneof_tags<60, 61, 62>{}]] choice payload;
+    [[= pb::tag{100}]] std::int16_t tail;
+};
+
+constexpr std::array<std::uint8_t, 3> raw{9, 8, 7};
+constexpr std::array<std::int32_t, 3> buffered_values{4, 5, 6};
+constexpr std::array<std::int32_t, 3> int_values{1, -1, 100000};
+constexpr std::array<pb::sint32, 2> zz_values{pb::sint32(-1), pb::sint32(2)};
+
+template <typename R, typename V>
+void append_all(R& sequence, const V& values) {
+    for (const auto& value : values)
+        static_cast<void>(sequence.push_back(value));
+}
+
+/// Sets the members that `all` and `all_views` have in the same form.
+template <typename T>
+void fill_common(T& v) {
+    v.flag = true;
+    v.i8 = -100;
+    v.i16 = -3;
+    v.i32 = -2;
+    v.i64 = -3;
+    v.u8 = 200;
+    v.u16 = 65535;
+    v.u32 = 300;
+    v.u64 = ~std::uint64_t{0};
+    v.s32 = -4;
+    v.s64 = std::int64_t{1} << 40;
+    v.fx32 = 7;
+    v.fx64 = std::uint64_t{1} << 40;
+    v.sfx32 = -8;
+    v.sfx64 = -9;
+    v.f = -0.0f;
+    v.d = 2.5;
+    v.m = mode::MAX;
+    v.g = grade::LOW;
+    v.name = "hello";
+    v.view = raw;
+    v.mac = {1, 2, 3, 4, 5, 6};
+    append_all(v.blob, std::array<std::uint8_t, 4>{1, 2, 3, 4});
+    v.child = {5, "c", -6};
+    v.maybe = 0;
+    v.maybe_child = inner{};
+    append_all(v.items, std::array<inner, 3>{inner{1, "a", 2}, inner{}, inner{3, "", -4}});
+    append_all(v.names, std::array<std::string_view, 2>{"x", ""});
+    v.tail = -7;
+}
+
+using buffer = std::array<std::uint8_t, 512>;
+
+/// An `all` with all members in their initial state. `all` has no default
+/// constructor, because a `pb::span_buffer` must get its storage.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+all make_all(std::span<std::int32_t> storage) { return {.buffered = pb::span_buffer<std::int32_t>(storage)}; }
+#pragma GCC diagnostic pop
+
+/// `encode`, `decode` and `encode` again give the same bytes, and `encoded_size` agrees.
+bool round_trips(const all& value) {
+    buffer first{};
+    const auto size = pb::encode(value, first);
+    if (!size || pb::encoded_size(value) != *size)
+        return false;
+
+    std::array<std::int32_t, 4> storage{};
+    all back = make_all(storage);
+    const auto used = pb::decode(std::span<const std::uint8_t>(first).first(*size), back);
+    if (!used || *used != *size)
+        return false;
+
+    buffer second{};
+    const auto again = pb::encode(back, second);
+    return again && *again == *size && pb::encoded_size(back) == *size && first == second;
+}
+
+template <typename A, typename B>
+bool same_bytes(const A& a, const B& b) {
+    buffer first{};
+    buffer second{};
+    const auto size_a = pb::encode(a, first);
+    const auto size_b = pb::encode(b, second);
+    return size_a && size_b && *size_a == *size_b && first == second;
+}
+
+bool test_all_kinds() {
+    std::array<std::int32_t, 4> storage{};
+    const all empty = make_all(storage);
+    // A nested message (key 2, length 1) and a fixed-length bytes field (key 2, length 1, 6 bytes) are
+    // always on the wire.
+    if (!round_trips(empty) || pb::encoded_size(empty) != 12)
+        return false;
+
+    all value = make_all(storage);
+    fill_common(value);
+    append_all(value.buffered, buffered_values);
+    append_all(value.ints, int_values);
+    append_all(value.zz, zz_values);
+    append_all(value.ds, std::array<double, 2>{1.0, -2.0});
+
+    all_views views{};
+    fill_common(views);
+    views.buffered = buffered_values;
+    views.ints = int_values;
+    views.zz = zz_values;
+    views.ds = {1.0, -2.0};
+
+    pose where{};
+    append_all(where.pos, std::array<float, 3>{1, 2, 3});
+    append_all(where.rot, std::array<float, 4>{0, 0, 0, 1});
+
+    const choice payloads[]{std::monostate{}, where, ping{0}, std::uint32_t{0}};
+    for (const choice& payload : payloads) {
+        value.payload = payload;
+        views.payload = payload;
+        if (!round_trips(value) || !same_bytes(value, views))
+            return false;
+    }
+    return true;
+}
+
 } // namespace
 
 int main() {
-    const bool ok = test_optional_accessor() && test_variant_accessor() && test_sequence_accessor();
+    const bool ok = test_optional_accessor() && test_variant_accessor() && test_sequence_accessor() &&
+                    test_all_kinds();
     return ok ? 0 : 1;
 }

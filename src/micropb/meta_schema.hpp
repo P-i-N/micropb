@@ -381,4 +381,36 @@ template <typename T>
     return std::define_static_array(fields);
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+namespace detail {
+
+/// Rejects types that `decode` cannot write: a repeated field in an
+/// encode-only container, and a `const` member. It examines `T`, and each
+/// member, alternative, value and element of it.
+template <typename T>
+consteval void check_decodable() {
+    constexpr field_kind kind = kind_of<T>();
+
+    if constexpr (kind == field_kind::REPEATED) {
+        static_assert(!is_instance_of<T>(^^std::array) && !is_instance_of<T>(^^std::span),
+                      "pb: decode_encode_only: std::array and std::span<const T> are encode-only, "
+                      "use pb::repeated or pb::span_buffer to decode");
+        check_decodable<element_t<T>>();
+    } else if constexpr (kind == field_kind::OPTIONAL) {
+        check_decodable<typename T::value_type>();
+    } else if constexpr (kind == field_kind::ONEOF) {
+        template for (constexpr std::meta::info alternative : alternatives<T>())
+            check_decodable<typename[:alternative:]>();
+    } else if constexpr (kind == field_kind::MESSAGE) {
+        template for (constexpr std::meta::info member : members<T>()) {
+            static_assert(!std::meta::is_const(std::meta::type_of(member)),
+                          "pb: decode_const_member: decode cannot write to a const member");
+            check_decodable<std::remove_const_t<typename[:std::meta::type_of(member):]>>();
+        }
+    }
+}
+
+} // namespace detail
+
 } // namespace pb

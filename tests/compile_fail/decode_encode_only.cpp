@@ -1,7 +1,7 @@
 #include <array>
 #include <cstdint>
 
-#include <micropb/decode.hpp>
+#include <micropb/codec.hpp>
 
 struct msg {
     std::array<std::int32_t, 2> ints;

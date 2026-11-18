@@ -549,6 +549,241 @@ inline void emit_message(writer& sink, const message_desc& message, const void* 
     return sink.size();
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+/// Stores a scalar from the value that the wire carries. A value that is too
+/// wide for the type loses its upper bits, as in the Google C++ runtime.
+inline void store_scalar(void* value, std::uint8_t code, std::uint64_t bits) {
+    if (code & scalar_zigzag) {
+        if ((code & scalar_size_mask) == 2)
+            bits = static_cast<std::uint32_t>(zigzag_decode(static_cast<std::uint32_t>(bits)));
+        else
+            bits = static_cast<std::uint64_t>(zigzag_decode(bits));
+    }
+    if (code & scalar_bool)
+        bits = bits != 0;
+
+    switch (code & scalar_size_mask) {
+    case 0: {
+        const auto narrow = static_cast<std::uint8_t>(bits);
+        std::memcpy(value, &narrow, sizeof narrow);
+        break;
+    }
+    case 1: {
+        const auto narrow = static_cast<std::uint16_t>(bits);
+        std::memcpy(value, &narrow, sizeof narrow);
+        break;
+    }
+    case 2: {
+        const auto narrow = static_cast<std::uint32_t>(bits);
+        std::memcpy(value, &narrow, sizeof narrow);
+        break;
+    }
+    default: std::memcpy(value, &bits, sizeof bits);
+    }
+}
+
+/// Reads the value of a scalar without a key. Returns 0 when the read fails.
+[[nodiscard]] inline std::uint64_t read_scalar(reader& in, std::uint8_t code) {
+    switch (wire_of_scalar(code)) {
+    case wire_type::FIXED32: return in.read_fixed32();
+    case wire_type::FIXED64: return in.read_fixed64();
+    default: return in.read_varint();
+    }
+}
+
+inline void reset_message(const message_desc& message, void* object);
+
+/// Sets the value at `value` to its initial state. A sequence keeps its
+/// storage and only gets the count 0.
+inline void reset_value(const value_desc& type, void* value) {
+    switch (type.kind) {
+    case field_kind::SCALAR: std::memset(value, 0, std::size_t{1} << (type.scalar & scalar_size_mask)); break;
+    case field_kind::FIXED_BYTES: std::memset(value, 0, type.size); break;
+    case field_kind::STRING: {
+        const std::string_view empty;
+        std::memcpy(value, static_cast<const void*>(&empty), sizeof empty);
+        break;
+    }
+    case field_kind::BYTES:
+        if (type.sequence == nullptr) {
+            const std::span<const std::uint8_t> empty;
+            std::memcpy(value, static_cast<const void*>(&empty), sizeof empty);
+            break;
+        }
+        [[fallthrough]];
+    case field_kind::REPEATED:
+        if (std::size_t* count = view_of(*type.sequence, value).stored_count)
+            *count = 0;
+        break;
+    case field_kind::MESSAGE: reset_message(*type.message, value); break;
+    case field_kind::OPTIONAL: static_cast<void>(type.optional->access(value, optional_op::RESET)); break;
+    case field_kind::ONEOF: static_cast<void>(type.variant->access(value, 0, true)); break;
+    }
+}
+
+/// Resets each member of the message at `object`, also in a nested message.
+inline void reset_message(const message_desc& message, void* object) {
+    for (std::size_t i = 0; i < message.count; ++i) {
+        // A `std::variant` member has one entry for each alternative. Reset it one time.
+        const field_desc& field = message.fields[i];
+        if (field.alternative <= 1)
+            reset_value(*field.type, member_at(object, field.offset));
+    }
+}
+
+inline void decode_message(reader& in, const message_desc& message, void* object);
+inline void decode_value(reader& in, wire_type wire, const value_desc& type, void* value);
+
+/// Reads one element from `in` into the next free item of the sequence at
+/// `value`. A full sequence is an error, before the element is read. The item
+/// starts from its initial state: records of a repeated field do not merge.
+inline void decode_element(reader& in, wire_type wire, const sequence_desc& sequence, void* value) {
+    const sequence_view items = view_of(sequence, value);
+    if (items.count == items.capacity)
+        return in.fail(error::CAPACITY_EXCEEDED);
+
+    void* item = member_at(items.data, items.count * sequence.element_size);
+    reset_value(*sequence.element, item);
+    decode_value(in, wire, *sequence.element, item);
+    if (!in.failed())
+        *items.stored_count = items.count + 1;
+}
+
+/// Reads one record of a repeated field. A scalar element can be a packed
+/// record or a single value, also mixed in one message.
+inline void decode_repeated(reader& in, wire_type wire, const sequence_desc& sequence, void* value) {
+    const value_desc& element = *sequence.element;
+    if (element.kind == field_kind::SCALAR && wire == wire_type::LENGTH_DELIMITED) {
+        reader packed(in.read_length_delimited());
+        while (!packed.empty())
+            decode_element(packed, wire_of(element), sequence, value);
+        in.absorb(packed);
+    } else if (wire == wire_of(element)) {
+        decode_element(in, wire, sequence, value);
+    } else {
+        in.skip(wire);
+    }
+}
+
+/// Reads the value of one field into `value`. A field with the wrong wire type
+/// is skipped, as an unknown field. A read that fails does not change a scalar,
+/// a string or a bytes field.
+inline void decode_value(reader& in, wire_type wire, const value_desc& type, void* value) {
+    if (type.kind == field_kind::REPEATED)
+        return decode_repeated(in, wire, *type.sequence, value);
+    if (wire != wire_of(type))
+        return in.skip(wire);
+
+    if (type.kind == field_kind::SCALAR) {
+        const std::uint64_t bits = read_scalar(in, type.scalar);
+        if (!in.failed())
+            store_scalar(value, type.scalar, bits);
+        return;
+    }
+    if (type.kind == field_kind::OPTIONAL) {
+        const optional_desc& optional = *type.optional;
+        return decode_value(in, wire, *optional.value, optional.access(value, optional_op::ENGAGE));
+    }
+
+    // All other kinds are length-delimited. The bytes are a view into the input.
+    const std::span<const std::uint8_t> bytes = in.read_length_delimited();
+    if (in.failed())
+        return;
+
+    switch (type.kind) {
+    case field_kind::STRING: {
+        const std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        std::memcpy(value, static_cast<const void*>(&text), sizeof text);
+        break;
+    }
+    case field_kind::BYTES: {
+        if (type.sequence == nullptr) {
+            std::memcpy(value, static_cast<const void*>(&bytes), sizeof bytes);
+            break;
+        }
+
+        const sequence_view items = view_of(*type.sequence, value);
+        if (bytes.size() > items.capacity)
+            return in.fail(error::CAPACITY_EXCEEDED);
+        if (!bytes.empty())
+            std::memcpy(items.data, bytes.data(), bytes.size());
+        *items.stored_count = bytes.size();
+        break;
+    }
+    case field_kind::FIXED_BYTES:
+        // Input that is shorter than the array leaves the remaining bytes 0.
+        if (bytes.size() > type.size)
+            return in.fail(error::CAPACITY_EXCEEDED);
+        std::memset(value, 0, type.size);
+        if (!bytes.empty())
+            std::memcpy(value, bytes.data(), bytes.size());
+        break;
+    case field_kind::MESSAGE: {
+        // The message is not reset: a second occurrence merges into the first.
+        reader part(bytes);
+        decode_message(part, *type.message, value);
+        in.absorb(part);
+        break;
+    }
+    default: break;
+    }
+}
+
+/// Reads all fields of `in` into the message at `object`, until the end of
+/// the input or the first error. Does not reset the message: a field that
+/// occurs again changes the value that is there.
+inline void decode_message(reader& in, const message_desc& message, void* object) {
+    // Fields usually arrive in ascending order, and a repeated field arrives
+    // many times. The search starts at the entry of the last match.
+    std::size_t last = 0;
+    while (!in.empty()) {
+        const field_key key = in.read_key();
+        if (in.failed())
+            return;
+
+        const field_desc* field = nullptr;
+        for (std::size_t tried = 0; tried < message.count && field == nullptr; ++tried) {
+            const std::size_t index = last + tried < message.count ? last + tried : last + tried - message.count;
+            if (message.fields[index].number == key.number) {
+                field = &message.fields[index];
+                last = index;
+            }
+        }
+        if (field == nullptr) {
+            in.skip(key.type);
+            continue;
+        }
+
+        void* member = member_at(object, field->offset);
+        if (field->alternative == 0) {
+            decode_value(in, key.type, *field->type, member);
+            continue;
+        }
+
+        // A different active alternative gives way to a value-initialized one.
+        // The same alternative stays, so a message merges. A wrong wire type
+        // is skipped and keeps the variant.
+        const variant_desc& variant = *field->type->variant;
+        const value_desc& alternative = *variant.alternatives[field->alternative];
+        if (key.type != wire_of(alternative))
+            in.skip(key.type);
+        else
+            decode_value(in, key.type, alternative, variant.access(member, field->alternative, true));
+    }
+}
+
+[[nodiscard]] inline std::expected<std::size_t, error> decode(const message_desc& message,
+                                                              std::span<const std::uint8_t> in, void* object) {
+    reset_message(message, object);
+
+    reader source(in);
+    decode_message(source, message, object);
+    if (source.failed())
+        return std::unexpected(source.status().error());
+    return in.size();
+}
+
 } // namespace detail
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -565,6 +800,16 @@ template <typename T>
 template <typename T>
 [[nodiscard]] std::expected<std::size_t, error> encode(const T& msg, std::span<std::uint8_t> out) {
     return detail::encode(detail::message_descriptor<T>::value, &msg, out);
+}
+
+/// Decodes the proto3 message in `in` into `msg` and returns `in.size()`. Resets
+/// `msg` first. A `pb::span_buffer` keeps its storage. On error, `msg` holds the
+/// fields that were read before the error. A `std::string_view` or a
+/// `std::span` of `msg` points into `in`.
+template <typename T>
+[[nodiscard]] std::expected<std::size_t, error> decode(std::span<const std::uint8_t> in, T& msg) {
+    detail::check_decodable<T>();
+    return detail::decode(detail::message_descriptor<T>::value, in, &msg);
 }
 
 } // namespace pb
