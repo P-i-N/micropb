@@ -53,6 +53,8 @@ constexpr bool prefixes_are_safe(const std::array<std::uint8_t, N>& wire) {
 
 // Decoding a `std::string_view` is not `constexpr` (R7): text_*, outer_set, lists_full and
 // envelope_long run at run time only.
+// The run-time sweep does not prove bounds safety. For those paths, bounds safety rests on the shared reader,
+// which the constant-evaluated sweep checks.
 
 constexpr bool test_round_trip_constexpr() {
     return round_trips<scalars>(vectors::scalars_zero) && round_trips<scalars>(vectors::scalars_max) &&

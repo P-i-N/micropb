@@ -62,8 +62,8 @@ All in namespace `pb`. `uint8_t` means `std::uint8_t`.
 enum class error {
     BUFFER_TOO_SMALL,     // encode: output span too short
     TRUNCATED,            // decode: input ends inside a field
-    INVALID_VARINT,       // decode: varint longer than 10 bytes, or overflows its target
-    INVALID_WIRE_TYPE,    // decode: wire type 3, 4, 6, 7, or wrong wire type for a known field
+    INVALID_VARINT,       // decode: varint longer than 10 bytes or more than 64 bits
+    INVALID_WIRE_TYPE,    // decode: wire type 3, 4, 6, 7
     INVALID_TAG,          // decode: field number 0 or above 2^29 - 1
     CAPACITY_EXCEEDED,    // decode: more elements than a repeated container holds
 };
@@ -159,7 +159,7 @@ The `.proto` file is the contract with the PC tools. A change to these rules bre
 
 ## Freestanding
 
-The core uses only `<cstdint>`, `<cstddef>`, `<span>`, `<string_view>`, `<array>`, `<optional>`, `<variant>`, `<expected>`, `<bit>`, `<type_traits>`, `<meta>`. No build in this project shows that it compiles freestanding. This stays unverified until the ARM stage. (Builder's call.)
+The core uses only `<cstdint>`, `<cstddef>`, `<span>`, `<string_view>`, `<array>`, `<optional>`, `<variant>`, `<expected>`, `<bit>`, `<type_traits>`, `<utility>`, `<algorithm>`, `<meta>`. No build in this project shows that it compiles freestanding. This stays unverified until the ARM stage. (Builder's call.)
 
 ## Decode semantics
 

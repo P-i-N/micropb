@@ -11,11 +11,17 @@ namespace pb {
 
 /// Error codes of the codec. Functions return them as `std::expected` values.
 enum class error {
+    /// encode: the output span is too short.
     BUFFER_TOO_SMALL,
+    /// decode: the input ends in a field, or a length prefix is larger than the remaining input.
     TRUNCATED,
+    /// decode: a varint is longer than 10 bytes or has more than 64 bits.
     INVALID_VARINT,
+    /// decode: a key has wire type 3, 4, 6 or 7.
     INVALID_WIRE_TYPE,
+    /// decode: a key has field number 0 or a field number above 2^29 - 1.
     INVALID_TAG,
+    /// decode: a field has more elements or bytes than its container holds.
     CAPACITY_EXCEEDED,
 };
 
