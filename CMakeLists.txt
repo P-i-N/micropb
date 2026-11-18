@@ -1,12 +1,18 @@
 cmake_minimum_required(VERSION 3.25)
 project(micropb LANGUAGES CXX)
 
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# The headers use C++26 static reflection, so each target that links micropb
+# gets these flags.
 add_library(micropb INTERFACE)
 target_include_directories(micropb INTERFACE src)
+target_compile_features(micropb INTERFACE cxx_std_26)
+target_compile_options(micropb INTERFACE -freflection)
 
 enable_testing()
 
-set(micropb_compile_options -std=c++26 -freflection -fno-exceptions -fno-rtti -Wall -Wextra -Werror)
+set(micropb_compile_options -fno-exceptions -fno-rtti -Wall -Wextra -Werror)
 
 function(micropb_add_test name)
     add_executable(${name} tests/${name}.cpp)

@@ -5,6 +5,8 @@ C++26 Google Protobuf serialization library
 
 Compiler: GCC 16.2 or newer with `-freflection` (MSYS2 UCRT64: `C:/msys64/ucrt64/bin/g++.exe`). The library is header-only. The flags are `-std=c++26 -freflection -fno-exceptions -fno-rtti -Wall -Wextra -Werror`.
 
+The CMake target `micropb` is an `INTERFACE` library. A target that links it gets the include directory, C++26 (`cxx_std_26`) and `-freflection`. The tests add `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`.
+
 On Windows, put `C:\msys64\ucrt64\bin` in `PATH`. The test executables need the libstdc++ DLL from that folder.
 
 ```sh
