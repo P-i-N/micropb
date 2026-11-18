@@ -28,3 +28,41 @@ cmake -DPROTOC=C:/msys64/ucrt64/bin/protoc.exe -P tests/vectors/generate.cmake
 ```
 
 The output is the same on each run. It has no timestamp and no absolute path. The script writes temporary files only to `.build/vectors/`.
+
+## Usage
+
+micropb encodes and decodes proto3 messages from plain C++ structs. It uses reflection, so the structs need no macros or generated code.
+
+```cpp
+#include <micropb/micropb.hpp>
+
+struct pose {
+    pb::repeated<float, 3> pos; // std::array<float, 3> also works, for encode only
+    pb::repeated<float, 4> rot;
+};
+
+struct ping {
+    std::uint32_t seq;
+};
+
+struct envelope {
+    std::uint32_t id;
+    std::variant<std::monostate, pose, ping> payload; // oneof
+};
+
+std::array<std::uint8_t, 64> buffer{};
+const auto size = pb::encode(envelope{1, ping{7}}, buffer); // std::expected<std::size_t, pb::error>
+
+envelope in;
+const auto used = pb::decode(std::span<const std::uint8_t>(buffer).first(*size), in);
+```
+
+Type mapping:
+
+* Integers: only fixed-width types (`std::int32_t`, `std::uint64_t`, ...). Other integer types, such as `long` or `int`, do not compile. Use `pb::sint32`, `pb::fixed32` and the similar wrappers for the other wire encodings.
+* `float`, `double`, `bool` and `enum class`: as in proto3.
+* `std::string_view` and `std::span<const std::uint8_t>`: `string` and `bytes`. Decoding does not copy.
+* `std::optional<T>`: field with explicit presence. `std::variant<std::monostate, ...>`: `oneof`.
+* `std::array<T, N>` (encode only) and `pb::repeated<T, N>`: repeated fields. Nested structs: messages.
+
+Framing is the job of the caller. `decode` reads exactly one message from the span that it gets, and `encode` writes one message. A stream of messages needs a length or another boundary that the application provides.
