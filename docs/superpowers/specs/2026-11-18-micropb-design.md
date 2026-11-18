@@ -127,7 +127,7 @@ Negative `int32_t` values encode as 10-byte varints, as `protoc` does. The 8- an
 2. `[[=pb::tag{N}]]` sets the tag to `N`. The fields after it continue from `N + 1`.
 3. A `std::variant<std::monostate, A, B, ...>` uses one tag for each alternative that is not `std::monostate`, in order. `[[=pb::oneof_tags<TA, TB, ...>{}]]` sets them explicitly. The next field continues from the last tag + 1.
 
-Compile errors (`static_assert` or a `consteval` failure) for: duplicate tags, tag 0, tags above 2^29 - 1, tags 19000-19999 (reserved by protobuf), the wrong number of `oneof_tags`, a `std::variant` without `std::monostate` as its first alternative, and a member type that has no mapping.
+Compile errors (`static_assert` or a `consteval` failure) for: duplicate tags, tag 0, tags above 2^29 - 1, tags 19000-19999 (reserved by protobuf), the wrong number of `oneof_tags`, a `std::variant` without `std::monostate` as its first alternative, a member type that has no mapping, a message type that is not a class aggregate, a message type with a base class, and a message type with a data member that is not public. Reflection does not show the members of a base class or private members, so the codec would lose them without an error.
 
 The same table is the one source for encode, decode, `encoded_size` and the `.proto` generator. It also stores the member identifiers, which the generator needs.
 

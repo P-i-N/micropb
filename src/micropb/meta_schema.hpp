@@ -267,6 +267,18 @@ consteval std::optional<std::meta::info> oneof_tags_annotation(std::meta::info m
     return std::nullopt;
 }
 
+/// Rejects message types of which reflection does not show all data members.
+template <typename T>
+consteval void check_message_type() {
+    static_assert(std::is_class_v<T> && std::is_aggregate_v<T>,
+                  "pb: not_aggregate: a message must be a class aggregate");
+    static_assert(std::meta::bases_of(^^T, std::meta::access_context::unchecked()).empty(),
+                  "pb: base_class: a message cannot have a base class, because the codec does not see its members");
+    static_assert(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()).size() ==
+                      members<T>().size(),
+                  "pb: inaccessible_member: all data members of a message must be public");
+}
+
 template <typename T>
 consteval std::size_t field_count() {
     std::size_t count = 0;
@@ -341,10 +353,11 @@ consteval bool has_duplicate(std::span<const field_info> fields) {
 } // namespace detail
 
 /// Fields of the message type `T`, sorted by field number. The encoder, the
-/// decoder and the schema generator use this table. An invalid tag or member
-/// type is a compile error.
+/// decoder and the schema generator use this table. An invalid message type,
+/// tag or member type is a compile error.
 template <typename T>
 [[nodiscard]] consteval std::span<const field_info> build_tag_table() {
+    detail::check_message_type<T>();
     constexpr auto fields = detail::sorted_fields<T>();
     static_assert(!detail::has_number_in(fields, 0, 0), "pb: tag_zero: field number 0 is not valid");
     static_assert(!detail::has_number_in(fields, detail::max_tag + 1, std::uint32_t(-1)),
