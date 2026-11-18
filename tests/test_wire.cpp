@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <string_view>
 
 using namespace pb;
 
@@ -97,6 +98,16 @@ constexpr bool test_writer_full() {
 
     constexpr std::array<std::uint8_t, 2> data{1, 2};
     return !w.write_bytes(data) && buf[1] == 0xEE && w.size() == 0;
+}
+
+constexpr bool test_write_text() {
+    std::array<std::uint8_t, 3> buf{0xEE, 0xEE, 0xEE};
+    writer w(buf);
+    if (!w.write_bytes(std::string_view("az")) || w.size() != 2)
+        return false;
+    if (w.write_bytes(std::string_view("bc")) || w.size() != 2)
+        return false;
+    return buf[0] == 'a' && buf[1] == 'z' && buf[2] == 0xEE;
 }
 
 constexpr bool test_read_varint() {
@@ -212,6 +223,7 @@ static_assert(test_write_varint());
 static_assert(test_write_fixed());
 static_assert(test_write_key());
 static_assert(test_writer_full());
+static_assert(test_write_text());
 static_assert(test_read_varint());
 static_assert(test_read_key());
 static_assert(test_read_length());
@@ -221,7 +233,7 @@ static_assert(test_skip());
 
 int main() {
     const bool ok = test_varint_size() && test_zigzag() && test_write_varint() && test_write_fixed() &&
-                    test_write_key() && test_writer_full() && test_read_varint() && test_read_key() &&
+                    test_write_key() && test_writer_full() && test_write_text() && test_read_varint() && test_read_key() &&
                     test_read_length() && test_skip();
     return ok ? 0 : 1;
 }

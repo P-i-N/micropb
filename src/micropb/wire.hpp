@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <expected>
 #include <span>
+#include <string_view>
 
 namespace pb {
 
@@ -74,6 +75,15 @@ struct writer {
 
         for (std::uint8_t byte : bytes)
             _out[_pos++] = byte;
+        return true;
+    }
+
+    [[nodiscard]] constexpr bool write_bytes(std::string_view text) {
+        if (text.size() > _out.size() - _pos)
+            return false;
+
+        for (char c : text)
+            _out[_pos++] = static_cast<std::uint8_t>(c);
         return true;
     }
 

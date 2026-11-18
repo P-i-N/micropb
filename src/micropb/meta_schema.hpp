@@ -362,7 +362,7 @@ template <typename T>
 
 namespace detail {
 
-consteval std::size_t delimited_size(std::uint32_t number, std::size_t length) {
+constexpr std::size_t delimited_size(std::uint32_t number, std::size_t length) {
     return varint_size(std::uint64_t{number} << 3) + varint_size(length) + length;
 }
 

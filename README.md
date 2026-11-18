@@ -16,3 +16,15 @@ ctest --test-dir .build --output-on-failure
 Each test is a `constexpr` function that `static_assert` checks. `main` runs the same tests at run time.
 
 The tests in `tests/compile_fail/` must not compile. Each one is a CTest test that builds an object target, which is not part of the default build. The test passes only when the compiler output contains the `static_assert` message that names its rule (`pb: <rule>:`).
+
+## Reference vectors
+
+`tests/vectors/` holds `vectors.proto` and one `<message>.<case>.txtpb` text-format file for each test case. `vectors.hpp` contains the bytes that `protoc --encode` writes for them. It is generated and checked in. The build and the tests do not run `protoc`. `messages.hpp` has the C++ mirrors of `vectors.proto`.
+
+To make `vectors.hpp` again (MSYS2 `mingw-w64-ucrt-x86_64-protobuf`):
+
+```sh
+cmake -DPROTOC=C:/msys64/ucrt64/bin/protoc.exe -P tests/vectors/generate.cmake
+```
+
+The output is the same on each run. It has no timestamp and no absolute path. The script writes temporary files only to `.build/vectors/`.
