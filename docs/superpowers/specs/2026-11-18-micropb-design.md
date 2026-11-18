@@ -2,7 +2,7 @@
 
 ## Intent
 
-`micropb` is a header-only proto3 codec. It sends messages between embedded devices and host PC tools over a USB COM serial port. The C++ structs are the schema. C++26 static reflection gives the field tags and the wire types. There is no `protoc` step for the C++ side and no descriptor tables in ROM.
+`micropb` is a header-only proto3 codec. It sends messages between embedded devices and host PC tools over a USB COM serial port. The C++ structs are the schema. C++26 static reflection gives the field tags and the wire types. There is no `protoc` step for the C++ side. The codec keeps one constant descriptor table for each message type in ROM, and reflection makes these tables (changed by `2026-11-18-micropb-table-codec-design.md`; the first design had no tables).
 
 The first user is the engine on the host PC. The device side is freestanding, so the core must also be correct there from the start.
 
@@ -10,7 +10,7 @@ The first user is the engine on the host PC. The device side is freestanding, so
 
 * Encode and decode proto3 wire format from plain C++ structs, byte-identical to `protoc` output for the same message.
 * No heap, no exceptions, no RTTI in the core.
-* All of encode, decode and `encoded_size` are `constexpr`. Tests can run them in `static_assert`. Decoding a `std::string_view` field runs only at run time, because C++ does not allow a zero-copy character view of byte input in constant evaluation.
+* Encode, decode and `encoded_size` run only at run time. The first design made them `constexpr`; `2026-11-18-micropb-table-codec-design.md` removed this goal, because one interpreter that reads descriptor tables is much smaller for tens of message types and cannot run in constant evaluation. The wire primitives and the schema stay `constexpr`.
 * Decoding from a contiguous buffer is zero-copy for `std::string_view` and `std::span<const std::uint8_t>`.
 * Generate a `.proto` file from the C++ structs. The PC tools can use it with Google protobuf (Python, C#). This file is the contract between the two sides.
 
@@ -44,15 +44,9 @@ The open choice was how the encoder writes the varint length prefix of submessag
 * **B. Compute sizes first.** `encoded_size` walks the message, then the writer writes each prefix with its final value. No `memmove`. The output is in strict order. `encoded_size` is also a public function for buffer sizing.
 * **C. `consteval max_wire_size<T>()`.** Works only for bounded types. `std::string_view` and `std::span` have no bound, so it cannot be the general mechanism.
 
-**Decision: B** (the user's choice). Extension (also the user's choice): when a nested message type has a size known at compile time, `encoded_size` uses the constant and does not walk into it.
+**Decision: B** (the user's choice). The first design had an extension: a nested message type with a size known at compile time (`known_size`) was not walked. `2026-11-18-micropb-table-codec-design.md` removed it. It applied only to messages made of `std::array` fields, and the interpreter measures a nested message in one walk.
 
-A message type has a known size only when its minimum and maximum encoded sizes are equal. With proto3 implicit presence, a field with a zero value is not written, so most types do not qualify. The types that qualify:
-
-* a non-empty `std::array<T, N>` of fixed-width scalars (`float`, `double`, `pb::fixed32`, `pb::fixed64`, `pb::sfixed32`, `pb::sfixed64`), written as one packed field;
-* a non-empty `std::array<std::uint8_t, N>`, written as `bytes`;
-* a nested message whose type has a known size.
-
-A rejected option: an annotation that forces the encoder to write zero fields. It would give more known-size types, but the output would not be byte-identical to `protoc`.
+A rejected option: an annotation that forces the encoder to write zero fields. The output would not be byte-identical to `protoc`.
 
 ## Public API
 
@@ -69,13 +63,13 @@ enum class error {
 };
 
 template <typename T>
-[[nodiscard]] constexpr std::size_t encoded_size(const T& msg);
+[[nodiscard]] std::size_t encoded_size(const T& msg);
 
 template <typename T>
-[[nodiscard]] constexpr std::expected<std::size_t, error> encode(const T& msg, std::span<uint8_t> out);
+[[nodiscard]] std::expected<std::size_t, error> encode(const T& msg, std::span<uint8_t> out);
 
 template <typename T>
-[[nodiscard]] constexpr std::expected<std::size_t, error> decode(std::span<const uint8_t> in, T& msg);
+[[nodiscard]] std::expected<std::size_t, error> decode(std::span<const uint8_t> in, T& msg);
 ```
 
 `encode` returns the number of bytes written. `decode` returns the number of bytes read, which is `in.size()` on success.
@@ -104,7 +98,7 @@ template <typename T>
 
 Negative `int32_t` values encode as 10-byte varints, as `protoc` does. An enum is `int32` on the wire: the encoder converts the value to `std::int32_t`, so a negative value (also an unsigned value of 2^31 or more) is a 10-byte varint. The decoder truncates the varint to `std::int32_t` and converts it to the enum. An enum type wider than 32 bits is a compile error. The 8- and 16-bit types encode as their 32-bit proto type. The decoder truncates wider values to the target width, by the same rule as for `int64` -> `int32`.
 
-`std::array<uint8_t, N>` is `bytes` with a fixed length. The encoder omits it only when `N == 0`. On decode, a length other than `N` is `error::CAPACITY_EXCEEDED` when it is longer. When it is shorter, the remaining bytes are 0. (Builder's call.) It has a known size, so it counts for the known-size rule. This also applies to `std::uint8_t` elements in `std::span`, `pb::repeated` and `pb::span_buffer`: these are `bytes` too, not `repeated uint32`.
+`std::array<uint8_t, N>` is `bytes` with a fixed length. The encoder omits it only when `N == 0`. On decode, a length other than `N` is `error::CAPACITY_EXCEEDED` when it is longer. When it is shorter, the remaining bytes are 0. (Builder's call.) This also applies to `std::uint8_t` elements in `std::span`, `pb::repeated` and `pb::span_buffer`: these are `bytes` too, not `repeated uint32`.
 
 ### Presence
 
@@ -159,11 +153,11 @@ The `.proto` file is the contract with the PC tools. A change to these rules bre
 
 ## Freestanding
 
-The core uses only `<cstdint>`, `<cstddef>`, `<span>`, `<string_view>`, `<array>`, `<optional>`, `<variant>`, `<expected>`, `<bit>`, `<type_traits>`, `<utility>`, `<algorithm>`, `<meta>`. No build in this project shows that it compiles freestanding. This stays unverified until the ARM stage. (Builder's call.)
+The core uses only `<cstdint>`, `<cstddef>`, `<span>`, `<string_view>`, `<array>`, `<optional>`, `<variant>`, `<expected>`, `<bit>`, `<type_traits>`, `<utility>`, `<algorithm>`, `<cstring>`, `<meta>`. No build in this project shows that it compiles freestanding. This stays unverified until the ARM stage. (Builder's call.)
 
 ## Decode semantics
 
-* `decode` resets `msg` before it reads: each field gets its value-initialized state, except that each `pb::span_buffer` keeps its storage span and only sets its count to 0. (Builder's call.)
+* `decode` resets `msg` before it reads: each field gets its value-initialized state, except that each `pb::repeated` and each `pb::span_buffer` keeps its storage and only sets its count to 0. The decoder resets each new element before it reads into it. (Builder's call.)
 * `pb::span_buffer` is allowed only where the caller can bind storage before `decode`: a member of the top-level message, or of a plain nested struct member. Inside `std::variant`, `std::optional` or an element of a repeated field it is a compile error. Use `pb::repeated<T, N>` there. (Builder's call.)
 * The decoder accepts all input that the Google C++ runtime accepts, so the PC tools and the device can change field widths independently. (Builder's call.)
     * A known field with the wrong wire type: skipped as an unknown field.
@@ -184,9 +178,8 @@ CMakeLists.txt
 src/micropb/
     types.hpp        wire wrappers, repeated, span_buffer, tag, oneof_tags, error
     wire.hpp         constexpr reader and writer, varint, ZigZag, skip_field
-    meta_schema.hpp  build_tag_table, type classification, known-size check
-    encode.hpp       encoded_size, encode
-    decode.hpp       decode
+    meta_schema.hpp  build_tag_table, type classification, compile-time checks
+    codec.hpp        descriptor tables, interpreter, encoded_size, encode, decode
     schema_gen.hpp   host only: C++ structs -> .proto text (uses std::string)
     micropb.hpp      umbrella header, without schema_gen.hpp
 tools/

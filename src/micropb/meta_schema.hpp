@@ -20,7 +20,7 @@ namespace pb {
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Category of a member type. It sets how the codec writes and reads the member.
-enum class field_kind { SCALAR, STRING, BYTES, FIXED_BYTES, MESSAGE, OPTIONAL, ONEOF, REPEATED };
+enum class field_kind : std::uint8_t { SCALAR, STRING, BYTES, FIXED_BYTES, MESSAGE, OPTIONAL, ONEOF, REPEATED };
 
 /// `field_info::alternative` of a field that is not a `std::variant` alternative.
 inline constexpr std::size_t no_alternative = std::size_t(-1);
@@ -269,7 +269,17 @@ consteval std::optional<std::meta::info> oneof_tags_annotation(std::meta::info m
     return std::nullopt;
 }
 
-/// Rejects message types of which reflection does not show all data members.
+template <typename T>
+consteval bool has_bit_field() {
+    for (std::meta::info member : std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked())) {
+        if (std::meta::is_bit_field(member))
+            return true;
+    }
+    return false;
+}
+
+/// Rejects message types of which reflection does not show all data members,
+/// and members that the codec cannot address.
 template <typename T>
 consteval void check_message_type() {
     static_assert(std::is_class_v<T> && std::is_aggregate_v<T>,
@@ -279,6 +289,7 @@ consteval void check_message_type() {
     static_assert(std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::unchecked()).size() ==
                       members<T>().size(),
                   "pb: inaccessible_member: all data members of a message must be public");
+    static_assert(!has_bit_field<T>(), "pb: bit_field: a message member cannot be a bit-field");
 }
 
 template <typename T>
@@ -372,69 +383,39 @@ template <typename T>
 
 ////////////////////////////////////////////////////////////////////////////////
 
-template <typename T>
-[[nodiscard]] consteval std::optional<std::size_t> known_size();
-
 namespace detail {
 
-constexpr std::size_t delimited_size(std::uint32_t number, std::size_t length) {
-    return varint_size(std::uint64_t{number} << 3) + varint_size(length) + length;
-}
+/// Rejects types that `decode` cannot write: a repeated field in an
+/// encode-only container, bytes in a span with a static extent, and a `const`
+/// member. It examines `T`, and each
+/// member, alternative, value and element of it.
+template <typename T>
+consteval void check_decodable() {
+    constexpr field_kind kind = kind_of<T>();
 
-/// Width of a scalar with a fixed wire width, else 0.
-template <typename E>
-consteval std::size_t fixed_width() {
-    if constexpr (kind_of<E>() != field_kind::SCALAR)
-        return 0;
-    else if constexpr (wire_type_of<E>() == wire_type::FIXED32)
-        return 4;
-    else if constexpr (wire_type_of<E>() == wire_type::FIXED64)
-        return 8;
-    else
-        return 0;
-}
-
-/// Encoded size of a field of type `M` when it does not depend on the value.
-/// The encoder omits an empty `std::array`, so its size is 0.
-template <typename M>
-consteval std::optional<std::size_t> known_field_size(std::uint32_t number) {
-    constexpr field_kind kind = kind_of<M>();
-    if constexpr (kind == field_kind::FIXED_BYTES) {
-        constexpr std::size_t length = std::tuple_size_v<M>;
-        return length == 0 ? 0 : delimited_size(number, length);
+    if constexpr (kind == field_kind::REPEATED) {
+        static_assert(!is_instance_of<T>(^^std::array) && !is_instance_of<T>(^^std::span),
+                      "pb: decode_encode_only: std::array and std::span<const T> are encode-only, "
+                      "use pb::repeated or pb::span_buffer to decode");
+        check_decodable<element_t<T>>();
+    } else if constexpr (kind == field_kind::BYTES) {
+        static_assert(!is_instance_of<T>(^^std::span) || std::is_same_v<T, std::span<const std::uint8_t>>,
+                      "pb: decode_fixed_span: a std::span with a static extent is encode-only, "
+                      "use std::span<const std::uint8_t> or std::array to decode");
+    } else if constexpr (kind == field_kind::OPTIONAL) {
+        check_decodable<typename T::value_type>();
+    } else if constexpr (kind == field_kind::ONEOF) {
+        template for (constexpr std::meta::info alternative : alternatives<T>())
+            check_decodable<typename[:alternative:]>();
     } else if constexpr (kind == field_kind::MESSAGE) {
-        constexpr std::optional<std::size_t> length = known_size<M>();
-        if (!length)
-            return std::nullopt;
-        return delimited_size(number, *length);
-    } else if constexpr (kind == field_kind::REPEATED && is_instance_of<M>(^^std::array)) {
-        constexpr std::size_t width = fixed_width<typename M::value_type>();
-        constexpr std::size_t length = width * std::tuple_size_v<M>;
-        if (width == 0)
-            return std::nullopt;
-        return length == 0 ? 0 : delimited_size(number, length);
-    } else {
-        return std::nullopt;
+        template for (constexpr std::meta::info member : members<T>()) {
+            static_assert(!std::meta::is_const(std::meta::type_of(member)),
+                          "pb: decode_const_member: decode cannot write to a const member");
+            check_decodable<std::remove_const_t<typename[:std::meta::type_of(member):]>>();
+        }
     }
 }
 
 } // namespace detail
-
-/// Encoded size of each message of type `T`, when all messages of the type have
-/// the same size, else `std::nullopt`. Fields with implicit presence can be
-/// omitted, so only fixed-width arrays, fixed-length bytes and nested messages of
-/// known size give a known size.
-template <typename T>
-[[nodiscard]] consteval std::optional<std::size_t> known_size() {
-    std::size_t total = 0;
-    template for (constexpr field_info field : build_tag_table<T>()) {
-        constexpr std::optional<std::size_t> size =
-            detail::known_field_size<typename[:std::meta::type_of(field.member):]>(field.number);
-        if (!size)
-            return std::nullopt;
-        total += *size;
-    }
-    return total;
-}
 
 } // namespace pb

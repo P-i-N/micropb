@@ -1,10 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <span>
-#include <string_view>
 
 #include <micropb/types.hpp>
 
@@ -48,59 +48,65 @@ struct field_key {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Writes wire primitives into a fixed buffer. A write that does not fit
-/// returns `false` and writes nothing. The writer never writes past the span.
+/// Writes wire primitives into a fixed buffer. A byte that does not fit is not
+/// written, but the writer counts it: `size()` is the size that the output
+/// needs, and `fits()` tells if the span holds all of it. A writer without a
+/// span only counts. The writer never writes past the span.
 struct writer {
+    constexpr writer() = default;
     constexpr explicit writer(std::span<std::uint8_t> out) : _out(out) {}
 
-    [[nodiscard]] constexpr bool write_varint(std::uint64_t value) {
-        if (varint_size(value) > _out.size() - _pos)
-            return false;
-
+    constexpr void write_varint(std::uint64_t value) {
         while (value >= 0x80) {
-            _out[_pos++] = static_cast<std::uint8_t>(value | 0x80);
+            put(static_cast<std::uint8_t>(value | 0x80));
             value >>= 7;
         }
-        _out[_pos++] = static_cast<std::uint8_t>(value);
-        return true;
+        put(static_cast<std::uint8_t>(value));
     }
 
-    [[nodiscard]] constexpr bool write_fixed32(std::uint32_t value) { return write_le(value, 4); }
+    constexpr void write_fixed32(std::uint32_t value) { write_le(value, 4); }
 
-    [[nodiscard]] constexpr bool write_fixed64(std::uint64_t value) { return write_le(value, 8); }
+    constexpr void write_fixed64(std::uint64_t value) { write_le(value, 8); }
 
-    [[nodiscard]] constexpr bool write_bytes(std::span<const std::uint8_t> bytes) {
-        if (bytes.size() > _out.size() - _pos)
-            return false;
-
-        for (std::uint8_t byte : bytes)
-            _out[_pos++] = byte;
-        return true;
+    /// Writes all items of `bytes`, or none of them when they do not all fit.
+    /// `bytes` is a contiguous range of `std::uint8_t` or `char`.
+    template <typename B>
+    constexpr void write_bytes(const B& bytes) {
+        if (_pos <= _out.size() && bytes.size() <= _out.size() - _pos)
+            std::copy(bytes.begin(), bytes.end(), _out.data() + _pos);
+        advance(bytes.size());
     }
 
-    [[nodiscard]] constexpr bool write_bytes(std::string_view text) {
-        if (text.size() > _out.size() - _pos)
-            return false;
-
-        for (char c : text)
-            _out[_pos++] = static_cast<std::uint8_t>(c);
-        return true;
+    constexpr void write_key(std::uint32_t number, wire_type type) {
+        write_varint((static_cast<std::uint64_t>(number) << 3) | static_cast<std::uint64_t>(type));
     }
 
-    [[nodiscard]] constexpr bool write_key(std::uint32_t number, wire_type type) {
-        return write_varint((static_cast<std::uint64_t>(number) << 3) | static_cast<std::uint64_t>(type));
+    /// Counts `count` bytes and writes nothing. The count stops at the largest
+    /// `std::size_t`: a size that is too large for the type never fits.
+    constexpr void advance(std::size_t count) {
+        constexpr std::size_t limit = std::size_t(-1);
+        _pos = count > limit - _pos ? limit : _pos + count;
     }
 
+    /// `true` when the span has no space: each byte from here is only counted.
+    [[nodiscard]] constexpr bool counts_only() const { return _pos >= _out.size(); }
+
+    /// Number of bytes that the output needs. This is the number of bytes
+    /// written only when `fits()` is `true`.
     [[nodiscard]] constexpr std::size_t size() const { return _pos; }
 
-private:
-    [[nodiscard]] constexpr bool write_le(std::uint64_t value, std::size_t count) {
-        if (count > _out.size() - _pos)
-            return false;
+    [[nodiscard]] constexpr bool fits() const { return _pos <= _out.size(); }
 
+private:
+    constexpr void put(std::uint8_t byte) {
+        if (_pos < _out.size())
+            _out[_pos] = byte;
+        advance(1);
+    }
+
+    constexpr void write_le(std::uint64_t value, std::size_t count) {
         for (std::size_t i = 0; i < count; ++i)
-            _out[_pos++] = static_cast<std::uint8_t>(value >> (8 * i));
-        return true;
+            put(static_cast<std::uint8_t>(value >> (8 * i)));
     }
 
     std::span<std::uint8_t> _out;
@@ -111,21 +117,27 @@ private:
 
 /// Reads wire primitives from a byte span. Every read checks the remaining
 /// bytes first, so the reader never reads past the span.
+/// The first read that fails sets the error and moves the reader to the end of
+/// the input. Each read after that returns 0 or an empty span, and the error
+/// stays. The caller reads without a check after each step and looks at
+/// `failed()` or `status()` when it must know.
 struct reader {
     /// Largest field number of proto3.
     static constexpr std::uint32_t max_field_number = (1u << 29) - 1;
 
     constexpr explicit reader(std::span<const std::uint8_t> in) : _in(in) {}
 
-    [[nodiscard]] constexpr std::expected<std::uint64_t, error> read_varint() {
+    constexpr std::uint64_t read_varint() {
         std::uint64_t value = 0;
         for (std::size_t i = 0; i < 10; ++i) {
-            if (_pos + i >= _in.size())
-                return std::unexpected(error::TRUNCATED);
+            if (_pos + i >= _in.size()) {
+                fail(error::TRUNCATED);
+                return 0;
+            }
 
             const std::uint8_t byte = _in[_pos + i];
             if (i == 9 && byte > 1)
-                return std::unexpected(error::INVALID_VARINT);
+                break;
 
             value |= static_cast<std::uint64_t>(byte & 0x7F) << (7 * i);
             if ((byte & 0x80) == 0) {
@@ -133,83 +145,91 @@ struct reader {
                 return value;
             }
         }
-        return std::unexpected(error::INVALID_VARINT);
+        fail(error::INVALID_VARINT);
+        return 0;
     }
 
-    [[nodiscard]] constexpr std::expected<std::uint32_t, error> read_fixed32() {
-        if (remaining() < 4)
-            return std::unexpected(error::TRUNCATED);
-        return static_cast<std::uint32_t>(read_le(4));
-    }
+    constexpr std::uint32_t read_fixed32() { return static_cast<std::uint32_t>(read_le(4)); }
 
-    [[nodiscard]] constexpr std::expected<std::uint64_t, error> read_fixed64() {
-        if (remaining() < 8)
-            return std::unexpected(error::TRUNCATED);
-        return read_le(8);
-    }
+    constexpr std::uint64_t read_fixed64() { return read_le(8); }
 
     /// Returns a view into the input. Does not copy.
-    [[nodiscard]] constexpr std::expected<std::span<const std::uint8_t>, error> read_length_delimited() {
-        const auto length = read_varint();
-        if (!length)
-            return std::unexpected(length.error());
-
+    constexpr std::span<const std::uint8_t> read_length_delimited() {
         // Compare with the remaining bytes before any addition: no overflow.
-        if (*length > remaining())
-            return std::unexpected(error::TRUNCATED);
+        // After a failed `read_varint` the length is 0 and no bytes remain.
+        const std::uint64_t length = read_varint();
+        if (length > remaining()) {
+            fail(error::TRUNCATED);
+            return {};
+        }
 
-        const auto bytes = _in.subspan(_pos, static_cast<std::size_t>(*length));
+        const auto bytes = _in.subspan(_pos, static_cast<std::size_t>(length));
         _pos += bytes.size();
         return bytes;
     }
 
-    [[nodiscard]] constexpr std::expected<field_key, error> read_key() {
-        const auto key = read_varint();
-        if (!key)
-            return std::unexpected(key.error());
+    /// The key is valid only when `failed()` is `false` after the call.
+    constexpr field_key read_key() {
+        const std::uint64_t key = read_varint();
+        if (_failed)
+            return {};
 
-        const std::uint64_t number = *key >> 3;
-        if (number == 0 || number > max_field_number)
-            return std::unexpected(error::INVALID_TAG);
-
-        const auto n = static_cast<std::uint32_t>(number);
-        switch (*key & 7) {
-        case 0: return field_key{n, wire_type::VARINT};
-        case 1: return field_key{n, wire_type::FIXED64};
-        case 2: return field_key{n, wire_type::LENGTH_DELIMITED};
-        case 5: return field_key{n, wire_type::FIXED32};
-        default: return std::unexpected(error::INVALID_WIRE_TYPE);
+        const std::uint64_t number = key >> 3;
+        const auto type = static_cast<std::uint8_t>(key & 7);
+        if (number == 0 || number > max_field_number) {
+            fail(error::INVALID_TAG);
+            return {};
         }
+        if (type == 3 || type == 4 || type > 5) {
+            fail(error::INVALID_WIRE_TYPE);
+            return {};
+        }
+        return {static_cast<std::uint32_t>(number), static_cast<wire_type>(type)};
     }
 
-    [[nodiscard]] constexpr std::expected<void, error> skip(wire_type type) {
+    constexpr void skip(wire_type type) {
         switch (type) {
-        case wire_type::VARINT: {
-            const auto value = read_varint();
-            if (!value)
-                return std::unexpected(value.error());
-            return {};
+        case wire_type::VARINT: static_cast<void>(read_varint()); break;
+        case wire_type::FIXED32: static_cast<void>(read_le(4)); break;
+        case wire_type::FIXED64: static_cast<void>(read_le(8)); break;
+        case wire_type::LENGTH_DELIMITED: static_cast<void>(read_length_delimited()); break;
         }
-        case wire_type::FIXED32: return skip_bytes(4);
-        case wire_type::FIXED64: return skip_bytes(8);
-        case wire_type::LENGTH_DELIMITED: {
-            const auto bytes = read_length_delimited();
-            if (!bytes)
-                return std::unexpected(bytes.error());
-            return {};
-        }
-        }
-        return std::unexpected(error::INVALID_WIRE_TYPE);
     }
 
-    [[nodiscard]] constexpr bool empty() const { return _pos == _in.size(); }
+    /// Sets the error, if there is none, and moves the reader to the end.
+    constexpr void fail(error code) {
+        if (!_failed)
+            _error = code;
+        _failed = true;
+        _pos = _in.size();
+    }
 
-    [[nodiscard]] constexpr std::size_t position() const { return _pos; }
+    /// Takes the error of `part`, a reader of a section of this input.
+    constexpr void absorb(const reader& part) {
+        if (part._failed)
+            fail(part._error);
+    }
+
+    [[nodiscard]] constexpr bool failed() const { return _failed; }
+
+    [[nodiscard]] constexpr std::expected<void, error> status() const {
+        if (_failed)
+            return std::unexpected(_error);
+        return {};
+    }
+
+    /// `true` at the end of the input, and after a failure.
+    [[nodiscard]] constexpr bool empty() const { return _pos == _in.size(); }
 
 private:
     [[nodiscard]] constexpr std::size_t remaining() const { return _in.size() - _pos; }
 
-    [[nodiscard]] constexpr std::uint64_t read_le(std::size_t count) {
+    constexpr std::uint64_t read_le(std::size_t count) {
+        if (remaining() < count) {
+            fail(error::TRUNCATED);
+            return 0;
+        }
+
         std::uint64_t value = 0;
         for (std::size_t i = 0; i < count; ++i)
             value |= static_cast<std::uint64_t>(_in[_pos + i]) << (8 * i);
@@ -217,15 +237,10 @@ private:
         return value;
     }
 
-    [[nodiscard]] constexpr std::expected<void, error> skip_bytes(std::size_t count) {
-        if (remaining() < count)
-            return std::unexpected(error::TRUNCATED);
-        _pos += count;
-        return {};
-    }
-
     std::span<const std::uint8_t> _in;
     std::size_t _pos = 0;
+    error _error{};
+    bool _failed = false;
 };
 
 } // namespace pb

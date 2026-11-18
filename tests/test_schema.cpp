@@ -34,18 +34,6 @@ struct pose {
     std::array<float, 4> rot;
 };
 
-struct mac {
-    std::array<std::uint8_t, 6> addr;
-};
-
-struct holder {
-    pose p;
-};
-
-struct plain {
-    std::int32_t a;
-};
-
 struct nested {
     std::optional<pose> p;
     std::optional<std::span<const std::uint8_t>> data;
@@ -117,11 +105,6 @@ consteval bool test_packed() {
     return is_packed<float>() && is_packed<sint64>() && !is_packed<std::string_view>() && !is_packed<pose>();
 }
 
-consteval bool test_known_size() {
-    return known_size<pose>() == 32 && known_size<mac>() == 8 && known_size<holder>() == 34 &&
-           known_size<plain>() == std::nullopt;
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 
 static_assert(test_auto_tags());
@@ -131,13 +114,12 @@ static_assert(test_nested_allowed());
 static_assert(test_kinds());
 static_assert(test_wire_types());
 static_assert(test_packed());
-static_assert(test_known_size());
 
 } // namespace
 
 // The schema exists only at compile time, so `main` evaluates the tests as a constant.
 int main() {
     constexpr bool ok = test_auto_tags() && test_oneof_tags() && test_explicit() && test_nested_allowed() &&
-                        test_kinds() && test_wire_types() && test_packed() && test_known_size();
+                        test_kinds() && test_wire_types() && test_packed();
     return ok ? 0 : 1;
 }
