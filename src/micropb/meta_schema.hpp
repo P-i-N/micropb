@@ -178,6 +178,9 @@ consteval bool contains_span_buffer() {
     }
 }
 
+inline constexpr std::string_view monostate_message =
+    "pb: monostate_member: std::monostate is allowed only as the first alternative of a std::variant";
+
 template <typename V>
 consteval bool alternatives_unique() {
     const std::span<const std::meta::info> types = alternatives<V>();
@@ -190,24 +193,57 @@ consteval bool alternatives_unique() {
     return true;
 }
 
+/// `true` when an alternative of the `std::variant` type `V` has the kind `kind`.
+template <typename V>
+consteval bool has_alternative_of_kind(field_kind kind) {
+    template for (constexpr std::meta::info alternative : alternatives<V>()) {
+        if (kind_of<typename[:alternative:]>() == kind)
+            return true;
+    }
+    return false;
+}
+
 /// Rejects member types that have a mapping but that proto3 or `decode` cannot use.
 template <typename M>
 consteval void check_member_type() {
     constexpr field_kind kind = kind_of<M>();
+    static_assert(!std::is_same_v<M, std::monostate>, monostate_message);
+
     if constexpr (kind == field_kind::OPTIONAL) {
         using value = typename M::value_type;
-        static_assert(kind_of<value>() != field_kind::REPEATED,
+        constexpr field_kind value_kind = kind_of<value>();
+        static_assert(!std::is_same_v<value, std::monostate>, monostate_message);
+        static_assert(value_kind != field_kind::REPEATED,
                       "pb: optional_repeated: a repeated field cannot have explicit presence");
+        static_assert(value_kind != field_kind::OPTIONAL,
+                      "pb: optional_optional: the value of a std::optional cannot be a std::optional");
+        static_assert(value_kind != field_kind::ONEOF,
+                      "pb: optional_variant: the value of a std::optional cannot be a std::variant");
         static_assert(!contains_span_buffer<value>(),
                       "pb: span_buffer_in_optional: use pb::repeated in a std::optional");
     } else if constexpr (kind == field_kind::ONEOF) {
         static_assert(std::meta::dealias(alternatives<M>()[0]) == ^^std::monostate,
                       "pb: variant_no_monostate: the first alternative of a std::variant must be std::monostate");
-        static_assert(alternatives_unique<M>(), "pb: variant_repeated_alternative: each alternative of a "
+        static_assert(alternatives_unique<M>(), "pb: variant_duplicate_alternative: each alternative of a "
                                                 "std::variant must have a different type");
+        static_assert(!has_alternative_of_kind<M>(field_kind::REPEATED),
+                      "pb: variant_repeated_alternative: a repeated field cannot be a oneof alternative");
+        static_assert(!has_alternative_of_kind<M>(field_kind::OPTIONAL),
+                      "pb: variant_optional_alternative: a std::optional cannot be a oneof alternative");
+        static_assert(!has_alternative_of_kind<M>(field_kind::ONEOF),
+                      "pb: variant_variant_alternative: a std::variant cannot be a oneof alternative");
         static_assert(!contains_span_buffer<M>(), "pb: span_buffer_in_variant: use pb::repeated in a std::variant");
     } else if constexpr (kind == field_kind::REPEATED) {
-        static_assert(!contains_span_buffer<element_t<M>>(),
+        using element = element_t<M>;
+        constexpr field_kind element_kind = kind_of<element>();
+        static_assert(!std::is_same_v<element, std::monostate>, monostate_message);
+        static_assert(element_kind != field_kind::REPEATED,
+                      "pb: repeated_repeated: the element of a repeated field cannot be a repeated field");
+        static_assert(element_kind != field_kind::OPTIONAL,
+                      "pb: repeated_optional: the element of a repeated field cannot be a std::optional");
+        static_assert(element_kind != field_kind::ONEOF,
+                      "pb: repeated_variant: the element of a repeated field cannot be a std::variant");
+        static_assert(!contains_span_buffer<element>(),
                       "pb: span_buffer_in_repeated: use pb::repeated as the element of a repeated field");
     }
 }

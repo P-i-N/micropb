@@ -4,7 +4,7 @@
 #include <variant>
 
 struct msg {
-    std::variant<std::monostate, std::int32_t, std::int32_t> v;
+    std::variant<std::monostate, pb::repeated<std::int32_t, 4>> v;
 };
 
-static_assert(pb::build_tag_table<msg>().size() == 2);
+static_assert(pb::build_tag_table<msg>().size() == 1);

@@ -46,6 +46,15 @@ struct plain {
     std::int32_t a;
 };
 
+struct nested {
+    std::optional<pose> p;
+    std::optional<std::span<const std::uint8_t>> data;
+    std::variant<std::monostate, std::string_view, pose, std::array<std::uint8_t, 6>> v;
+    pb::repeated<std::array<std::uint8_t, 6>, 2> addresses;
+    std::array<std::string_view, 2> names;
+    std::span<const pose> poses;
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 
 template <typename T, std::size_t N>
@@ -78,6 +87,10 @@ consteval bool test_explicit() {
     return numbers_are<t_tags, 3>({5, 6, 7}) && table[0].member == ^^t_tags::v && table[0].alternative == 2 &&
            table[1].member == ^^t_tags::b && table[1].alternative == no_alternative &&
            table[2].member == ^^t_tags::v && table[2].alternative == 1;
+}
+
+consteval bool test_nested_allowed() {
+    return numbers_are<nested, 8>({1, 2, 3, 4, 5, 6, 7, 8});
 }
 
 consteval bool test_kinds() {
@@ -114,6 +127,7 @@ consteval bool test_known_size() {
 static_assert(test_auto_tags());
 static_assert(test_oneof_tags());
 static_assert(test_explicit());
+static_assert(test_nested_allowed());
 static_assert(test_kinds());
 static_assert(test_wire_types());
 static_assert(test_packed());
@@ -123,7 +137,7 @@ static_assert(test_known_size());
 
 // The schema exists only at compile time, so `main` evaluates the tests as a constant.
 int main() {
-    constexpr bool ok = test_auto_tags() && test_oneof_tags() && test_explicit() && test_kinds() &&
-                        test_wire_types() && test_packed() && test_known_size();
+    constexpr bool ok = test_auto_tags() && test_oneof_tags() && test_explicit() && test_nested_allowed() &&
+                        test_kinds() && test_wire_types() && test_packed() && test_known_size();
     return ok ? 0 : 1;
 }

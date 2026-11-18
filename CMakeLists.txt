@@ -33,8 +33,11 @@ micropb_add_test(test_schema)
 
 foreach(rule
         duplicate_tag tag_zero tag_too_large tag_reserved oneof_tags_count
-        variant_no_monostate variant_repeated_alternative unmapped_type
-        span_buffer_in_variant span_buffer_in_optional span_buffer_in_repeated optional_repeated
+        variant_no_monostate variant_duplicate_alternative variant_repeated_alternative
+        variant_optional_alternative variant_variant_alternative unmapped_type monostate_member
+        span_buffer_in_variant span_buffer_in_optional span_buffer_in_repeated
+        optional_repeated optional_optional optional_variant
+        repeated_repeated repeated_optional repeated_variant
         tag_on_variant oneof_tags_on_non_variant)
     micropb_add_compile_fail_test(${rule})
 endforeach()
