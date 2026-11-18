@@ -68,46 +68,39 @@ template <typename M>
         return static_cast<M>(bits);
 }
 
+/// Reads the value of a scalar without a key. Returns the scalar of 0 when the
+/// read fails.
 template <typename M>
-[[nodiscard]] constexpr std::expected<M, error> read_scalar(reader& in) {
+[[nodiscard]] constexpr M read_scalar(reader& in) {
     constexpr wire_type type = wire_type_of<M>();
 
-    if constexpr (type == wire_type::FIXED32) {
-        const auto bits = in.read_fixed32();
-        if (!bits)
-            return std::unexpected(bits.error());
-        return scalar_from_bits<M>(*bits);
-    } else if constexpr (type == wire_type::FIXED64) {
-        const auto bits = in.read_fixed64();
-        if (!bits)
-            return std::unexpected(bits.error());
-        return scalar_from_bits<M>(*bits);
-    } else {
-        const auto bits = in.read_varint();
-        if (!bits)
-            return std::unexpected(bits.error());
-        return scalar_from_bits<M>(*bits);
-    }
+    if constexpr (type == wire_type::FIXED32)
+        return scalar_from_bits<M>(in.read_fixed32());
+    else if constexpr (type == wire_type::FIXED64)
+        return scalar_from_bits<M>(in.read_fixed64());
+    else
+        return scalar_from_bits<M>(in.read_varint());
 }
 
 template <typename T>
-[[nodiscard]] constexpr std::expected<void, error> decode_message(std::span<const std::uint8_t> bytes, T& message);
+constexpr void decode_message(reader& in, T& message);
 
 template <typename M>
-[[nodiscard]] constexpr std::expected<void, error> decode_field(reader& in, wire_type type, M& value);
+constexpr void decode_field(reader& in, wire_type type, M& value);
 
+/// Adds `item` to `sequence`, but not after a failed read. A full sequence is
+/// an error.
 template <typename S, typename E>
-[[nodiscard]] constexpr std::expected<void, error> append(S& sequence, const E& item) {
-    if (!sequence.push_back(item))
-        return std::unexpected(error::CAPACITY_EXCEEDED);
-    return {};
+constexpr void append(reader& in, S& sequence, const E& item) {
+    if (!in.failed() && !sequence.push_back(item))
+        in.fail(error::CAPACITY_EXCEEDED);
 }
 
 /// Reads one record of a repeated field into `sequence`. A scalar element can
 /// be a packed record or a single value. Any other element is one record, which
 /// starts from a value-initialized element: records do not merge.
 template <typename S>
-[[nodiscard]] constexpr std::expected<void, error> decode_repeated(reader& in, wire_type type, S& sequence) {
+constexpr void decode_repeated(reader& in, wire_type type, S& sequence) {
     if constexpr (is_instance_of<S>(^^std::array) || is_instance_of<S>(^^std::span)) {
         static_assert(false, "pb: decode_encode_only: std::array and std::span<const T> are encode-only, "
                              "use pb::repeated or pb::span_buffer to decode");
@@ -115,97 +108,82 @@ template <typename S>
         using element = element_t<S>;
 
         if (type == wire_type::LENGTH_DELIMITED) {
-            const auto bytes = in.read_length_delimited();
-            if (!bytes)
-                return std::unexpected(bytes.error());
-
-            reader packed(*bytes);
-            while (!packed.empty()) {
-                const auto item = read_scalar<element>(packed);
-                if (!item)
-                    return std::unexpected(item.error());
-
-                const auto status = append(sequence, *item);
-                if (!status)
-                    return status;
-            }
-            return {};
+            reader packed(in.read_length_delimited());
+            while (!packed.empty())
+                append(packed, sequence, read_scalar<element>(packed));
+            in.absorb(packed);
+        } else if (type == wire_type_of<element>()) {
+            append(in, sequence, read_scalar<element>(in));
+        } else {
+            in.skip(type);
         }
-
-        if (type != wire_type_of<element>())
-            return in.skip(type);
-
-        const auto item = read_scalar<element>(in);
-        if (!item)
-            return std::unexpected(item.error());
-        return append(sequence, *item);
     } else {
         if (type != wire_type::LENGTH_DELIMITED)
             return in.skip(type);
 
         element_t<S> item{};
-        const auto status = decode_field(in, type, item);
-        if (!status)
-            return status;
-        return append(sequence, item);
+        decode_field(in, type, item);
+        append(in, sequence, item);
     }
 }
 
 /// Reads the value of one field into `value`. A field with the wrong wire type
-/// is skipped, as an unknown field.
+/// is skipped, as an unknown field. A read that fails does not change a scalar,
+/// a string or a bytes field.
 template <typename M>
-[[nodiscard]] constexpr std::expected<void, error> decode_field(reader& in, wire_type type, M& value) {
+constexpr void decode_field(reader& in, wire_type type, M& value) {
     constexpr field_kind kind = kind_of<M>();
 
     if constexpr (kind == field_kind::SCALAR) {
         if (type != wire_type_of<M>())
             return in.skip(type);
 
-        const auto scalar = read_scalar<M>(in);
-        if (!scalar)
-            return std::unexpected(scalar.error());
-        value = *scalar;
-        return {};
+        const M scalar = read_scalar<M>(in);
+        if (!in.failed())
+            value = scalar;
     } else if constexpr (kind == field_kind::OPTIONAL) {
         if (type != wire_type_of<M>())
             return in.skip(type);
 
         if (!value)
             value.emplace();
-        return decode_field(in, type, *value);
+        decode_field(in, type, *value);
     } else if constexpr (kind == field_kind::REPEATED) {
-        return decode_repeated(in, type, value);
+        decode_repeated(in, type, value);
     } else if constexpr (kind == field_kind::ONEOF) {
         static_assert(false, "pb: decode: a oneof is decoded by its alternatives, not as one field");
     } else {
         if (type != wire_type::LENGTH_DELIMITED)
             return in.skip(type);
 
-        const auto bytes = in.read_length_delimited();
-        if (!bytes)
-            return std::unexpected(bytes.error());
+        const std::span<const std::uint8_t> bytes = in.read_length_delimited();
+        if (in.failed())
+            return;
 
         if constexpr (kind == field_kind::STRING) {
-            value = std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size());
+            value = std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size());
         } else if constexpr (kind == field_kind::BYTES) {
             if constexpr (is_instance_of<M>(^^std::span)) {
-                value = *bytes;
+                value = bytes;
             } else {
-                if (bytes->size() > value.capacity())
-                    return std::unexpected(error::CAPACITY_EXCEEDED);
+                if (bytes.size() > value.capacity())
+                    return in.fail(error::CAPACITY_EXCEEDED);
+
                 value.clear();
-                for (const std::uint8_t byte : *bytes)
+                for (const std::uint8_t byte : bytes)
                     static_cast<void>(value.push_back(byte));
             }
         } else if constexpr (kind == field_kind::FIXED_BYTES) {
-            if (bytes->size() > std::tuple_size_v<M>)
-                return std::unexpected(error::CAPACITY_EXCEEDED);
+            if (bytes.size() > std::tuple_size_v<M>)
+                return in.fail(error::CAPACITY_EXCEEDED);
+
             value = {};
-            std::copy(bytes->begin(), bytes->end(), value.begin());
+            std::copy(bytes.begin(), bytes.end(), value.begin());
         } else {
-            return decode_message(*bytes, value);
+            reader part(bytes);
+            decode_message(part, value);
+            in.absorb(part);
         }
-        return {};
     }
 }
 
@@ -213,46 +191,47 @@ template <typename M>
 /// alternative gives way to a value-initialized one. The same alternative stays,
 /// so a message merges. A wrong wire type is skipped and keeps the variant.
 template <std::size_t I, typename V>
-[[nodiscard]] constexpr std::expected<void, error> decode_alternative(reader& in, wire_type type, V& variant) {
+constexpr void decode_alternative(reader& in, wire_type type, V& variant) {
     using alternative = std::variant_alternative_t<I, V>;
     if (type != wire_type_of<alternative>())
         return in.skip(type);
 
     if (variant.index() != I)
         variant.template emplace<I>();
-    return decode_field(in, type, *std::get_if<I>(&variant));
+    decode_field(in, type, *std::get_if<I>(&variant));
 }
 
 /// Reads the value of the field `key` into `message`. A field number that the
 /// message does not have is skipped.
 template <typename T>
-[[nodiscard]] constexpr std::expected<void, error> decode_known(reader& in, field_key key, T& message) {
+constexpr void decode_known(reader& in, field_key key, T& message) {
     template for (constexpr field_info field : build_tag_table<T>()) {
-        if (field.number == key.number) {
+        // `field` has a type that exists only at compile time. Run-time code
+        // must use a copy of the number, or the function becomes `consteval`.
+        constexpr std::uint32_t number = field.number;
+
+        if (key.number == number) {
             if constexpr (field.alternative == no_alternative)
                 return decode_field(in, key.type, message.[:field.member:]);
             else
                 return decode_alternative<field.alternative>(in, key.type, message.[:field.member:]);
         }
     }
-    return in.skip(key.type);
+    in.skip(key.type);
 }
 
-/// Reads all fields of `bytes` into `message`. Does not reset `message`: a field
-/// that occurs again changes the value that is there.
+/// Reads all fields of `in` into `message`, until the end of the input or the
+/// first error. Does not reset `message`: a field that occurs again changes the
+/// value that is there.
 template <typename T>
-[[nodiscard]] constexpr std::expected<void, error> decode_message(std::span<const std::uint8_t> bytes, T& message) {
-    reader in(bytes);
+constexpr void decode_message(reader& in, T& message) {
     while (!in.empty()) {
-        const auto key = in.read_key();
-        if (!key)
-            return std::unexpected(key.error());
+        const field_key key = in.read_key();
+        if (in.failed())
+            return;
 
-        const auto status = decode_known(in, *key, message);
-        if (!status)
-            return std::unexpected(status.error());
+        decode_known(in, key, message);
     }
-    return {};
 }
 
 } // namespace detail
@@ -269,9 +248,10 @@ template <typename T>
 [[nodiscard]] constexpr std::expected<std::size_t, error> decode(std::span<const std::uint8_t> in, T& msg) {
     detail::reset_message(msg);
 
-    const auto status = detail::decode_message(in, msg);
-    if (!status)
-        return std::unexpected(status.error());
+    reader source(in);
+    detail::decode_message(source, msg);
+    if (source.failed())
+        return std::unexpected(source.status().error());
     return in.size();
 }
 

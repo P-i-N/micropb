@@ -22,33 +22,6 @@ namespace detail {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Sink with the interface of `writer` that only counts bytes. The encoder
-/// uses one code path for the size and for the bytes.
-struct counter {
-    [[nodiscard]] constexpr bool write_varint(std::uint64_t value) { return add(varint_size(value)); }
-    [[nodiscard]] constexpr bool write_fixed32(std::uint32_t) { return add(4); }
-    [[nodiscard]] constexpr bool write_fixed64(std::uint64_t) { return add(8); }
-    [[nodiscard]] constexpr bool write_bytes(std::span<const std::uint8_t> bytes) { return add(bytes.size()); }
-    [[nodiscard]] constexpr bool write_bytes(std::string_view text) { return add(text.size()); }
-
-    [[nodiscard]] constexpr bool write_key(std::uint32_t number, wire_type type) {
-        return write_varint((static_cast<std::uint64_t>(number) << 3) | static_cast<std::uint64_t>(type));
-    }
-
-    /// Adds the size of a part that the caller already measured.
-    [[nodiscard]] constexpr bool add(std::size_t count) {
-        _size += count;
-        return true;
-    }
-
-    [[nodiscard]] constexpr std::size_t size() const { return _size; }
-
-private:
-    std::size_t _size = 0;
-};
-
-////////////////////////////////////////////////////////////////////////////////
-
 /// Value of a scalar as the wire carries it: the varint value, or the bits of a
 /// fixed-width value. A negative integer sign-extends to 64 bits. An enum is
 /// `int32`, so an unsigned enum value of 2^31 or more is negative. Zero bits
@@ -70,31 +43,29 @@ template <typename M>
 }
 
 /// Writes the value of a scalar without a key.
-template <typename S, typename M>
-[[nodiscard]] constexpr bool emit_value(S& sink, const M& value) {
+template <typename M>
+constexpr void emit_value(writer& sink, const M& value) {
     constexpr wire_type type = wire_type_of<M>();
     const std::uint64_t bits = scalar_bits(value);
 
     if constexpr (type == wire_type::FIXED32)
-        return sink.write_fixed32(static_cast<std::uint32_t>(bits));
+        sink.write_fixed32(static_cast<std::uint32_t>(bits));
     else if constexpr (type == wire_type::FIXED64)
-        return sink.write_fixed64(bits);
+        sink.write_fixed64(bits);
     else
-        return sink.write_varint(bits);
+        sink.write_varint(bits);
 }
 
-template <typename S, typename M>
-[[nodiscard]] constexpr bool emit_scalar(S& sink, std::uint32_t number, const M& value) {
-    return sink.write_key(number, wire_type_of<M>()) && emit_value(sink, value);
+/// Writes a string or bytes field: key, length, then the items of `bytes`.
+template <typename B>
+constexpr void emit_delimited(writer& sink, std::uint32_t number, const B& bytes) {
+    sink.write_key(number, wire_type::LENGTH_DELIMITED);
+    sink.write_varint(bytes.size());
+    sink.write_bytes(bytes);
 }
 
-template <typename S, typename B>
-[[nodiscard]] constexpr bool emit_delimited(S& sink, std::uint32_t number, std::size_t size, const B& bytes) {
-    return sink.write_key(number, wire_type::LENGTH_DELIMITED) && sink.write_varint(size) && sink.write_bytes(bytes);
-}
-
-template <typename S, typename T>
-[[nodiscard]] constexpr bool emit_message(S& sink, const T& message);
+template <typename T>
+constexpr void emit_message(writer& sink, const T& message);
 
 /// Size of the values of a packed field, without key and length prefix.
 template <typename E, typename R>
@@ -103,79 +74,79 @@ template <typename E, typename R>
     if constexpr (width != 0) {
         return width * values.size();
     } else {
-        counter size;
+        writer size;
         for (const E& value : values)
-            static_cast<void>(emit_value(size, value));
+            emit_value(size, value);
         return size.size();
     }
 }
 
 /// Encoded size of the fields of `message`, without key and length prefix.
+/// A writer without a span only counts, so the size and the bytes come from
+/// one code path.
 template <typename T>
 [[nodiscard]] constexpr std::size_t message_size(const T& message) {
-    counter size;
-    static_cast<void>(emit_message(size, message));
+    writer size;
+    emit_message(size, message);
     return size.size();
 }
 
 /// Writes one field to `sink`. `always` is `true` for explicit presence: the
 /// field is written also when its value is the default value.
-template <typename S, typename M>
-[[nodiscard]] constexpr bool emit_field(S& sink, std::uint32_t number, const M& value, bool always) {
+template <typename M>
+constexpr void emit_field(writer& sink, std::uint32_t number, const M& value, bool always) {
     constexpr field_kind kind = kind_of<M>();
 
     if constexpr (kind == field_kind::SCALAR) {
         if (!always && scalar_bits(value) == 0)
-            return true;
-        return emit_scalar(sink, number, value);
+            return;
+
+        sink.write_key(number, wire_type_of<M>());
+        emit_value(sink, value);
     } else if constexpr (kind == field_kind::STRING) {
-        const std::string_view text = value;
-        if (!always && text.empty())
-            return true;
-        return emit_delimited(sink, number, text.size(), text);
+        if (always || !value.empty())
+            emit_delimited(sink, number, value);
     } else if constexpr (kind == field_kind::BYTES) {
         const std::span<const std::uint8_t> bytes(value.begin(), value.end());
-        if (!always && bytes.empty())
-            return true;
-        return emit_delimited(sink, number, bytes.size(), bytes);
+        if (always || !bytes.empty())
+            emit_delimited(sink, number, bytes);
     } else if constexpr (kind == field_kind::FIXED_BYTES) {
-        constexpr std::size_t length = std::tuple_size_v<M>;
-        if (!always && length == 0)
-            return true;
-        return emit_delimited(sink, number, length, std::span<const std::uint8_t>(value));
+        if (always || !value.empty())
+            emit_delimited(sink, number, value);
     } else if constexpr (kind == field_kind::MESSAGE) {
         constexpr std::optional<std::size_t> known = known_size<M>();
-        const std::size_t length = known ? *known : message_size(value);
+        sink.write_key(number, wire_type::LENGTH_DELIMITED);
 
-        if (!sink.write_key(number, wire_type::LENGTH_DELIMITED) || !sink.write_varint(length))
-            return false;
-        if constexpr (std::is_same_v<S, counter>)
-            return sink.add(length);
-        else
-            return emit_message(sink, value);
+        if (!sink.counts_only()) {
+            // The length prefix comes before the fields, so measure them first.
+            sink.write_varint(known ? *known : message_size(value));
+            emit_message(sink, value);
+        } else if constexpr (known) {
+            sink.write_varint(*known);
+            sink.advance(*known);
+        } else {
+            // No byte is written, so the order is free: count the fields, then
+            // the length prefix. This walks the message only one time.
+            const std::size_t start = sink.size();
+            emit_message(sink, value);
+            sink.advance(varint_size(sink.size() - start));
+        }
     } else if constexpr (kind == field_kind::OPTIONAL) {
-        if (!value)
-            return true;
-        return emit_field(sink, number, *value, true);
+        if (value)
+            emit_field(sink, number, *value, true);
     } else if constexpr (kind == field_kind::REPEATED) {
         using element = element_t<M>;
         if (value.size() == 0)
-            return true;
+            return;
 
         if constexpr (is_packed<element>()) {
-            if (!sink.write_key(number, wire_type::LENGTH_DELIMITED) || !sink.write_varint(packed_size<element>(value)))
-                return false;
-            for (const element& item : value) {
-                if (!emit_value(sink, item))
-                    return false;
-            }
-            return true;
+            sink.write_key(number, wire_type::LENGTH_DELIMITED);
+            sink.write_varint(packed_size<element>(value));
+            for (const element& item : value)
+                emit_value(sink, item);
         } else {
-            for (const element& item : value) {
-                if (!emit_field(sink, number, item, true))
-                    return false;
-            }
-            return true;
+            for (const element& item : value)
+                emit_field(sink, number, item, true);
         }
     } else {
         static_assert(false, "pb: encode: a oneof is written by emit_message");
@@ -183,20 +154,21 @@ template <typename S, typename M>
 }
 
 /// Writes the fields of `message` in ascending field number.
-template <typename S, typename T>
-[[nodiscard]] constexpr bool emit_message(S& sink, const T& message) {
+template <typename T>
+constexpr void emit_message(writer& sink, const T& message) {
     template for (constexpr field_info field : build_tag_table<T>()) {
+        // `field` has a type that exists only at compile time. Run-time code
+        // must use a copy of the number, or the function becomes `consteval`.
+        constexpr std::uint32_t number = field.number;
         using member = typename[:std::meta::type_of(field.member):];
+
         if constexpr (field.alternative == no_alternative) {
-            if (!emit_field<S, member>(sink, field.number, message.[:field.member:], false))
-                return false;
+            emit_field<member>(sink, number, message.[:field.member:], false);
         } else {
-            const auto* active = std::get_if<field.alternative>(&message.[:field.member:]);
-            if (active && !emit_field(sink, field.number, *active, true))
-                return false;
+            if (const auto* active = std::get_if<field.alternative>(&message.[:field.member:]))
+                emit_field(sink, number, *active, true);
         }
     }
-    return true;
 }
 
 } // namespace detail
@@ -215,7 +187,8 @@ template <typename T>
 template <typename T>
 [[nodiscard]] constexpr std::expected<std::size_t, error> encode(const T& message, std::span<std::uint8_t> out) {
     writer sink(out);
-    if (!detail::emit_message(sink, message))
+    detail::emit_message(sink, message);
+    if (!sink.fits())
         return std::unexpected(error::BUFFER_TOO_SMALL);
     return sink.size();
 }
