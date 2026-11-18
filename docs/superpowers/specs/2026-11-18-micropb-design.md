@@ -10,7 +10,7 @@ The first user is the engine on the host PC. The device side is freestanding, so
 
 * Encode and decode proto3 wire format from plain C++ structs, byte-identical to `protoc` output for the same message.
 * No heap, no exceptions, no RTTI in the core.
-* All of encode, decode and `encoded_size` are `constexpr`. Tests can run them in `static_assert`.
+* All of encode, decode and `encoded_size` are `constexpr`. Tests can run them in `static_assert`. Decoding a `std::string_view` field runs only at run time, because C++ does not allow a zero-copy character view of byte input in constant evaluation.
 * Decoding from a contiguous buffer is zero-copy for `std::string_view` and `std::span<const std::uint8_t>`.
 * Generate a `.proto` file from the C++ structs. The PC tools can use it with Google protobuf (Python, C#). This file is the contract between the two sides.
 

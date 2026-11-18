@@ -263,6 +263,8 @@ template <typename T>
 /// `msg` first. A `pb::span_buffer` keeps its storage. On error, `msg` holds the
 /// fields that were read before the error. A `std::string_view` or a
 /// `std::span` of `msg` points into `in`.
+/// Decoding a `std::string_view` field is not `constexpr`: C++ does not allow a
+/// zero-copy character view of byte input in constant evaluation.
 template <typename T>
 [[nodiscard]] constexpr std::expected<std::size_t, error> decode(std::span<const std::uint8_t> in, T& msg) {
     detail::reset_message(msg);
