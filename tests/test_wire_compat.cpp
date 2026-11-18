@@ -29,7 +29,7 @@ struct envelope_owned {
 };
 
 template <typename T, std::size_t N>
-constexpr bool round_trips(const std::array<std::uint8_t, N>& wire) {
+bool round_trips(const std::array<std::uint8_t, N>& wire) {
     T message{};
     const auto decoded = decode(std::span<const std::uint8_t>(wire), message);
     if (!decoded || *decoded != N)
@@ -41,7 +41,7 @@ constexpr bool round_trips(const std::array<std::uint8_t, N>& wire) {
 }
 
 template <typename T, std::size_t N>
-constexpr bool prefixes_are_safe(const std::array<std::uint8_t, N>& wire) {
+bool prefixes_are_safe(const std::array<std::uint8_t, N>& wire) {
     for (std::size_t length = 0; length < N; ++length) {
         T message{};
         const auto result = decode(std::span<const std::uint8_t>(wire).first(length), message);
@@ -51,12 +51,7 @@ constexpr bool prefixes_are_safe(const std::array<std::uint8_t, N>& wire) {
     return true;
 }
 
-// Decoding a `std::string_view` is not `constexpr` (R7): text_*, outer_set, lists_full and
-// envelope_long run at run time only.
-// The run-time sweep does not prove bounds safety. For those paths, bounds safety rests on the shared reader,
-// which the constant-evaluated sweep checks.
-
-constexpr bool test_round_trip_constexpr() {
+bool test_round_trip_constexpr() {
     return round_trips<scalars>(vectors::scalars_zero) && round_trips<scalars>(vectors::scalars_max) &&
            round_trips<scalars>(vectors::scalars_negative) &&
            round_trips<scalars>(vectors::scalars_enum_neg) && round_trips<outer>(vectors::outer_unset) &&
@@ -72,7 +67,7 @@ bool test_round_trip_runtime() {
            round_trips<envelope_owned>(vectors::envelope_long);
 }
 
-constexpr bool test_prefix_sweep_constexpr() {
+bool test_prefix_sweep_constexpr() {
     return prefixes_are_safe<scalars>(vectors::scalars_zero) && prefixes_are_safe<scalars>(vectors::scalars_max) &&
            prefixes_are_safe<scalars>(vectors::scalars_negative) &&
            prefixes_are_safe<scalars>(vectors::scalars_enum_neg) && prefixes_are_safe<outer>(vectors::outer_unset) &&
@@ -122,8 +117,6 @@ bool test_envelope_stream() {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static_assert(test_round_trip_constexpr());
-static_assert(test_prefix_sweep_constexpr());
 
 } // namespace
 

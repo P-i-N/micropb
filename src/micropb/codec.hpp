@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <expected>
 #include <meta>
 #include <optional>
 #include <span>
@@ -319,6 +321,250 @@ template <typename T>
 constexpr message_desc message_descriptor<T>::value{describe_fields<T>().data(),
                                                      static_cast<std::uint16_t>(describe_fields<T>().size())};
 
+////////////////////////////////////////////////////////////////////////////////
+// Part 2: interpreter. No function in this part is a template.
+
+/// Address of the member that is `offset` bytes into `object`.
+[[nodiscard]] inline const void* member_at(const void* object, std::size_t offset) {
+    return static_cast<const unsigned char*>(object) + offset;
+}
+
+[[nodiscard]] inline void* member_at(void* object, std::size_t offset) {
+    return static_cast<unsigned char*>(object) + offset;
+}
+
+[[nodiscard]] inline wire_type wire_of_scalar(std::uint8_t code) {
+    if ((code & scalar_fixed) == 0)
+        return wire_type::VARINT;
+    return (code & scalar_size_mask) == 2 ? wire_type::FIXED32 : wire_type::FIXED64;
+}
+
+/// Wire type of a field of this type. A `std::optional` has the wire type of
+/// its value. A repeated field has the wire type of one unpacked element.
+[[nodiscard]] inline wire_type wire_of(const value_desc& type) {
+    if (type.kind == field_kind::OPTIONAL)
+        return wire_of(*type.optional->value);
+    if (type.kind == field_kind::REPEATED)
+        return wire_of(*type.sequence->element);
+    if (type.kind == field_kind::SCALAR)
+        return wire_of_scalar(type.scalar);
+    return wire_type::LENGTH_DELIMITED;
+}
+
+/// The items of the sequence at `object`. The interpreter writes through the
+/// result only when it decodes.
+[[nodiscard]] inline sequence_view view_of(const sequence_desc& sequence, void* object) {
+    switch (sequence.storage) {
+    case sequence_storage::REPEATED: {
+        auto* count = static_cast<std::size_t*>(member_at(object, sequence.count_offset));
+        return {object, *count, sequence.capacity, count};
+    }
+    case sequence_storage::ARRAY: return {object, sequence.capacity, sequence.capacity, nullptr};
+    case sequence_storage::ACCESSOR: break;
+    }
+    return sequence.access(object);
+}
+
+/// Value of the scalar at `value` as the wire carries it: the varint value, or
+/// the bits of a fixed-width value. A negative integer sign-extends to 64 bits.
+/// An enum is `int32`, so an unsigned enum value of 2^31 or more is negative.
+[[nodiscard]] inline std::uint64_t load_scalar(const void* value, std::uint8_t code) {
+    std::uint64_t bits = 0;
+    switch (code & scalar_size_mask) {
+    case 0: {
+        std::uint8_t narrow;
+        std::memcpy(&narrow, value, sizeof narrow);
+        bits = narrow;
+        break;
+    }
+    case 1: {
+        std::uint16_t narrow;
+        std::memcpy(&narrow, value, sizeof narrow);
+        bits = narrow;
+        break;
+    }
+    case 2: {
+        std::uint32_t narrow;
+        std::memcpy(&narrow, value, sizeof narrow);
+        bits = narrow;
+        break;
+    }
+    default: std::memcpy(&bits, value, sizeof bits);
+    }
+
+    if (code & scalar_signed) {
+        const unsigned shift = 64 - (8u << (code & scalar_size_mask));
+        bits = static_cast<std::uint64_t>(static_cast<std::int64_t>(bits << shift) >> shift);
+    }
+    if (code & scalar_enum)
+        bits = static_cast<std::uint64_t>(static_cast<std::int64_t>(static_cast<std::int32_t>(bits)));
+    if (code & scalar_zigzag)
+        bits = zigzag_encode(static_cast<std::int64_t>(bits));
+    return bits;
+}
+
+/// Writes the value of a scalar without a key.
+inline void emit_scalar(writer& sink, std::uint8_t code, std::uint64_t bits) {
+    switch (wire_of_scalar(code)) {
+    case wire_type::FIXED32: sink.write_fixed32(static_cast<std::uint32_t>(bits)); break;
+    case wire_type::FIXED64: sink.write_fixed64(bits); break;
+    default: sink.write_varint(bits);
+    }
+}
+
+/// Writes a string or bytes field. `always` is `true` for explicit presence.
+inline void emit_bytes(writer& sink, std::uint32_t number, std::span<const std::uint8_t> bytes, bool always) {
+    if (!always && bytes.empty())
+        return;
+
+    sink.write_key(number, wire_type::LENGTH_DELIMITED);
+    sink.write_varint(bytes.size());
+    sink.write_bytes(bytes);
+}
+
+inline void emit_message(writer& sink, const message_desc& message, const void* object);
+
+/// Encoded size of the fields of the message at `object`, without key and
+/// length prefix. A writer without a span only counts, so the size and the
+/// bytes come from one code path.
+[[nodiscard]] inline std::size_t encoded_size(const message_desc& message, const void* object) {
+    writer sink;
+    emit_message(sink, message, object);
+    return sink.size();
+}
+
+/// Writes one field. `always` is `true` for explicit presence: the field is
+/// written also when its value is the default value.
+inline void emit_value(writer& sink, std::uint32_t number, const value_desc& type, const void* value, bool always) {
+    switch (type.kind) {
+    case field_kind::SCALAR: {
+        // Zero bits mean the default value. `-0.0` has a sign bit, so it is written.
+        const std::uint64_t bits = load_scalar(value, type.scalar);
+        if (always || bits != 0) {
+            sink.write_key(number, wire_of_scalar(type.scalar));
+            emit_scalar(sink, type.scalar, bits);
+        }
+        break;
+    }
+    case field_kind::STRING: {
+        std::string_view text;
+        std::memcpy(static_cast<void*>(&text), value, sizeof text);
+        emit_bytes(sink, number, {reinterpret_cast<const std::uint8_t*>(text.data()), text.size()}, always);
+        break;
+    }
+    case field_kind::BYTES: {
+        std::span<const std::uint8_t> bytes;
+        if (type.sequence == nullptr) {
+            std::memcpy(static_cast<void*>(&bytes), value, sizeof bytes);
+        } else {
+            const sequence_view items = view_of(*type.sequence, const_cast<void*>(value));
+            bytes = {static_cast<const std::uint8_t*>(items.data), items.count};
+        }
+        emit_bytes(sink, number, bytes, always);
+        break;
+    }
+    case field_kind::FIXED_BYTES:
+        // The length is never 0 here, except for an array of length 0.
+        emit_bytes(sink, number, {static_cast<const std::uint8_t*>(value), type.size}, always);
+        break;
+    case field_kind::MESSAGE: {
+        sink.write_key(number, wire_type::LENGTH_DELIMITED);
+        if (!sink.counts_only()) {
+            // The length prefix comes before the fields, so measure them first.
+            sink.write_varint(encoded_size(*type.message, value));
+            emit_message(sink, *type.message, value);
+        } else {
+            // No byte is written, so the order is free: count the fields, then
+            // the length prefix. This walks the message only one time.
+            const std::size_t start = sink.size();
+            emit_message(sink, *type.message, value);
+            sink.advance(varint_size(sink.size() - start));
+        }
+        break;
+    }
+    case field_kind::OPTIONAL: {
+        const optional_desc& optional = *type.optional;
+        if (const void* held = optional.access(const_cast<void*>(value), optional_op::GET))
+            emit_value(sink, number, *optional.value, held, true);
+        break;
+    }
+    case field_kind::REPEATED: {
+        const sequence_desc& sequence = *type.sequence;
+        const value_desc& element = *sequence.element;
+        const sequence_view items = view_of(sequence, const_cast<void*>(value));
+        if (items.count == 0)
+            break;
+
+        if (element.kind != field_kind::SCALAR) {
+            for (std::size_t i = 0; i < items.count; ++i)
+                emit_value(sink, number, element, member_at(items.data, i * sequence.element_size), true);
+            break;
+        }
+
+        // Scalars are one packed field: measure the values, then write them.
+        writer measure;
+        if (element.scalar & scalar_fixed) {
+            measure.advance(items.count * sequence.element_size);
+        } else {
+            for (std::size_t i = 0; i < items.count; ++i)
+                measure.write_varint(load_scalar(member_at(items.data, i * sequence.element_size), element.scalar));
+        }
+
+        sink.write_key(number, wire_type::LENGTH_DELIMITED);
+        sink.write_varint(measure.size());
+        for (std::size_t i = 0; i < items.count; ++i) {
+            const void* item = member_at(items.data, i * sequence.element_size);
+            emit_scalar(sink, element.scalar, load_scalar(item, element.scalar));
+        }
+        break;
+    }
+    case field_kind::ONEOF:
+        // `emit_message` writes the active alternative of a oneof.
+        break;
+    }
+}
+
+/// Writes the fields of the message at `object` in ascending field number.
+inline void emit_message(writer& sink, const message_desc& message, const void* object) {
+    for (std::size_t i = 0; i < message.count; ++i) {
+        const field_desc& field = message.fields[i];
+        const void* member = member_at(object, field.offset);
+        if (field.alternative == 0) {
+            emit_value(sink, field.number, *field.type, member, false);
+            continue;
+        }
+
+        const variant_desc& variant = *field.type->variant;
+        if (const void* active = variant.access(const_cast<void*>(member), field.alternative, false))
+            emit_value(sink, field.number, *variant.alternatives[field.alternative], active, true);
+    }
+}
+
+[[nodiscard]] inline std::expected<std::size_t, error> encode(const message_desc& message, const void* object,
+                                                              std::span<std::uint8_t> out) {
+    writer sink(out);
+    emit_message(sink, message, object);
+    if (!sink.fits())
+        return std::unexpected(error::BUFFER_TOO_SMALL);
+    return sink.size();
+}
+
 } // namespace detail
+
+////////////////////////////////////////////////////////////////////////////////
+
+/// Size in bytes of the encoding of `msg`.
+template <typename T>
+[[nodiscard]] std::size_t encoded_size(const T& msg) {
+    return detail::encoded_size(detail::message_descriptor<T>::value, &msg);
+}
+
+/// Encodes `msg` into `out` in proto3 wire format and returns the number of
+/// bytes written. Does not write past `out`. When `out` is too small, returns
+/// `error::BUFFER_TOO_SMALL`; the bytes of `out` that it wrote are not valid.
+template <typename T>
+[[nodiscard]] std::expected<std::size_t, error> encode(const T& msg, std::span<std::uint8_t> out) {
+    return detail::encode(detail::message_descriptor<T>::value, &msg, out);
+}
 
 } // namespace pb

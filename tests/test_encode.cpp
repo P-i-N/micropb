@@ -7,9 +7,10 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 
-#include <micropb/encode.hpp>
+#include <micropb/codec.hpp>
 
 using namespace pb;
 
@@ -22,7 +23,7 @@ constexpr std::uint8_t guard = 0xAA;
 
 /// `encode` writes exactly `expected`, and `encoded_size` agrees.
 template <typename T, std::size_t N>
-constexpr bool matches(const T& value, const std::array<std::uint8_t, N>& expected) {
+bool matches(const T& value, const std::array<std::uint8_t, N>& expected) {
     std::array<std::uint8_t, N + 1> buffer{};
     buffer.fill(guard);
 
@@ -44,41 +45,41 @@ struct lists_owned {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-constexpr bool test_encode_scalars_zero() { return matches(scalars{}, vectors::scalars_zero); }
+bool test_encode_scalars_zero() { return matches(scalars{}, vectors::scalars_zero); }
 
-constexpr bool test_encode_scalars_max() { return matches(scalars_max(), vectors::scalars_max); }
+bool test_encode_scalars_max() { return matches(scalars_max(), vectors::scalars_max); }
 
-constexpr bool test_encode_scalars_negative() { return matches(scalars_negative(), vectors::scalars_negative); }
+bool test_encode_scalars_negative() { return matches(scalars_negative(), vectors::scalars_negative); }
 
-constexpr bool test_encode_scalars_enum_neg() { return matches(scalars_enum_neg(), vectors::scalars_enum_neg); }
+bool test_encode_scalars_enum_neg() { return matches(scalars_enum_neg(), vectors::scalars_enum_neg); }
 
-constexpr bool test_encode_text_short() { return matches(text{"hi", short_data, mac}, vectors::text_short); }
+bool test_encode_text_short() { return matches(text{"hi", short_data, mac}, vectors::text_short); }
 
-constexpr bool test_encode_text_long() { return matches(text_long(), vectors::text_long); }
+bool test_encode_text_long() { return matches(text_long(), vectors::text_long); }
 
-constexpr bool test_encode_outer_set() {
+bool test_encode_outer_set() {
     return matches(outer{.child = {1, {}}, .maybe = 0, .maybe_child = inner{}, .gap = 3}, vectors::outer_set);
 }
 
-constexpr bool test_encode_outer_unset() { return matches(outer{}, vectors::outer_unset); }
+bool test_encode_outer_unset() { return matches(outer{}, vectors::outer_unset); }
 
-constexpr bool test_encode_lists_empty() { return matches(lists{}, vectors::lists_empty); }
+bool test_encode_lists_empty() { return matches(lists{}, vectors::lists_empty); }
 
-constexpr bool test_encode_lists_full() { return matches(lists_full(), vectors::lists_full); }
+bool test_encode_lists_full() { return matches(lists_full(), vectors::lists_full); }
 
-constexpr bool test_encode_pose_zero() { return matches(pose{}, vectors::pose_zero); }
+bool test_encode_pose_zero() { return matches(pose{}, vectors::pose_zero); }
 
-constexpr bool test_encode_envelope_none() { return matches(envelope{1, {}}, vectors::envelope_none); }
+bool test_encode_envelope_none() { return matches(envelope{1, {}}, vectors::envelope_none); }
 
-constexpr bool test_encode_envelope_pose() {
+bool test_encode_envelope_pose() {
     return matches(envelope{2, pose{{1, 2, 3}, {0, 0, 0, 1}}}, vectors::envelope_pose);
 }
 
-constexpr bool test_encode_envelope_ping() { return matches(envelope{3, ping{}}, vectors::envelope_ping); }
+bool test_encode_envelope_ping() { return matches(envelope{3, ping{}}, vectors::envelope_ping); }
 
-constexpr bool test_encode_envelope_long() { return matches(envelope{4, text_long()}, vectors::envelope_long); }
+bool test_encode_envelope_long() { return matches(envelope{4, text_long()}, vectors::envelope_long); }
 
-constexpr bool test_encode_spans() {
+bool test_encode_spans() {
     constexpr std::array<std::int32_t, 3> three{1, -2, 3};
     lists_owned owned;
     for (const std::int32_t item : three)
@@ -109,13 +110,7 @@ constexpr bool test_encode_spans() {
            std::equal(c.begin(), c.begin() + *size_c, d.begin());
 }
 
-constexpr bool test_known_size_used() {
-    constexpr std::size_t known = encoded_size(pose{});
-    static_assert(known == 32);
-    return known == *pb::known_size<pose>() && known == vectors::pose_zero.size() && !pb::known_size<envelope>();
-}
-
-constexpr bool test_encode_too_small() {
+bool test_encode_too_small() {
     const text value = text_long();
     const std::size_t size = encoded_size(value);
 
@@ -140,38 +135,93 @@ struct unsigned_enum {
 };
 
 /// An enum is `int32` on the wire: an unsigned value of 2^31 or more is a negative `int32`.
-constexpr bool test_encode_unsigned_enum() {
+bool test_encode_unsigned_enum() {
     constexpr std::array<std::uint8_t, 11> expected{0x08, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01};
     return matches(unsigned_enum{wide_unsigned::MAX}, expected);
 }
 
-constexpr bool test_encode_order() {
+bool test_encode_order() {
     constexpr std::array<std::uint8_t, 4> expected{0x08, 0x01, 0x10, 0x01};
     return matches(back{.a = 1, .b = 1}, expected);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static_assert(test_encode_scalars_zero());
-static_assert(test_encode_scalars_max());
-static_assert(test_encode_scalars_negative());
-static_assert(test_encode_scalars_enum_neg());
-static_assert(test_encode_text_short());
-static_assert(test_encode_text_long());
-static_assert(test_encode_outer_set());
-static_assert(test_encode_outer_unset());
-static_assert(test_encode_lists_empty());
-static_assert(test_encode_lists_full());
-static_assert(test_encode_pose_zero());
-static_assert(test_encode_envelope_none());
-static_assert(test_encode_envelope_pose());
-static_assert(test_encode_envelope_ping());
-static_assert(test_encode_envelope_long());
-static_assert(test_encode_spans());
-static_assert(test_known_size_used());
-static_assert(test_encode_too_small());
-static_assert(test_encode_order());
-static_assert(test_encode_unsigned_enum());
+
+struct nothing {};
+
+struct holds_nothing {
+    nothing n;
+    std::uint32_t x;
+};
+
+/// A message type without fields has a field table of length 0.
+bool test_encode_empty_message() {
+    constexpr std::array<std::uint8_t, 4> expected{0x0a, 0x00, 0x10, 0x01};
+    return matches(holds_nothing{{}, 1}, expected) && encoded_size(nothing{}) == 0;
+}
+
+struct level3 {
+    std::string_view s;
+};
+
+struct level2 {
+    level3 c;
+};
+
+struct level1 {
+    level2 c;
+};
+
+/// Three nested messages, each with a length prefix of two bytes.
+bool test_encode_deep() {
+    const std::string text(200, 'x');
+    std::array<std::uint8_t, 256> buffer{};
+    const auto size = encode(level1{{{text}}}, buffer);
+    constexpr std::array<std::uint8_t, 10> head{0x0a, 0xce, 0x01, 0x0a, 0xcb, 0x01, 0x0a, 0xc8, 0x01, 'x'};
+    return size && *size == 209 && encoded_size(level1{{{text}}}) == 209 &&
+           std::equal(head.begin(), head.end(), buffer.begin()) && buffer[208] == 'x';
+}
+
+/// `encode` into each buffer that is too short gives an error and does not write past the buffer.
+template <typename T>
+bool each_short_buffer_fails(const T& value) {
+    const std::size_t size = encoded_size(value);
+    for (std::size_t length = 0; length < size; ++length) {
+        std::array<std::uint8_t, 512> buffer{};
+        buffer.fill(guard);
+        const auto result = encode(value, std::span(buffer).first(length));
+        if (result || result.error() != error::BUFFER_TOO_SMALL)
+            return false;
+        if (!std::all_of(buffer.begin() + length, buffer.end(), [](std::uint8_t b) { return b == guard; }))
+            return false;
+    }
+    return true;
+}
+
+bool test_encode_each_short_buffer() {
+    return each_short_buffer_fails(text_long()) && each_short_buffer_fails(envelope{4, text_long()}) &&
+           each_short_buffer_fails(lists_full());
+}
+
+struct buffers {
+    pb::span_buffer<std::int32_t> ints;
+    pb::span_buffer<std::uint8_t> bytes;
+};
+
+bool test_encode_span_buffer() {
+    std::array<std::int32_t, 4> int_storage{};
+    std::array<std::uint8_t, 4> byte_storage{};
+    buffers value{pb::span_buffer<std::int32_t>(int_storage), pb::span_buffer<std::uint8_t>(byte_storage)};
+    for (std::int32_t i : {1, -2, 3})
+        static_cast<void>(value.ints.push_back(i));
+    for (std::uint8_t b : {7, 8, 9})
+        static_cast<void>(value.bytes.push_back(b));
+
+    constexpr std::array<std::uint8_t, 19> expected{0x0a, 0x0c, 0x01, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                                                    0xff, 0xff, 0x01, 0x03, 0x12, 0x03, 7,    8,    9};
+    return matches(value, expected);
+}
 
 } // namespace
 
@@ -182,7 +232,8 @@ int main() {
                     test_encode_outer_unset() && test_encode_lists_empty() && test_encode_lists_full() &&
                     test_encode_pose_zero() && test_encode_envelope_none() && test_encode_envelope_pose() &&
                     test_encode_envelope_ping() && test_encode_envelope_long() && test_encode_spans() &&
-                    test_known_size_used() && test_encode_too_small() && test_encode_order() &&
-                    test_encode_unsigned_enum();
+                    test_encode_too_small() && test_encode_order() &&
+                    test_encode_unsigned_enum() && test_encode_empty_message() && test_encode_deep() &&
+                    test_encode_each_short_buffer() && test_encode_span_buffer();
     return ok ? 0 : 1;
 }
