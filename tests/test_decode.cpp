@@ -2,8 +2,6 @@
 #include "vectors/messages.hpp"
 #include "vectors/vectors.hpp"
 
-#include <micropb/decode.hpp>
-
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -13,6 +11,8 @@
 #include <span>
 #include <string_view>
 #include <variant>
+
+#include <micropb/decode.hpp>
 
 using namespace pb;
 

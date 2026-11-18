@@ -1,9 +1,9 @@
-#include <micropb/wire.hpp>
-
 #include <array>
 #include <cstdint>
 #include <limits>
 #include <string_view>
+
+#include <micropb/wire.hpp>
 
 using namespace pb;
 

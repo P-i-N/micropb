@@ -1,7 +1,7 @@
-#include <micropb/types.hpp>
-
 #include <array>
 #include <cstdint>
+
+#include <micropb/types.hpp>
 
 using namespace pb;
 

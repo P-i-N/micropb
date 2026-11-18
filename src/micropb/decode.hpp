@@ -1,9 +1,5 @@
 #pragma once
 
-#include <micropb/meta_schema.hpp>
-#include <micropb/types.hpp>
-#include <micropb/wire.hpp>
-
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -16,6 +12,10 @@
 #include <string_view>
 #include <type_traits>
 #include <variant>
+
+#include <micropb/meta_schema.hpp>
+#include <micropb/types.hpp>
+#include <micropb/wire.hpp>
 
 namespace pb {
 

@@ -2,14 +2,14 @@
 #include "vectors/messages.hpp"
 #include "vectors/vectors.hpp"
 
-#include <micropb/encode.hpp>
-
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
 #include <string_view>
+
+#include <micropb/encode.hpp>
 
 using namespace pb;
 

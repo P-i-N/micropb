@@ -1,6 +1,6 @@
-#include <micropb/meta_schema.hpp>
-
 #include <variant>
+
+#include <micropb/meta_schema.hpp>
 
 struct msg {
     std::monostate m;

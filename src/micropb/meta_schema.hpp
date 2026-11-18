@@ -1,8 +1,5 @@
 #pragma once
 
-#include <micropb/types.hpp>
-#include <micropb/wire.hpp>
-
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -14,6 +11,9 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+
+#include <micropb/types.hpp>
+#include <micropb/wire.hpp>
 
 namespace pb {
 

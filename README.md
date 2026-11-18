@@ -36,12 +36,12 @@ The output is the same on each run. It has no timestamp and no absolute path. Th
 micropb encodes and decodes proto3 messages from plain C++ structs. It uses reflection, so the structs need no macros or generated code.
 
 ```cpp
-#include <micropb/micropb.hpp>
-
 #include <array>
 #include <cstdint>
 #include <span>
 #include <variant>
+
+#include <micropb/micropb.hpp>
 
 struct pose {
     pb::repeated<float, 3> pos; // std::array<float, 3> also works, for encode only

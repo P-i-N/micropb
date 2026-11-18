@@ -1,7 +1,7 @@
-#include <micropb/meta_schema.hpp>
-
 #include <cstdint>
 #include <variant>
+
+#include <micropb/meta_schema.hpp>
 
 struct msg {
     std::variant<std::monostate, pb::span_buffer<std::int32_t>> v;

@@ -1,6 +1,6 @@
-#include <micropb/meta_schema.hpp>
-
 #include <cstdint>
+
+#include <micropb/meta_schema.hpp>
 
 struct msg {
     msg() {}

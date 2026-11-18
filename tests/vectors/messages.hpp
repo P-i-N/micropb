@@ -1,13 +1,13 @@
 #pragma once
 
-#include <micropb/types.hpp>
-
 #include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
 #include <string_view>
 #include <variant>
+
+#include <micropb/types.hpp>
 
 /// C++ mirrors of `vectors.proto`. The encode, decode and compatibility tests share them.
 namespace messages {

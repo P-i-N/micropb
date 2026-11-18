@@ -1,8 +1,8 @@
-#include <micropb/meta_schema.hpp>
-
 #include <cstdint>
 #include <optional>
 #include <variant>
+
+#include <micropb/meta_schema.hpp>
 
 struct msg {
     std::optional<std::variant<std::monostate, std::int32_t>> v;

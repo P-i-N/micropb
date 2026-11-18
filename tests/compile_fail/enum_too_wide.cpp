@@ -1,6 +1,6 @@
-#include <micropb/meta_schema.hpp>
-
 #include <cstdint>
+
+#include <micropb/meta_schema.hpp>
 
 enum class wide : std::int64_t { ZERO };
 

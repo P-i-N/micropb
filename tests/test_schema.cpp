@@ -1,11 +1,11 @@
-#include <micropb/meta_schema.hpp>
-
 #include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
 #include <string_view>
 #include <variant>
+
+#include <micropb/meta_schema.hpp>
 
 using namespace pb;
 

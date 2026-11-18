@@ -2,13 +2,13 @@
 #include "vectors/messages.hpp"
 #include "vectors/vectors.hpp"
 
-#include <micropb/micropb.hpp>
-
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <span>
 #include <variant>
+
+#include <micropb/micropb.hpp>
 
 using namespace pb;
 

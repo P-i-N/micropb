@@ -1,12 +1,12 @@
 #pragma once
 
-#include <micropb/types.hpp>
-
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <span>
 #include <string_view>
+
+#include <micropb/types.hpp>
 
 namespace pb {
 

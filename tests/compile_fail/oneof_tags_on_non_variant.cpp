@@ -1,6 +1,6 @@
-#include <micropb/meta_schema.hpp>
-
 #include <cstdint>
+
+#include <micropb/meta_schema.hpp>
 
 struct msg {
     [[=pb::oneof_tags<3>{}]] std::int32_t a;

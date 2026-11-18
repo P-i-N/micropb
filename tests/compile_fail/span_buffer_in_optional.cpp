@@ -1,7 +1,7 @@
-#include <micropb/meta_schema.hpp>
-
 #include <cstdint>
 #include <optional>
+
+#include <micropb/meta_schema.hpp>
 
 struct inner {
     pb::span_buffer<std::int32_t> values;
