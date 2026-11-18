@@ -88,6 +88,8 @@ consteval bool is_sequence() {
 template <typename T>
 [[nodiscard]] consteval field_kind kind_of() {
     if constexpr (detail::is_scalar<T>()) {
+        if constexpr (std::is_enum_v<T>)
+            static_assert(sizeof(T) <= 4, "pb: enum_too_wide: a proto3 enum is int32, so the enum must fit in 32 bits");
         return field_kind::SCALAR;
     } else if constexpr (std::is_same_v<T, std::string_view>) {
         return field_kind::STRING;

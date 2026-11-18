@@ -56,7 +56,8 @@ constexpr bool prefixes_are_safe(const std::array<std::uint8_t, N>& wire) {
 
 constexpr bool test_round_trip_constexpr() {
     return round_trips<scalars>(vectors::scalars_zero) && round_trips<scalars>(vectors::scalars_max) &&
-           round_trips<scalars>(vectors::scalars_negative) && round_trips<outer>(vectors::outer_unset) &&
+           round_trips<scalars>(vectors::scalars_negative) &&
+           round_trips<scalars>(vectors::scalars_enum_neg) && round_trips<outer>(vectors::outer_unset) &&
            round_trips<lists>(vectors::lists_empty) && round_trips<pose_owned>(vectors::pose_zero) &&
            round_trips<envelope_owned>(vectors::envelope_none) &&
            round_trips<envelope_owned>(vectors::envelope_pose) &&
@@ -71,7 +72,8 @@ bool test_round_trip_runtime() {
 
 constexpr bool test_prefix_sweep_constexpr() {
     return prefixes_are_safe<scalars>(vectors::scalars_zero) && prefixes_are_safe<scalars>(vectors::scalars_max) &&
-           prefixes_are_safe<scalars>(vectors::scalars_negative) && prefixes_are_safe<outer>(vectors::outer_unset) &&
+           prefixes_are_safe<scalars>(vectors::scalars_negative) &&
+           prefixes_are_safe<scalars>(vectors::scalars_enum_neg) && prefixes_are_safe<outer>(vectors::outer_unset) &&
            prefixes_are_safe<lists>(vectors::lists_empty) && prefixes_are_safe<pose_owned>(vectors::pose_zero) &&
            prefixes_are_safe<envelope_owned>(vectors::envelope_none) &&
            prefixes_are_safe<envelope_owned>(vectors::envelope_pose) &&

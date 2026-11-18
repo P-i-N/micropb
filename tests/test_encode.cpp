@@ -50,6 +50,8 @@ constexpr bool test_encode_scalars_max() { return matches(scalars_max(), vectors
 
 constexpr bool test_encode_scalars_negative() { return matches(scalars_negative(), vectors::scalars_negative); }
 
+constexpr bool test_encode_scalars_enum_neg() { return matches(scalars_enum_neg(), vectors::scalars_enum_neg); }
+
 constexpr bool test_encode_text_short() { return matches(text{"hi", short_data, mac}, vectors::text_short); }
 
 constexpr bool test_encode_text_long() { return matches(text_long(), vectors::text_long); }
@@ -131,6 +133,18 @@ struct back {
     [[= pb::tag{1}]] std::int32_t b;
 };
 
+enum class wide_unsigned : std::uint32_t { ZERO, MAX = 0xFFFFFFFF };
+
+struct unsigned_enum {
+    wide_unsigned e;
+};
+
+/// An enum is `int32` on the wire: an unsigned value of 2^31 or more is a negative `int32`.
+constexpr bool test_encode_unsigned_enum() {
+    constexpr std::array<std::uint8_t, 11> expected{0x08, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01};
+    return matches(unsigned_enum{wide_unsigned::MAX}, expected);
+}
+
 constexpr bool test_encode_order() {
     constexpr std::array<std::uint8_t, 4> expected{0x08, 0x01, 0x10, 0x01};
     return matches(back{.a = 1, .b = 1}, expected);
@@ -141,6 +155,7 @@ constexpr bool test_encode_order() {
 static_assert(test_encode_scalars_zero());
 static_assert(test_encode_scalars_max());
 static_assert(test_encode_scalars_negative());
+static_assert(test_encode_scalars_enum_neg());
 static_assert(test_encode_text_short());
 static_assert(test_encode_text_long());
 static_assert(test_encode_outer_set());
@@ -156,15 +171,18 @@ static_assert(test_encode_spans());
 static_assert(test_known_size_used());
 static_assert(test_encode_too_small());
 static_assert(test_encode_order());
+static_assert(test_encode_unsigned_enum());
 
 } // namespace
 
 int main() {
     const bool ok = test_encode_scalars_zero() && test_encode_scalars_max() && test_encode_scalars_negative() &&
-                    test_encode_text_short() && test_encode_text_long() && test_encode_outer_set() &&
+                    test_encode_scalars_enum_neg() && test_encode_text_short() && test_encode_text_long() &&
+                    test_encode_outer_set() &&
                     test_encode_outer_unset() && test_encode_lists_empty() && test_encode_lists_full() &&
                     test_encode_pose_zero() && test_encode_envelope_none() && test_encode_envelope_pose() &&
                     test_encode_envelope_ping() && test_encode_envelope_long() && test_encode_spans() &&
-                    test_known_size_used() && test_encode_too_small() && test_encode_order();
+                    test_known_size_used() && test_encode_too_small() && test_encode_order() &&
+                    test_encode_unsigned_enum();
     return ok ? 0 : 1;
 }

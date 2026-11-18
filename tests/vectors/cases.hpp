@@ -47,6 +47,12 @@ constexpr scalars scalars_negative() {
     return v;
 }
 
+constexpr scalars scalars_enum_neg() {
+    scalars v{};
+    v.c = color::NEG;
+    return v;
+}
+
 constexpr std::array<std::uint8_t, 6> mac{1, 2, 3, 4, 5, 6};
 constexpr std::array<std::uint8_t, 3> short_data{1, 2, 3};
 

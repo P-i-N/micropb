@@ -12,7 +12,7 @@
 /// C++ mirrors of `vectors.proto`. The encode, decode and compatibility tests share them.
 namespace messages {
 
-enum class color : std::int32_t { NONE, RED, BLUE };
+enum class color : std::int32_t { NONE, RED, BLUE, NEG = -1 };
 
 struct scalars {
     std::int32_t i32;

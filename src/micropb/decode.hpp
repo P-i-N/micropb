@@ -47,7 +47,7 @@ constexpr void reset_value(M& value) {
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Scalar from the value that the wire carries. A value that is too wide for
-/// `M` loses its upper bits, as in the Google C++ runtime.
+/// `M` loses its upper bits, as in the Google C++ runtime. An enum is `int32`.
 template <typename M>
 [[nodiscard]] constexpr M scalar_from_bits(std::uint64_t bits) {
     if constexpr (std::is_same_v<M, sint32>)
@@ -63,7 +63,7 @@ template <typename M>
     else if constexpr (std::is_same_v<M, bool>)
         return bits != 0;
     else if constexpr (std::is_enum_v<M>)
-        return static_cast<M>(static_cast<std::underlying_type_t<M>>(bits));
+        return static_cast<M>(static_cast<std::int32_t>(bits));
     else
         return static_cast<M>(bits);
 }

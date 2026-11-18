@@ -84,6 +84,12 @@ struct narrow {
     sint32 s32;
 };
 
+enum class small : std::uint8_t { ZERO };
+
+struct small_enum {
+    small e;
+};
+
 struct mac_only {
     std::array<std::uint8_t, 6> mac;
 };
@@ -149,6 +155,8 @@ constexpr bool test_decode_scalars_zero() { return decodes(vectors::scalars_zero
 constexpr bool test_decode_scalars_max() { return decodes(vectors::scalars_max, scalars_max()); }
 
 constexpr bool test_decode_scalars_negative() { return decodes(vectors::scalars_negative, scalars_negative()); }
+
+constexpr bool test_decode_scalars_enum_neg() { return decodes(vectors::scalars_enum_neg, scalars_enum_neg()); }
 
 bool test_decode_text_short() { return decodes(vectors::text_short, text{"hi", short_data, mac}); }
 
@@ -231,6 +239,14 @@ constexpr bool test_narrowing() {
     const bool ok_e = decode(varint_field(0x28, (std::uint64_t{3} << 32) + 3).span(), e).has_value();
     return ok_a && a.i32 == 7 && ok_b && b.i8 == 44 && ok_c && c.u16 == 4464 && ok_d && d.flag && ok_e &&
            e.s32.value == -2;
+}
+
+/// An enum is `int32` on the wire. The decoder truncates the varint to `std::int32_t`, then converts it to the
+/// enum. 300 becomes 44 in an enum with `std::uint8_t` as its underlying type.
+constexpr bool test_narrow_enum() {
+    small_enum message{};
+    const bool ok = decode(varint_field(0x08, 300).span(), message).has_value();
+    return ok && static_cast<std::uint8_t>(message.e) == 44;
 }
 
 constexpr bool test_fixed_bytes() {
@@ -430,6 +446,7 @@ constexpr bool test_oneof_wrong_wire_type() {
 static_assert(test_decode_scalars_zero());
 static_assert(test_decode_scalars_max());
 static_assert(test_decode_scalars_negative());
+static_assert(test_decode_scalars_enum_neg());
 static_assert(test_decode_outer_unset());
 static_assert(test_reset());
 static_assert(test_last_wins());
@@ -437,6 +454,7 @@ static_assert(test_unknown_skip());
 static_assert(test_wrong_wire_type());
 static_assert(test_wrong_wire_type_optional());
 static_assert(test_narrowing());
+static_assert(test_narrow_enum());
 static_assert(test_fixed_bytes());
 static_assert(test_repeated_bytes());
 static_assert(test_span_buffer());
@@ -463,10 +481,12 @@ static_assert(test_oneof_wrong_wire_type());
 
 int main() {
     const bool ok = test_decode_scalars_zero() && test_decode_scalars_max() && test_decode_scalars_negative() &&
-                    test_decode_text_short() && test_decode_text_long() && test_decode_outer_set() &&
+                    test_decode_scalars_enum_neg() && test_decode_text_short() && test_decode_text_long() &&
+                    test_decode_outer_set() &&
                     test_decode_outer_unset() && test_zero_copy() && test_reset() && test_last_wins() &&
                     test_merge() && test_unknown_skip() && test_wrong_wire_type() &&
-                    test_wrong_wire_type_optional() && test_narrowing() && test_fixed_bytes() &&
+                    test_wrong_wire_type_optional() && test_narrowing() && test_narrow_enum() &&
+                    test_fixed_bytes() &&
                     test_repeated_bytes() && test_span_buffer() && test_span_buffer_nested() && test_errors() &&
                     test_decode_lists_empty() &&
                     test_decode_pose_zero() &&

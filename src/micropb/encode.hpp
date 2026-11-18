@@ -50,7 +50,8 @@ private:
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Value of a scalar as the wire carries it: the varint value, or the bits of a
-/// fixed-width value. A negative integer sign-extends to 64 bits. Zero bits
+/// fixed-width value. A negative integer sign-extends to 64 bits. An enum is
+/// `int32`, so an unsigned enum value of 2^31 or more is negative. Zero bits
 /// mean the default value, also for `-0.0`, which has a sign bit.
 template <typename M>
 [[nodiscard]] constexpr std::uint64_t scalar_bits(const M& value) {
@@ -62,6 +63,8 @@ template <typename M>
         return std::bit_cast<std::uint32_t>(value);
     else if constexpr (std::is_same_v<M, double>)
         return std::bit_cast<std::uint64_t>(value);
+    else if constexpr (std::is_enum_v<M>)
+        return static_cast<std::uint64_t>(static_cast<std::int64_t>(static_cast<std::int32_t>(value)));
     else
         return static_cast<std::uint64_t>(value);
 }

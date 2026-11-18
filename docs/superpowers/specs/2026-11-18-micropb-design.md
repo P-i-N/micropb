@@ -102,7 +102,7 @@ template <typename T>
 
 `pb::sint32` and the other wire wrappers are zero-cost wrappers with implicit conversion to and from the underlying integer.
 
-Negative `int32_t` values encode as 10-byte varints, as `protoc` does. The 8- and 16-bit types encode as their 32-bit proto type. The decoder truncates wider values to the target width, by the same rule as for `int64` -> `int32`.
+Negative `int32_t` values encode as 10-byte varints, as `protoc` does. An enum is `int32` on the wire: the encoder converts the value to `std::int32_t`, so a negative value (also an unsigned value of 2^31 or more) is a 10-byte varint. The decoder truncates the varint to `std::int32_t` and converts it to the enum. An enum type wider than 32 bits is a compile error. The 8- and 16-bit types encode as their 32-bit proto type. The decoder truncates wider values to the target width, by the same rule as for `int64` -> `int32`.
 
 `std::array<uint8_t, N>` is `bytes` with a fixed length. The encoder omits it only when `N == 0`. On decode, a length other than `N` is `error::CAPACITY_EXCEEDED` when it is longer. When it is shorter, the remaining bytes are 0. (Builder's call.) It has a known size, so it counts for the known-size rule. This also applies to `std::uint8_t` elements in `std::span`, `pb::repeated` and `pb::span_buffer`: these are `bytes` too, not `repeated uint32`.
 
