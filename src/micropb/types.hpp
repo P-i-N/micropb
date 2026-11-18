@@ -67,11 +67,12 @@ struct repeated {
     [[nodiscard]] constexpr std::size_t capacity() const { return N; }
     [[nodiscard]] constexpr bool empty() const { return _count == 0; }
 
-    constexpr T* begin() { return _items.data(); }
-    constexpr T* end() { return _items.data() + _count; }
-    constexpr const T* begin() const { return _items.data(); }
-    constexpr const T* end() const { return _items.data() + _count; }
+    [[nodiscard]] constexpr T* begin() { return _items.data(); }
+    [[nodiscard]] constexpr T* end() { return _items.data() + _count; }
+    [[nodiscard]] constexpr const T* begin() const { return _items.data(); }
+    [[nodiscard]] constexpr const T* end() const { return _items.data() + _count; }
 
+    /// `index` must be less than `size()`.
     constexpr T& operator[](std::size_t index) { return _items[index]; }
     constexpr const T& operator[](std::size_t index) const { return _items[index]; }
 
@@ -101,11 +102,12 @@ struct span_buffer {
     [[nodiscard]] constexpr std::size_t capacity() const { return _storage.size(); }
     [[nodiscard]] constexpr bool empty() const { return _count == 0; }
 
-    constexpr T* begin() { return _storage.data(); }
-    constexpr T* end() { return _storage.data() + _count; }
-    constexpr const T* begin() const { return _storage.data(); }
-    constexpr const T* end() const { return _storage.data() + _count; }
+    [[nodiscard]] constexpr T* begin() { return _storage.data(); }
+    [[nodiscard]] constexpr T* end() { return _storage.data() + _count; }
+    [[nodiscard]] constexpr const T* begin() const { return _storage.data(); }
+    [[nodiscard]] constexpr const T* end() const { return _storage.data() + _count; }
 
+    /// `index` must be less than `size()`.
     constexpr T& operator[](std::size_t index) { return _storage[index]; }
     constexpr const T& operator[](std::size_t index) const { return _storage[index]; }
 
