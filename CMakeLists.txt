@@ -15,3 +15,4 @@ function(micropb_add_test name)
 endfunction()
 
 micropb_add_test(test_wire)
+micropb_add_test(test_types)
