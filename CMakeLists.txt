@@ -31,6 +31,7 @@ micropb_add_test(test_wire)
 micropb_add_test(test_types)
 micropb_add_test(test_schema)
 micropb_add_test(test_encode)
+micropb_add_test(test_decode)
 
 foreach(rule
         duplicate_tag tag_zero tag_too_large tag_reserved oneof_tags_count
