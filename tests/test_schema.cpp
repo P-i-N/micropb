@@ -118,6 +118,10 @@ static_assert(test_packed());
 } // namespace
 
 // The schema exists only at compile time, so `main` evaluates the tests as a constant.
+// A `std::span` of elements that are not `const` is not a sequence type.
+static_assert(!pb::detail::sequence_traits<std::span<std::int32_t>>::is_sequence &&
+              pb::detail::sequence_traits<std::span<const std::int32_t>>::is_sequence);
+
 int main() {
     constexpr bool ok = test_auto_tags() && test_oneof_tags() && test_explicit() && test_nested_allowed() &&
                         test_kinds() && test_wire_types() && test_packed();

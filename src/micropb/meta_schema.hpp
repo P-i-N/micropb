@@ -148,7 +148,7 @@ template <typename T>
     } else if constexpr (std::is_class_v<T> && std::is_aggregate_v<T>) {
         return field_kind::MESSAGE;
     } else {
-        static_assert(false, "pb: unmapped_type: the member type has no proto3 mapping");
+        static_assert(!std::is_same_v<T, T>, "pb: unmapped_type: the member type has no proto3 mapping");
     }
 }
 
@@ -160,7 +160,7 @@ template <typename T>
     if constexpr (kind == field_kind::OPTIONAL)
         return wire_type_of<typename T::value_type>();
     else if constexpr (kind == field_kind::ONEOF || kind == field_kind::REPEATED)
-        static_assert(false, "pb: wire_type_of: a oneof or repeated field has no single wire type");
+        static_assert(!std::is_same_v<T, T>, "pb: wire_type_of: a oneof or repeated field has no single wire type");
     else if constexpr (kind != field_kind::SCALAR)
         return wire_type::LENGTH_DELIMITED;
     else if constexpr (detail::is_one_of<T, float, fixed32, sfixed32>)
@@ -223,6 +223,52 @@ consteval bool is_alternative_valid(std::size_t alternative) {
         return alternative == 0;
 }
 
+/// The bytes of one entry of a field list, for the rules that compare entries.
+struct entry_shape {
+    std::size_t offset;
+    std::size_t size;
+    std::size_t alternative;
+    /// The number of alternatives of a `std::variant` member, else 0.
+    std::size_t alternatives;
+    /// An empty struct. It can share its address with a different member.
+    bool empty;
+};
+
+/// `true` when two entries name the same bytes of the message. The entries of
+/// the different alternatives of one `std::variant` member are not such a case.
+consteval bool entries_overlap(std::span<const entry_shape> entries) {
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        for (std::size_t j = i + 1; j < entries.size(); ++j) {
+            const entry_shape& a = entries[i];
+            const entry_shape& b = entries[j];
+            if (a.empty || b.empty)
+                continue;
+
+            const bool same_variant = a.alternative != 0 && b.alternative != 0 && a.offset == b.offset;
+            if (same_variant ? a.alternative == b.alternative
+                             : a.offset < b.offset + b.size && b.offset < a.offset + a.size)
+                return true;
+        }
+    }
+    return false;
+}
+
+/// `true` when each `std::variant` member has one entry for each alternative after `std::monostate`.
+consteval bool alternatives_complete(std::span<const entry_shape> entries) {
+    for (const entry_shape& entry : entries) {
+        const auto same_member = [&](const entry_shape& other) { return other.offset == entry.offset; };
+        if (entry.alternatives != 0 &&
+            static_cast<std::size_t>(std::count_if(entries.begin(), entries.end(), same_member)) != entry.alternatives - 1)
+            return false;
+    }
+    return true;
+}
+
+template <typename M>
+inline constexpr std::size_t alternative_count = 0;
+template <typename... A>
+inline constexpr std::size_t alternative_count<std::variant<A...>> = sizeof...(A);
+
 /// The alternatives of a `std::variant` type.
 template <typename V>
 struct variant_traits;
@@ -273,8 +319,17 @@ struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>> {
         static_assert((is_alternative_valid<std::remove_const_t<M>>(Alternative) && ...),
                       "pb: field_list_alternative: a std::variant member needs one pb::field_at for each "
                       "alternative with its index, each other member has no index");
+
+        constexpr std::array<entry_shape, count> shapes{
+            entry_shape{Offset, sizeof(M), Alternative, alternative_count<std::remove_const_t<M>>, std::is_empty_v<M>}...};
+        static_assert(!entries_overlap(shapes),
+                      "pb: field_list_overlap: two pb::field_at of a field list name the same member");
+        static_assert(alternatives_complete(shapes),
+                      "pb: field_list_alternative: a std::variant member needs one pb::field_at for each "
+                      "alternative with its index, each other member has no index");
+
         check_field_numbers<sorted_numbers()>();
-        (check_member_type<M>(), ...);
+        (check_member_type<std::remove_const_t<M>>(), ...);
     }
 
     static consteval bool contains_span_buffer() {
@@ -483,7 +538,7 @@ consteval std::array<field_info, field_count<T>()> collect_fields() {
     std::uint32_t next = 1;
 
     template for (constexpr std::meta::info member : members<T>()) {
-        using type = typename[:std::meta::type_of(member):];
+        using type = std::remove_const_t<typename[:std::meta::type_of(member):]>;
         check_member_type<type>();
 
         constexpr std::optional<std::uint32_t> number = tag_annotation(member);
@@ -521,21 +576,10 @@ consteval std::array<field_info, field_count<T>()> sorted_fields() {
     return fields;
 }
 
-template <typename T>
-consteval std::array<std::uint32_t, field_count<T>()> sorted_numbers() {
-    std::array<std::uint32_t, field_count<T>()> numbers{};
-    std::size_t index = 0;
-    for (const field_info& field : sorted_fields<T>())
-        numbers[index++] = field.number;
-    return numbers;
-}
-
 /// The `pb::field_list` of the struct `T`: one `pb::field_at` for each entry
 /// of the tag table, in declaration order.
 template <typename T>
-consteval std::meta::info reflect_field_list() {
-    check_message_type<T>();
-
+consteval std::meta::info make_field_list() {
     std::array<std::meta::info, field_count<T>() + 1> arguments{^^T};
     std::size_t index = 1;
     for (const field_info& field : collect_fields<T>()) {
@@ -548,18 +592,25 @@ consteval std::meta::info reflect_field_list() {
     return std::meta::substitute(^^field_list, arguments);
 }
 
+/// First the rules for the message type, so that their error comes before an error of reflection.
+template <typename T>
+consteval std::meta::info reflect_field_list() {
+    check_message_type<T>();
+    return make_field_list<T>();
+}
+
 template <typename T>
 using reflected_fields = typename[:reflect_field_list<T>():];
 
 } // namespace detail
 
-/// Fields of the message type `T`, sorted by field number, with the reflection
-/// of each member. The schema generator uses this table. An invalid message
-/// type, tag or member type is a compile error.
+/// Fields of the struct `T`, sorted by field number, with the reflection of
+/// each member. The schema generator uses this table. It reads the members and
+/// annotations of `T`, not a `pb::fields_of` specialization. An invalid message
+/// type, tag or member type is a compile error, by the same rules as in the codec.
 template <typename T>
 [[nodiscard]] consteval std::span<const field_info> build_tag_table() {
-    detail::check_message_type<T>();
-    detail::check_field_numbers<detail::sorted_numbers<T>()>();
+    detail::list_traits<detail::reflected_fields<T>>::check();
     return std::define_static_array(detail::sorted_fields<T>());
 }
 

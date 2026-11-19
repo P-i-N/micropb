@@ -115,15 +115,26 @@ foreach(rule
     micropb_add_compile_fail_test(${rule})
 endforeach()
 
-# A message type without a field list on a compiler without reflection.
-add_library(no_field_list OBJECT EXCLUDE_FROM_ALL tests/compile_fail/no_field_list.cpp)
-target_link_libraries(no_field_list PRIVATE micropb_cxx23)
-set_target_properties(no_field_list PROPERTIES CXX_STANDARD 23)
-target_compile_options(no_field_list PRIVATE ${micropb_compile_options})
-add_test(NAME compile_fail.no_field_list COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target no_field_list)
-set_tests_properties(compile_fail.no_field_list PROPERTIES
-    PASS_REGULAR_EXPRESSION "static assertion failed: pb: no_field_list:"
-    RESOURCE_LOCK micropb_build_dir)
+# Rules for a field list that a person wrote. These files are built as C++23 without reflection.
+function(micropb_add_list_compile_fail_test name rule)
+    add_library(${name} OBJECT EXCLUDE_FROM_ALL tests/compile_fail/${name}.cpp)
+    target_link_libraries(${name} PRIVATE micropb_cxx23)
+    set_target_properties(${name} PROPERTIES CXX_STANDARD 23)
+    target_compile_options(${name} PRIVATE ${micropb_compile_options})
+    add_test(NAME compile_fail.${name} COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target ${name})
+    set_tests_properties(compile_fail.${name} PROPERTIES
+        PASS_REGULAR_EXPRESSION "static assertion failed: pb: ${rule}:"
+        RESOURCE_LOCK micropb_build_dir)
+endfunction()
+
+micropb_add_list_compile_fail_test(no_field_list no_field_list)
+micropb_add_list_compile_fail_test(list_member_type optional_repeated)
+micropb_add_list_compile_fail_test(list_duplicate_number duplicate_tag)
+micropb_add_list_compile_fail_test(list_decode_alternative decode_encode_only)
+micropb_add_list_compile_fail_test(list_alternative_on_plain_member field_list_alternative)
+micropb_add_list_compile_fail_test(list_alternative_index_too_large field_list_alternative)
+micropb_add_list_compile_fail_test(list_alternative_missing field_list_alternative)
+micropb_add_list_compile_fail_test(list_member_twice field_list_overlap)
 
 # Size report: not a test. `cmake --build <dir> --target size_report` prints the
 # size of one translation unit that encodes and decodes 16 and 32 message types.

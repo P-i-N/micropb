@@ -41,6 +41,15 @@ struct fixed {
     const inner label;
 };
 
+/// `const` members of each kind: encode only.
+struct constants {
+    const std::uint32_t id;
+    const std::optional<std::int32_t> maybe;
+    const std::variant<std::monostate, std::uint32_t, float> choice;
+    const pb::repeated<std::uint8_t, 4> data;
+    const std::string_view name;
+};
+
 } // namespace manual
 
 // The lists are in the order of the members, not in the order of the numbers.
@@ -67,6 +76,15 @@ struct pb::fields_of<manual::fixed> : pb::field_list<manual::fixed,
     pb::field_at<decltype(manual::fixed::gains), 1, offsetof(manual::fixed, gains)>,
     pb::field_at<decltype(manual::fixed::label), 2, offsetof(manual::fixed, label)>> {};
 
+template <>
+struct pb::fields_of<manual::constants> : pb::field_list<manual::constants,
+    pb::field_at<decltype(manual::constants::id), 1, offsetof(manual::constants, id)>,
+    pb::field_at<decltype(manual::constants::maybe), 2, offsetof(manual::constants, maybe)>,
+    pb::field_at<decltype(manual::constants::choice), 3, offsetof(manual::constants, choice), 1>,
+    pb::field_at<decltype(manual::constants::choice), 4, offsetof(manual::constants, choice), 2>,
+    pb::field_at<decltype(manual::constants::data), 5, offsetof(manual::constants, data)>,
+    pb::field_at<decltype(manual::constants::name), 6, offsetof(manual::constants, name)>> {};
+
 namespace {
 
 namespace d = pb::detail;
@@ -90,6 +108,7 @@ static_assert(std::is_same_v<d::reflected_fields<manual::inner>, d::field_list_o
 static_assert(std::is_same_v<d::reflected_fields<manual::message>, d::field_list_of<manual::message>>);
 static_assert(std::is_same_v<d::reflected_fields<manual::empty>, d::field_list_of<manual::empty>>);
 static_assert(std::is_same_v<d::reflected_fields<manual::fixed>, d::field_list_of<manual::fixed>>);
+static_assert(std::is_same_v<d::reflected_fields<manual::constants>, d::field_list_of<manual::constants>>);
 #endif
 
 template <typename T, std::size_t N>
@@ -140,9 +159,15 @@ bool test_encode_only() {
                                                            0x12, 0x02, 0x08, 0x03});
 }
 
+bool test_const_members() {
+    const manual::constants constants{7, 3, std::uint32_t{9}, {}, "a"};
+    return encodes_to(constants, std::array<std::uint8_t, 9>{0x08, 0x07, 0x10, 0x03, 0x18, 0x09, 0x32, 0x01, 0x61});
+}
+
 } // namespace
 
 int main() {
-    const bool ok = test_encode() && test_decode() && test_decode_message_alternative() && test_encode_only();
+    const bool ok = test_encode() && test_decode() && test_decode_message_alternative() && test_encode_only() &&
+                    test_const_members();
     return ok ? 0 : 1;
 }
