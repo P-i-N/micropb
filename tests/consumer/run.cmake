@@ -1,10 +1,11 @@
 # Runs the consumer project with one Arm compiler: cmake -P run.cmake
 # Inputs (-D): COMPILER, CPU, SOURCE_DIR (micropb), BINARY_DIR (a folder for this run),
-# MODE (build or reflection_on), REFLECTION (on or off: what the compiler supports).
+# MODE (build or reflection_on), REFLECTION (on or off: what the compiler supports),
+# GENERATOR (the CMake generator of the outer project), MAKE_PROGRAM (optional: its CMAKE_MAKE_PROGRAM).
 #   build:          configure and build; the configure output must show the status line of REFLECTION.
 #   reflection_on:  configure with -DMICROPB_REFLECTION=ON; it must fail with the message of micropb.
 #                   Only for a compiler without reflection.
-foreach(var COMPILER CPU SOURCE_DIR BINARY_DIR MODE REFLECTION)
+foreach(var COMPILER CPU SOURCE_DIR BINARY_DIR MODE REFLECTION GENERATOR)
     if(NOT DEFINED ${var})
         message(FATAL_ERROR "run.cmake: ${var} is not set")
     endif()
@@ -12,12 +13,15 @@ endforeach()
 
 file(REMOVE_RECURSE ${BINARY_DIR})
 
-set(configure_command ${CMAKE_COMMAND} -S ${SOURCE_DIR}/tests/consumer -B ${BINARY_DIR} -G Ninja
+set(configure_command ${CMAKE_COMMAND} -S ${SOURCE_DIR}/tests/consumer -B ${BINARY_DIR} -G "${GENERATOR}"
     -DCMAKE_SYSTEM_NAME=Generic
     -DCMAKE_CXX_COMPILER=${COMPILER}
     -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
     "-DCMAKE_CXX_FLAGS=-mcpu=${CPU} -mthumb"
     -DMICROPB_SOURCE_DIR=${SOURCE_DIR})
+if(MAKE_PROGRAM)
+    list(APPEND configure_command "-DCMAKE_MAKE_PROGRAM=${MAKE_PROGRAM}")
+endif()
 if(MODE STREQUAL "reflection_on")
     list(APPEND configure_command -DMICROPB_REFLECTION=ON)
 endif()
