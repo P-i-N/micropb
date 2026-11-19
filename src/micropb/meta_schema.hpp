@@ -268,10 +268,11 @@ struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>> {
     static consteval void check() {
         static_assert(((Offset <= max_offset) && ...),
                       "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less");
-        static_assert(((Offset + sizeof(M) <= sizeof(T)) && ...) &&
-                          (is_alternative_valid<std::remove_const_t<M>>(Alternative) && ...),
-                      "pb: field_list_entry: a pb::field_at has an offset that is not in the message, or an "
-                      "alternative index that does not agree with the member type");
+        static_assert(((Offset + sizeof(M) <= sizeof(T)) && ...),
+                      "pb: field_list_offset: the member of a pb::field_at is not in the message, use offsetof");
+        static_assert((is_alternative_valid<std::remove_const_t<M>>(Alternative) && ...),
+                      "pb: field_list_alternative: a std::variant member needs one pb::field_at for each "
+                      "alternative with its index, each other member has no index");
         check_field_numbers<sorted_numbers()>();
         (check_member_type<M>(), ...);
     }

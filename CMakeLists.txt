@@ -98,9 +98,20 @@ foreach(rule
         repeated_repeated repeated_optional repeated_variant
         tag_on_variant oneof_tags_on_non_variant decode_encode_only
         not_aggregate base_class inaccessible_member enum_too_wide
-        bit_field member_offset_too_large decode_const_member decode_fixed_span)
+        bit_field member_offset_too_large decode_const_member decode_fixed_span
+        field_list_type field_list_offset field_list_alternative)
     micropb_add_compile_fail_test(${rule})
 endforeach()
+
+# A message type without a field list on a compiler without reflection.
+add_library(no_field_list OBJECT EXCLUDE_FROM_ALL tests/compile_fail/no_field_list.cpp)
+target_include_directories(no_field_list PRIVATE src)
+set_target_properties(no_field_list PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
+target_compile_options(no_field_list PRIVATE ${micropb_compile_options})
+add_test(NAME compile_fail.no_field_list COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target no_field_list)
+set_tests_properties(compile_fail.no_field_list PROPERTIES
+    PASS_REGULAR_EXPRESSION "static assertion failed: pb: no_field_list:"
+    RESOURCE_LOCK micropb_build_dir)
 
 # Size report: not a test. `cmake --build <dir> --target size_report` prints the
 # size of one translation unit that encodes and decodes 16 and 32 message types.
