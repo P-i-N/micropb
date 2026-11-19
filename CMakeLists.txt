@@ -97,6 +97,7 @@ if(MICROPB_TESTS)
     micropb_add_test(test_types)
     micropb_add_test(test_generated)
     micropb_add_test(test_field_list)
+    micropb_add_test(test_scalars)
     if(MICROPB_HAS_REFLECTION)
         micropb_add_test(test_schema)
         micropb_add_test(test_codec)
@@ -120,6 +121,7 @@ if(MICROPB_TESTS)
     micropb_add_cxx23_test(test_types)
     micropb_add_cxx23_test(test_field_list)
     micropb_add_cxx23_test(test_generated)
+    micropb_add_cxx23_test(test_scalars)
 
     # The tables must be constants in ROM: the program must have no code that makes them before main().
     if(NOT MICROPB_SANITIZE)
@@ -200,6 +202,7 @@ if(MICROPB_TESTS)
     micropb_add_arm_test(test_types)
     micropb_add_arm_test(test_field_list)
     micropb_add_arm_test(test_generated)
+    micropb_add_arm_test(test_scalars)
 
     foreach(prefix ${micropb_arm_prefixes})
         # The tables must be ROM constants on Arm too.
@@ -282,6 +285,8 @@ if(MICROPB_TESTS)
     micropb_add_list_compile_fail_test(list_alternative_index_too_large field_list_alternative)
     micropb_add_list_compile_fail_test(list_alternative_missing field_list_alternative)
     micropb_add_list_compile_fail_test(list_member_twice field_list_overlap)
+    micropb_add_list_compile_fail_test(char_member unmapped_type)
+    micropb_add_list_compile_fail_test(wchar_member unmapped_type)
 
     if(MICROPB_HAS_REFLECTION)
         # Size report: not a test. `cmake --build <dir> --target size_report` prints the

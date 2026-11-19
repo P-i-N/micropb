@@ -201,6 +201,7 @@ A message is a class aggregate: only public data members, no base class, no cons
 | `std::uint32_t`, `std::uint64_t` | `uint32`, `uint64` | |
 | `std::int8_t`, `std::int16_t` | `int32` | Decode truncates to the width of the member. |
 | `std::uint8_t`, `std::uint16_t` | `uint32` | Decode truncates to the width of the member. |
+| `signed char`, `short`, `int`, `long`, `long long` and the unsigned forms | The proto type of the fixed-width type of the same size and sign | `long` is `int32` on Windows and `arm-none-eabi`, and `int64` on Linux x86-64. |
 | `pb::sint32`, `pb::sint64` | `sint32`, `sint64` | ZigZag: small for negative values. |
 | `pb::fixed32`, `pb::fixed64` | `fixed32`, `fixed64` | |
 | `pb::sfixed32`, `pb::sfixed64` | `sfixed32`, `sfixed64` | |
@@ -214,7 +215,7 @@ A message is a class aggregate: only public data members, no base class, no cons
 | `std::variant<std::monostate, A, B>` | `oneof` | `std::monostate` means that no alternative is set. |
 | `pb::repeated<T, N>` | `repeated T` | See [Repeated fields](#repeated-fields). |
 
-Use only the fixed-width integer types of `<cstdint>`. They mean the same on each target: `std::int32_t` is `int` on a PC, but `long` on `arm-none-eabi`. A type such as `long` or `char` does not compile when it is not one of these aliases on the target.
+Plain `char` and the character types (`wchar_t`, `char8_t`, `char16_t`, `char32_t`) do not compile. The fixed-width types of `<cstdint>` are the portable choice when the `.proto` file must be the same for each target: `std::int32_t` is `int` on a PC, but `long` on `arm-none-eabi`.
 
 `pb::sint32` and the other `pb::` integer types are small wrappers. They convert to and from the integer type that they hold:
 

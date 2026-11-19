@@ -113,12 +113,18 @@ struct sequence_traits<span_buffer<T>> {
 template <typename T>
 using element_t = typename sequence_traits<T>::element;
 
+/// A standard integer type: any integer type by size and sign, but not `bool` and not the character types.
+/// `std::int32_t` is `int` on a PC and `long` on `arm-none-eabi`, and both are accepted.
+template <typename T>
+consteval bool is_standard_integer() {
+    return std::is_integral_v<T> &&
+           !is_one_of<std::remove_cv_t<T>, bool, char, wchar_t, char8_t, char16_t, char32_t>;
+}
+
 template <typename T>
 consteval bool is_scalar() {
-    return std::is_enum_v<T> ||
-           is_one_of<T, bool, std::int8_t, std::int16_t, std::int32_t, std::int64_t, std::uint8_t, std::uint16_t,
-                     std::uint32_t, std::uint64_t, float, double, sint32, sint64, fixed32, fixed64, sfixed32,
-                     sfixed64>;
+    return std::is_enum_v<T> || is_standard_integer<T>() ||
+           is_one_of<T, bool, float, double, sint32, sint64, fixed32, fixed64, sfixed32, sfixed64>;
 }
 
 } // namespace detail
