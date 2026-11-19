@@ -748,11 +748,11 @@ docs/superpowers/    design documents and implementation plans
 
 ## Status and limits
 
-* **Compiler:** developed and tested with GCC 16.2 on Linux. The MSYS2 build of the table codec and the MinGW variant of `MICROPB_SANITIZE` are not yet verified.
+* **Compiler:** developed and tested with GCC 16.2 on Linux, and on Windows with GCC 16.2 from MSYS2 UCRT64 (all tests pass, no warnings). The MinGW variant of `MICROPB_SANITIZE` is not yet verified.
 * **Without reflection:** tested only as GCC 16.2 with `-std=c++23` and without `-freflection`. No older compiler has been used. The code needs `std::expected`, so GCC 12 or newer. Clang is not tested: it does not know the attribute `gnu::noclone` of the codec and gives a warning for it.
 * **ARM:** not yet compiled or measured for an ARM target.
 * **CMake:** `add_subdirectory` also adds the tests of `micropb` to your project.
-* **`protoc` plugin:** tested on Linux with `protoc` 35.1 and the Python package `protobuf` 7.36. `tools/protoc-gen-micropb.bat` is not yet verified on Windows.
+* **`protoc` plugin:** tested on Linux with `protoc` 35.1 and the Python package `protobuf` 7.36, and on Windows with `protoc` 36.2 and `protobuf` 6.31.1. On Windows, `tools/protoc-gen-micropb.bat` starts the first `python` in `PATH`, and that Python must have the `protobuf` package. When `C:\msys64\ucrt64\bin` comes first in `PATH`, this is the MSYS2 Python, which has no `protobuf` package unless you install `mingw-w64-ucrt-x86_64-python-protobuf`.
 * **Planned:** a generator that writes the `.proto` file from the C++ structs.
 * **Not supported:** `map`, proto2, groups, `Any` and the other well-known types, JSON, streaming encode or decode. Unknown fields are skipped and not kept.
 * **Not `constexpr`:** `encode`, `decode` and `encoded_size` run only at run time.
