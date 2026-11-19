@@ -401,6 +401,11 @@ class StructureTest(unittest.TestCase):
     def test_cstdint_is_not_included_for_a_name_that_contains_int(self):
         self.assertNotIn("#include", header("message point { bool int_flag = 1; }"))
 
+    def test_service_is_ignored(self):
+        text = header("message m { bool a = 1; } service control { rpc run(m) returns (m); }")
+        self.assertEqual(definitions(text), ["m"])
+        self.assertNotIn("control", text)
+
     def test_extend_block_is_ignored(self):
         text = header("""
             import "google/protobuf/descriptor.proto";
@@ -427,6 +432,12 @@ class ErrorTest(unittest.TestCase):
         text = error(PROTO3 + "package p; message m { repeated int32 a = 1; }")
         self.assertIn("a.proto: p.m.a: a repeated field needs a capacity. "
                       "Add this line to a.options: p.m.a max_count:<N>", text)
+
+    def test_repeated_without_max_count_says_when_no_options_file_was_found(self):
+        hint = "No file a.options was found. If it is in another folder, use --micropb_opt=options_dir=<folder>."
+        proto = PROTO3 + "message m { repeated int32 a = 1; repeated int32 b = 2; }"
+        self.assertIn("m.a max_count:<N>. " + hint, error(proto))
+        self.assertNotIn("was found", error(proto, "m.b max_count:2\n"))
 
     def test_fixed_count_without_max_count(self):
         self.assertIn("a repeated field needs a capacity",

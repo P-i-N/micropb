@@ -285,8 +285,10 @@ class Header:
             count, fixed = option("max_count"), option("fixed_count")
             if not count:
                 file = self.options.path or re.sub(r"\.proto$", "", self.file.name) + ".options"
+                hint = "" if self.options.path else (f". No file {file} was found. If it is in another folder, "
+                                                     "use --micropb_opt=options_dir=<folder>.")
                 raise self.error(f"{name}: a repeated field needs a capacity. "
-                                 f"Add this line to {file}: {name} max_count:<N>")
+                                 f"Add this line to {file}: {name} max_count:<N>{hint}")
             text = f"std::array<{text}, {count}>" if fixed else f"pb::repeated<{text}, {count}>"
 
         self.options.check_use(name, found, used)

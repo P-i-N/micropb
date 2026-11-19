@@ -1,6 +1,6 @@
 # `protoc-gen-micropb` design
 
-Date: 2026-11-19. Status: waiting for approval.
+Date: 2026-11-19. Status: approved and implemented.
 
 ## Intent
 
@@ -90,10 +90,10 @@ An option that the plugin does not know, or that does not apply to the field (fo
 The plugin reports these to `protoc`, which prints them and stops. No header is written.
 
 * A file that is not `syntax = "proto3"`.
-* A `map` field, a group, an extension.
+* A `map` field. (proto3 has no groups. An `extend` block in a proto3 file can only add custom options, so the plugin ignores it: see "Changes during the implementation".)
 * A repeated field without `max_count`. The message shows the line to add to the options file.
 * A message that contains itself, directly or through other messages.
-* A `oneof` with two members of the same type (the library rule `variant_duplicate_alternative`), or with fewer than one member.
+* A `oneof` with two members of the same type (the library rule `variant_duplicate_alternative`).
 * A bad line in the options file, with the file name and the line number.
 
 The compile-time checks of the library find all other problems when the header is compiled.
@@ -124,3 +124,13 @@ README.md                       new section "Generate structs from a .proto file
 * A message field without `optional` is a plain member, as in `messages.hpp`. The encoder always writes it. Google's runtime omits it when it is unset.
 * Nested types are flattened to `Outer_Inner`.
 * A `oneof` loses the names of its members, because a `std::variant` has only types.
+
+## Changes during the implementation
+
+* An `extend` block is ignored and is not an error. In proto3 it can only define custom options, so no message field is lost. A file that defines its own options thus still works.
+* An import gives an `#include` only when the file uses a type of the imported file. Thus `import "nanopb.proto"` does not ask for a header that does not exist.
+* A member whose name is equal to the name of a type in the same struct makes the plugin write the full type name (`::pkg::inner inner;`). C++ does not accept the short form.
+* New errors: two types with the same flattened name (`A_B` and `A.B`), `int_size:IS_8` on a repeated unsigned field (the library reads a sequence of `std::uint8_t` as `bytes`), `fixed_length` without `max_size`, an unknown plugin parameter.
+* New warning: a pattern that matches no field. A wildcard rule gives no warning for the fields that it does not apply to.
+* `max_size` applies only to a `bytes` field that is not repeated.
+* A second test schema, `tests/generator/features.proto` with `shared.proto`, covers the rules that `vectors.proto` does not use. Its generated headers are also checked in and compiled.

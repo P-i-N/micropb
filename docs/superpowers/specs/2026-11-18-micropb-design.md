@@ -202,7 +202,7 @@ Each stage is a separate, reviewable change.
 
 1. Core: `types.hpp`, `wire.hpp`, `meta_schema.hpp`, `encode.hpp`, `decode.hpp`, CMake, `test_wire.cpp`, `test_types.cpp`, `test_schema.cpp`, `test_encode.cpp`, `test_decode.cpp`, `test_wire_compat.cpp`. The tests include an envelope message with a `oneof` of all message types. This is the reference use case for the serial link.
 2. `.proto` generator: `schema_gen.hpp`, `test_schema_gen.cpp`.
-3. `protoc-gen-micropb.py`: a `protoc` plugin that reads an existing `.proto` file and writes C++26 structs. It writes `[[=pb::tag{N}]]` only where field numbers have gaps. Its purpose is to bring existing `.proto` schemas into `micropb`. It needs Python, the `protobuf` Python package and `protoc`. This needs approval as a dependency.
+3. `protoc-gen-micropb.py` (done before stage 2, design in `2026-11-19-protoc-plugin-design.md`): a `protoc` plugin that reads an existing `.proto` file and writes C++26 structs. It writes `[[=pb::tag{N}]]` only where field numbers have gaps. Its purpose is to bring existing `.proto` schemas into `micropb`. It needs Python, the `protobuf` Python package and `protoc`. This needs approval as a dependency.
 
 ## Left to the builder
 
