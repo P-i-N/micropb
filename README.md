@@ -422,7 +422,7 @@ A `.proto` file does not say how many elements a repeated field can have. The pl
 | `max_count:N fixed_count:true` | a repeated field | `std::array<T, N>` (encode only) |
 | `max_size:N` | a `bytes` field | `pb::repeated<std::uint8_t, N>` |
 | `max_size:N fixed_length:true` | a `bytes` field | `std::array<std::uint8_t, N>` |
-| `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `int32`, `int64`, `uint32`, `uint64` | `std::int8_t` ... `std::uint64_t`, with the sign of the field |
+| `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `int32`, `int64`, `uint32`, `uint64`, `sint32`, `sint64` | `std::int8_t` ... `std::uint64_t`, with the sign of the field. A narrow `sint32` or `sint64` gives `pb::wire_int<std::intN_t, pb::int_encoding::ZIGZAG>` |
 
 * The pattern is the name of the field: `package.Message.field`, or `Message.field` without the package. `*` and `?` are wildcards, thus `* max_count:8` sets a default for all fields.
 * When more than one line sets the same option for a field, the last line wins.

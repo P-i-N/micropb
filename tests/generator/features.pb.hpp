@@ -46,6 +46,8 @@ struct Device {
     pb::repeated<Device_Slot, 2> slots;
     pb::repeated<Device_State, 3> history;
     pb::repeated<std::int8_t, 4> trims;
+    pb::wire_int<std::int16_t, pb::int_encoding::ZIGZAG> trim_delta;
+    pb::repeated<pb::wire_int<std::int16_t, pb::int_encoding::ZIGZAG>, 3> history_delta;
     std::variant<std::monostate, std::uint32_t, std::string_view, Device_Slot> event;
     bool ready;
 };
@@ -90,6 +92,8 @@ struct pb::fields_of<::features::Device> : pb::field_list<::features::Device,
     pb::field_at<decltype(::features::Device::slots), 14, offsetof(::features::Device, slots)>,
     pb::field_at<decltype(::features::Device::history), 15, offsetof(::features::Device, history)>,
     pb::field_at<decltype(::features::Device::trims), 16, offsetof(::features::Device, trims)>,
+    pb::field_at<decltype(::features::Device::trim_delta), 17, offsetof(::features::Device, trim_delta)>,
+    pb::field_at<decltype(::features::Device::history_delta), 18, offsetof(::features::Device, history_delta)>,
     pb::field_at<decltype(::features::Device::event), 20, offsetof(::features::Device, event), 1>,
     pb::field_at<decltype(::features::Device::event), 22, offsetof(::features::Device, event), 2>,
     pb::field_at<decltype(::features::Device::event), 25, offsetof(::features::Device, event), 3>,

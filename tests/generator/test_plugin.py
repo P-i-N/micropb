@@ -265,6 +265,20 @@ class OptionsTest(unittest.TestCase):
         self.assertEqual(members(text, "m"),
                          ["std::int8_t a;", "std::uint16_t b;", "std::int32_t c;", "std::uint64_t d;"])
 
+    def test_int_size_on_sint(self):
+        text = header("message m { sint32 a = 1; sint32 b = 2; sint64 c = 3; sint32 d = 4; sint64 e = 5; }",
+                      "m.a int_size:IS_8\n" "m.b int_size:IS_16\n" "m.c int_size:IS_32\n" "m.d int_size:IS_32\n" "m.e int_size:IS_64\n")
+        self.assertEqual(members(text, "m"), [
+            "pb::wire_int<std::int8_t, pb::int_encoding::ZIGZAG> a;",
+            "pb::wire_int<std::int16_t, pb::int_encoding::ZIGZAG> b;",
+            "pb::wire_int<std::int32_t, pb::int_encoding::ZIGZAG> c;",
+            "pb::sint32 d;",
+            "pb::sint64 e;"])
+
+    def test_int_size_on_repeated_sint(self):
+        text = header("message m { repeated sint32 a = 1; }", "m.a max_count:4 int_size:IS_8\n")
+        self.assertEqual(members(text, "m"), ["pb::repeated<pb::wire_int<std::int8_t, pb::int_encoding::ZIGZAG>, 4> a;"])
+
     def test_int_size_on_repeated_field(self):
         text = header("message m { repeated int32 a = 1; }", "m.a max_count:4 int_size:IS_16\n")
         self.assertEqual(members(text, "m"), ["pb::repeated<std::int16_t, 4> a;"])
@@ -674,12 +688,19 @@ class WarningTest(unittest.TestCase):
         self.assertEqual(members(text, "m"), ["pb::repeated<std::int32_t, 4> a;"])
 
     def test_option_that_does_not_apply(self):
-        stderr, text = self.warnings("package p; message m { string name = 1; int32 a = 2; sint32 b = 3; }",
+        stderr, text = self.warnings("package p; message m { string name = 1; int32 a = 2; fixed32 b = 3; }",
                                      "m.name max_size:40\n\nm.a max_count:4\nm.b int_size:IS_8\n")
         self.assertIn("a.options:1: warning: max_size does not apply to p.m.name", stderr)
         self.assertIn("a.options:3: warning: max_count does not apply to p.m.a", stderr)
         self.assertIn("a.options:4: warning: int_size does not apply to p.m.b", stderr)
-        self.assertEqual(members(text, "m"), ["std::string_view name;", "std::int32_t a;", "pb::sint32 b;"])
+        self.assertEqual(members(text, "m"), ["std::string_view name;", "std::int32_t a;", "pb::fixed32 b;"])
+
+    def test_int_size_does_not_apply_to_fixed_and_enum_fields(self):
+        stderr, text = self.warnings("enum e { E_A = 0; } message m { sfixed32 a = 1; e b = 2; fixed64 c = 3; }",
+                                     "m.a int_size:IS_8\nm.b int_size:IS_16\nm.c int_size:IS_32\n")
+        for name in "abc":
+            self.assertIn(f"warning: int_size does not apply to m.{name}", stderr)
+        self.assertEqual(members(text, "m"), ["pb::sfixed32 a;", "e b;", "pb::fixed64 c;"])
 
     def test_max_size_does_not_apply_to_repeated_bytes(self):
         stderr, text = self.warnings("message m { repeated bytes a = 1; }", "m.a max_count:2 max_size:8\n")

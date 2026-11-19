@@ -31,6 +31,8 @@ static_assert(std::is_same_v<decltype(gen::envelope::payload),
 
 static_assert(std::is_same_v<decltype(features::Device::limits), features::limits>);
 static_assert(std::is_same_v<decltype(features::Device::trims), pb::repeated<std::int8_t, 4>>);
+static_assert(std::is_same_v<decltype(features::Device::trim_delta),
+                             pb::wire_int<std::int16_t, pb::int_encoding::ZIGZAG>>);
 static_assert(std::is_same_v<decltype(features::Frame::origin), shared::types::Point>);
 static_assert(std::is_same_v<decltype(features::Calibration::gains), std::array<float, 4>>);
 
@@ -131,14 +133,16 @@ bool test_fixed_arrays() {
 
 /// `device { class: -2 state: STATE_BUSY limits { low: 1 high: 2 } backup {} serial: 7 offset: -300 token: ""
 /// spare { index: 3 } slots { index: 1 key: "ab" } slots {} history: [STATE_BUSY, STATE_IDLE] trims: [-1, 5]
-/// moved { index: 9 } } slot { key: "k" } origin { x: -4 y: 4 } unit: UNIT_METER mode: RX_MODE_VARIABLE`
+/// trim_delta: -300 history_delta: [-1, 2, -32768] moved { index: 9 } } slot { key: "k" } origin { x: -4 y: 4 }
+/// unit: UNIT_METER mode: RX_MODE_VARIABLE`
 constexpr auto frame_wire = std::to_array<std::uint8_t>({
-    0x0a, 0x49, 0x08, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01, 0x10, 0x01, 0x1a,
+    0x0a, 0x55, 0x08, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01, 0x10, 0x01, 0x1a,
     0x04, 0x08, 0x01, 0x10, 0x02, 0x22, 0x00, 0x50, 0x07, 0x58, 0xd4, 0xfd, 0xff, 0xff, 0xff, 0xff,
     0xff, 0xff, 0xff, 0x01, 0x62, 0x00, 0x6a, 0x02, 0x08, 0x03, 0x72, 0x06, 0x08, 0x01, 0x12, 0x02,
     0x61, 0x62, 0x72, 0x00, 0x7a, 0x02, 0x01, 0x00, 0x82, 0x01, 0x0b, 0xff, 0xff, 0xff, 0xff, 0xff,
-    0xff, 0xff, 0xff, 0xff, 0x01, 0x05, 0xca, 0x01, 0x02, 0x08, 0x09, 0x12, 0x03, 0x12, 0x01, 0x6b,
-    0x1a, 0x04, 0x08, 0x07, 0x10, 0x08, 0x20, 0x01, 0x28, 0x01});
+    0xff, 0xff, 0xff, 0xff, 0x01, 0x05, 0x88, 0x01, 0xd7, 0x04, 0x92, 0x01, 0x05, 0x01, 0x04, 0xff,
+    0xff, 0x03, 0xca, 0x01, 0x02, 0x08, 0x09, 0x12, 0x03, 0x12, 0x01, 0x6b, 0x1a, 0x04, 0x08, 0x07,
+    0x10, 0x08, 0x20, 0x01, 0x28, 0x01});
 
 bool test_frame_encode() {
     features::Frame frame{};
@@ -148,6 +152,7 @@ bool test_frame_encode() {
     device.limits = {1, 2};
     device.serial = 7;
     device.offset = -300;
+    device.trim_delta = -300;
     device.token.emplace();
     device.spare = features::Device_Slot{3, {}};
     device.event = features::Device_Slot{9, {}};
@@ -156,7 +161,9 @@ bool test_frame_encode() {
     bool ok = first.key.push_back('a') && first.key.push_back('b') && device.slots.push_back(first) &&
               device.slots.push_back({}) && device.history.push_back(features::Device_State::BUSY) &&
               device.history.push_back(features::Device_State::IDLE) && device.trims.push_back(-1) &&
-              device.trims.push_back(5) && frame.slot.key.push_back('k');
+              device.trims.push_back(5) &&
+              device.history_delta.push_back(-1) && device.history_delta.push_back(2) &&
+              device.history_delta.push_back(-32768) && frame.slot.key.push_back('k');
     frame.origin = {-4, 4};
     frame.unit = shared::types::Unit::METER;
     frame.mode = features::RxMode::VARIABLE;
@@ -176,6 +183,7 @@ bool test_frame_decode() {
            device.spare->index == 3 && device.slots.size() == 2 && device.slots[0].key.size() == 2 &&
            device.slots[0].key[1] == 'b' && device.history.size() == 2 &&
            device.history[0] == features::Device_State::BUSY && device.trims.size() == 2 && device.trims[0] == -1 &&
+           device.trim_delta == -300 && device.history_delta.size() == 3 && device.history_delta[2] == -32768 &&
            moved && moved->index == 9 && !device.ready && frame.slot.key.size() == 1 && frame.origin.x == -4 &&
            frame.origin.y == 4 && frame.unit == shared::types::Unit::METER && frame.mode == features::RxMode::VARIABLE;
 }

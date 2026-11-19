@@ -12,7 +12,8 @@ file in the NanoPB format:
     Message.field  max_count:3 fixed_count:true   std::array<T, 3>
     Message.field  max_size:16                    bytes: pb::repeated<std::uint8_t, 16>
     Message.field  max_size:6 fixed_length:true   bytes: std::array<std::uint8_t, 6>
-    Message.field  int_size:IS_8                  std::int8_t or std::uint8_t (also IS_16, IS_32, IS_64)
+    Message.field  int_size:IS_8                  std::int8_t or std::uint8_t (also IS_16, IS_32, IS_64);
+                                                    sint32, sint64: pb::wire_int<std::int8_t, pb::int_encoding::ZIGZAG>
 
 The plugin looks for app.options with the path that protoc has for app.proto: first from the
 current folder, then from each folder of the parameter --micropb_opt=options_dir=<folder>. With
@@ -53,7 +54,10 @@ SCALARS = {
 }
 
 # The types that `int_size` can change.
-SIZED_INTEGERS = (Field.TYPE_INT32, Field.TYPE_INT64, Field.TYPE_UINT32, Field.TYPE_UINT64)
+SIZED_INTEGERS = (Field.TYPE_INT32, Field.TYPE_INT64, Field.TYPE_UINT32, Field.TYPE_UINT64,
+                  Field.TYPE_SINT32, Field.TYPE_SINT64)
+# The size that a ZigZag type has without `int_size`.
+ZIGZAG_SIZES = {Field.TYPE_SINT32: 32, Field.TYPE_SINT64: 64}
 
 # The headers that the generated text can need, each with a pattern that shows the need.
 INCLUDES = [
@@ -295,7 +299,10 @@ class Header:
 
         if field.type in SIZED_INTEGERS:
             bits = option("int_size")
-            if bits:
+            if bits and field.type in ZIGZAG_SIZES:
+                if bits != ZIGZAG_SIZES[field.type]:
+                    text = f"pb::wire_int<std::int{bits}_t, pb::int_encoding::ZIGZAG>"
+            elif bits:
                 text = re.sub(r"\d+", str(bits), text)
             if repeated and text == "std::uint8_t":
                 raise self.error(f"{name}: int_size:IS_8 on a repeated unsigned field gives a bytes field")

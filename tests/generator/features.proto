@@ -45,6 +45,8 @@ message Device {
   repeated Slot slots = 14;
   repeated State history = 15;
   repeated int32 trims = 16;
+  sint32 trim_delta = 17;
+  repeated sint64 history_delta = 18;
   oneof event {
     uint32 code = 20;
     string text = 22;
