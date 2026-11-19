@@ -1,0 +1,9 @@
+# Sizes for features.proto. A name can have the package or not.
+features.Device.slots  max_count:2
+Device.history         max_count:3
+Device.trims           max_count:4 int_size:IS_8
+Device.offset          int_size:IS_16
+Device.token           max_size:8
+Device.Slot.key        max_size:16
+Calibration.gains      max_count:4 fixed_count:true
+Calibration.id         max_size:6 fixed_length:true

@@ -1,0 +1,7 @@
+# Sizes for vectors.proto. protoc-gen-micropb reads this file and writes vectors.pb.hpp.
+lists.*      max_count:8
+pose.pos     max_count:3
+pose.rot     max_count:4
+text.mac     max_size:6 fixed_length:true
+scalars.i8   int_size:IS_8
+scalars.u16  int_size:IS_16

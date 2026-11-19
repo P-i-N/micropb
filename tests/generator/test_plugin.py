@@ -521,6 +521,32 @@ class WarningTest(unittest.TestCase):
         self.assertEqual(stderr, "")
 
 
+class CheckedInTest(unittest.TestCase):
+    """The generated headers that the C++ test `test_generated` compiles."""
+
+    # The folder to run protoc in, the folder of the headers, the .proto files, more protoc arguments.
+    GENERATED = [
+        (REPO / "tests/vectors", REPO / "tests/vectors", ["vectors.proto"], []),
+        (REPO, REPO / "tests/generator", ["features.proto", "shared.proto"],
+         ["-Itests/generator", "--micropb_opt=options_dir=tests/generator"]),
+    ]
+
+    def test_checked_in_headers_are_current(self):
+        for cwd, folder, protos, args in self.GENERATED:
+            with tempfile.TemporaryDirectory() as out:
+                rc, stderr = run_protoc(cwd, protos, out, *args)
+                self.assertEqual((rc, stderr), (0, ""))
+                for proto in protos:
+                    name = proto.replace(".proto", ".pb.hpp")
+                    text = (Path(out) / name).read_text()
+                    if os.environ.get("MICROPB_UPDATE_GENERATED"):
+                        (folder / name).write_text(text, newline="\n")
+                    with self.subTest(header=name):
+                        self.assertTrue((folder / name).is_file(), "run again with MICROPB_UPDATE_GENERATED=1")
+                        self.assertEqual(text, (folder / name).read_text(),
+                                         "run again with MICROPB_UPDATE_GENERATED=1")
+
+
 if __name__ == "__main__":
     if sys.argv[1:] == ["--check-tools"]:
         sys.exit(0 if tools_available() else 1)

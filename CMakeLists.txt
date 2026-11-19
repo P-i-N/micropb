@@ -56,6 +56,21 @@ micropb_add_test(test_codec)
 micropb_add_test(test_encode)
 micropb_add_test(test_decode)
 micropb_add_test(test_wire_compat)
+micropb_add_test(test_generated)
+
+# The tests of tools/protoc-gen-micropb.py need Python, the Python package protobuf and protoc.
+# Without them, CTest does not have the test `generator`. The other tests do not need these tools.
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    set(micropb_plugin_tests ${CMAKE_CURRENT_SOURCE_DIR}/tests/generator/test_plugin.py)
+    execute_process(COMMAND ${Python3_EXECUTABLE} ${micropb_plugin_tests} --check-tools
+        RESULT_VARIABLE micropb_plugin_tools OUTPUT_QUIET ERROR_QUIET)
+    if(micropb_plugin_tools EQUAL 0)
+        add_test(NAME generator COMMAND ${Python3_EXECUTABLE} ${micropb_plugin_tests})
+    else()
+        message(STATUS "micropb: no protoc or no Python package protobuf, the test `generator` is off")
+    endif()
+endif()
 
 foreach(rule
         duplicate_tag tag_zero tag_too_large tag_reserved oneof_tags_count
