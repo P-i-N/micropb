@@ -10,6 +10,12 @@ target_include_directories(micropb INTERFACE src)
 target_compile_features(micropb INTERFACE cxx_std_26)
 target_compile_options(micropb INTERFACE -freflection)
 
+# For a compiler without reflection: the include directory and C++23 only. Each
+# message type then needs a field list (`pb::fields_of`).
+add_library(micropb_cxx23 INTERFACE)
+target_include_directories(micropb_cxx23 INTERFACE src)
+target_compile_features(micropb_cxx23 INTERFACE cxx_std_23)
+
 enable_testing()
 
 set(micropb_compile_options -fno-exceptions -fno-rtti -Wall -Wextra -Werror)
@@ -63,8 +69,8 @@ micropb_add_test(test_field_list)
 # works there when it has a field list (`pb::fields_of`), which protoc-gen-micropb writes.
 function(micropb_add_cxx23_test name)
     add_executable(${name}_cxx23 tests/${name}.cpp)
-    target_include_directories(${name}_cxx23 PRIVATE src)
-    set_target_properties(${name}_cxx23 PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
+    target_link_libraries(${name}_cxx23 PRIVATE micropb_cxx23)
+    set_target_properties(${name}_cxx23 PROPERTIES CXX_STANDARD 23)
     target_compile_options(${name}_cxx23 PRIVATE ${micropb_compile_options} ${micropb_sanitize_options})
     target_link_options(${name}_cxx23 PRIVATE ${micropb_sanitize_link_options})
     add_test(NAME ${name}_cxx23 COMMAND ${name}_cxx23)
@@ -111,8 +117,8 @@ endforeach()
 
 # A message type without a field list on a compiler without reflection.
 add_library(no_field_list OBJECT EXCLUDE_FROM_ALL tests/compile_fail/no_field_list.cpp)
-target_include_directories(no_field_list PRIVATE src)
-set_target_properties(no_field_list PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(no_field_list PRIVATE micropb_cxx23)
+set_target_properties(no_field_list PROPERTIES CXX_STANDARD 23)
 target_compile_options(no_field_list PRIVATE ${micropb_compile_options})
 add_test(NAME compile_fail.no_field_list COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target no_field_list)
 set_tests_properties(compile_fail.no_field_list PROPERTIES

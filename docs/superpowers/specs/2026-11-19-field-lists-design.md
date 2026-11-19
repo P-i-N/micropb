@@ -1,6 +1,6 @@
 # Field lists: `micropb` without reflection
 
-Date: 2026-11-19. Status: waiting for approval.
+Date: 2026-11-19. Status: implemented. The user selected the approach and the C++23 floor, then left with the words "do whatever", so the builder made the remaining decisions. They are in "Changes during the implementation".
 
 ## Intent
 
@@ -107,6 +107,15 @@ GCC 16 is the only compiler on this machine. "No reflection" is tested as GCC 16
 ## Calls of the builder
 
 * The field list is a type, not an array of values. Thus the rules can examine the member types, and the generated list can be compared with the reflected list by `std::is_same_v`.
-* `offsetof` gives the offset. A generated struct is a standard-layout type with the standard library of GCC, where `offsetof` is fully defined. For a type that is not standard-layout, `offsetof` is "conditionally supported": GCC and Clang accept it with a warning. The generated block turns this warning off for its lines.
+* `offsetof` gives the offset. A generated struct is a standard-layout type with the standard library of GCC, where `offsetof` is fully defined. For a type that is not standard-layout, `offsetof` is "conditionally supported": GCC and Clang accept it with the warning `-Winvalid-offsetof`. The generated header does not turn this warning off.
 * The entries of a list do not have to be in the order of the field numbers. The back end sorts them.
 * The file name `meta_schema.hpp` stays, although one half of it does not use reflection.
+
+## Changes during the implementation
+
+* **The generated structs have no `pb::tag` and no `pb::oneof_tags` annotation.** An annotation is C++26 syntax, so a C++23 compiler does not accept it. The field numbers are only in the field list. Thus, on GCC 16, the list that reflection makes for a generated struct has the numbers 1, 2, 3 ..., and the test compares members, offsets and alternatives but not numbers. The numbers are tested against the hand-written structs of `tests/vectors/messages.hpp` and against bytes from `protoc`.
+* **Three more rules** for lists that a person writes: `field_list_type`, `field_list_offset`, `field_list_alternative`. A wrong list would make the codec read or write memory outside the message.
+* **A CMake target `micropb_cxx23`**: the include directory and C++23, without `-freflection`.
+* The C++23 configuration is not a second build folder. It is a set of more test targets (`*_cxx23`) in the same build.
+* `std::monostate` has no field list. The rule functions skip it.
+* The code size became smaller: 14,517 bytes for 32 message types (before: 14,700).

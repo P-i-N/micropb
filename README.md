@@ -2,7 +2,7 @@
 
 A small proto3 encoder and decoder for C++26. Your plain structs are the schema.
 
-`micropb` is made for embedded devices that send protobuf messages to PC tools, for example on a USB serial port. It uses C++26 static reflection, so the C++ side needs no `.proto` file, no code generator and no macro. When you already have `.proto` files, a `protoc` plugin writes the structs from them.
+`micropb` is made for embedded devices that send protobuf messages to PC tools, for example on a USB serial port. It uses C++26 static reflection, so the C++ side needs no `.proto` file, no code generator and no macro. When you already have `.proto` files, a `protoc` plugin writes the structs from them. Those generated structs also work on a C++23 compiler that has no reflection.
 
 ```cpp
 struct ping {
@@ -21,6 +21,7 @@ const auto size = pb::encode(ping{7}, buffer); // 08 07
 * [Add it to a project](#add-it-to-a-project)
 * [Define messages](#define-messages)
 * [Generate structs from a .proto file](#generate-structs-from-a-proto-file)
+* [Compilers without reflection](#compilers-without-reflection)
 * [Encode](#encode)
 * [Decode](#decode)
 * [Errors](#errors)
@@ -42,6 +43,7 @@ const auto size = pb::encode(ping{7}, buffer); // 08 07
 * **Same bytes as `protoc`.** The tests compare the output with reference vectors from the Google C++ runtime.
 * **Mistakes are compile errors.** A duplicate field number or a type without a proto3 mapping does not compile.
 * **Header-only.** Five headers, standard library only.
+* **Reflection is optional.** A message with a field list works on a C++23 compiler. The `protoc` plugin writes the field lists.
 
 ## Example
 
@@ -93,14 +95,15 @@ The encoded message has 6 bytes:
 
 ## How it works
 
-Reflection reads each message struct at compile time and makes a constant table for it. At run time, one interpreter reads the tables.
+Each message type has a field list: the type, the number and the offset of each member. Reflection reads the struct at compile time and makes this list. For a `.proto` file, the `protoc` plugin writes the list into the generated header, so that no reflection is necessary. Templates make a constant table from the list. At run time, one interpreter reads the tables.
 
 ```mermaid
 flowchart LR
     subgraph CT["Compile time"]
         direction TB
-        S["Your struct"] -->|"C++26 reflection"| TT["Tag table<br/>field numbers and checks"]
-        TT --> D["Descriptor tables<br/>constants in ROM"]
+        S["Your struct"] -->|"C++26 reflection"| TT["Field list<br/>pb::fields_of"]
+        P[".proto file"] -->|"protoc plugin"| TT
+        TT -->|"checks"| D["Descriptor tables<br/>constants in ROM"]
     end
     subgraph RT["Run time"]
         direction TB
@@ -162,9 +165,9 @@ classDiagram
 
 ## Add it to a project
 
-**Requirements:** GCC 16.2 or newer with `-std=c++26 -freflection`. No other compiler has been used.
+**Requirements:** GCC 16.2 or newer with `-std=c++26 -freflection`. No other compiler has been used. For a compiler without reflection, see [Compilers without reflection](#compilers-without-reflection).
 
-With CMake, add the directory and link the `micropb` target. The target is an `INTERFACE` library: it gives the include directory, C++26 and `-freflection`.
+With CMake, add the directory and link the `micropb` target. The target is an `INTERFACE` library: it gives the include directory, C++26 and `-freflection`. The target `micropb_cxx23` gives the include directory and C++23 only.
 
 ```cmake
 add_subdirectory(micropb)
@@ -300,13 +303,13 @@ A `std::array<std::uint8_t, N>` is a bytes field with a fixed length, for exampl
 
 ## Generate structs from a .proto file
 
-When a project already has `.proto` files, you do not have to write the structs. `tools/protoc-gen-micropb.py` is a plugin for `protoc`. It reads a proto3 file and writes a header with the structs. It needs Python 3 and the Python package `protobuf`.
+When a project already has `.proto` files, you do not have to write the structs. `tools/protoc-gen-micropb.py` is a plugin for `protoc`. It reads a proto3 file and writes a header with the structs. It needs Python 3.8 or newer and the Python package `protobuf`. (It is tested only with Python 3.14.)
 
 ```mermaid
 flowchart LR
     proto["app.proto<br/>shared with the PC tools"] --> protoc["protoc +<br/>protoc-gen-micropb"]
     options["app.options<br/>sizes"] --> protoc
-    protoc --> header["app.pb.hpp<br/>plain structs"]
+    protoc --> header["app.pb.hpp<br/>plain structs and field lists"]
     header --> codec["pb::encode<br/>pb::decode"]
 ```
 
@@ -314,7 +317,7 @@ flowchart LR
 protoc --plugin=protoc-gen-micropb=tools/protoc-gen-micropb.py --micropb_out=gen --micropb_opt=options_dir=proto -I proto proto/app.proto
 ```
 
-This command writes `gen/app.pb.hpp`. On Windows, use `tools\protoc-gen-micropb.bat` as the plugin, because `protoc` cannot start a `.py` file there.
+This command writes `gen/app.pb.hpp`. The folder `gen` must exist. On Windows, use `tools\protoc-gen-micropb.bat` as the plugin, because `protoc` cannot start a `.py` file there.
 
 `proto/app.proto`:
 
@@ -351,6 +354,7 @@ Sample.mac        max_size:6 fixed_length:true
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 
@@ -367,23 +371,35 @@ struct Sample {
     std::uint32_t time;
     pb::repeated<float, 8> values;
     std::array<std::uint8_t, 6> mac;
-    [[= pb::tag{10}]] std::optional<pb::sint32> offset;
+    std::optional<pb::sint32> offset;
     Mode mode;
 };
 
 } // namespace app
+
+// Field lists: with these, the messages also work on a compiler without reflection.
+
+template <>
+struct pb::fields_of<app::Sample> : pb::field_list<app::Sample,
+    pb::field_at<decltype(app::Sample::time), 1, offsetof(app::Sample, time)>,
+    pb::field_at<decltype(app::Sample::values), 2, offsetof(app::Sample, values)>,
+    pb::field_at<decltype(app::Sample::mac), 3, offsetof(app::Sample, mac)>,
+    pb::field_at<decltype(app::Sample::offset), 10, offsetof(app::Sample, offset)>,
+    pb::field_at<decltype(app::Sample::mode), 11, offsetof(app::Sample, mode)>> {};
 ```
+
+The structs are plain structs. The field lists after them give each member its field number. With them, the header needs no reflection and no annotation, see [Compilers without reflection](#compilers-without-reflection).
 
 ### What the plugin writes
 
 The types are those of the table in [Type mapping](#type-mapping). These rules are specific to the plugin:
 
-* **Names** stay as they are in the `.proto` file. A name that is a C++ keyword gets the suffix `_`: `class` becomes `class_`.
+* **Names** stay as they are in the `.proto` file. A name that is a C++ keyword gets the suffix `_`: `class` becomes `class_`. The same applies to `pb`, `std` and the common macro names `NULL`, `EOF`, `errno`, `stdin`, `stdout`, `stderr`, `assert` and `offsetof`. A name that is a different macro in your project, for example `HIGH`, is not changed and does not compile.
 * **Package:** `package a.b` becomes `namespace a::b`.
-* **Enum values** lose the prefix `<ENUM NAME>_` when each value of the enum has it. `MODE_IDLE` of `Mode` becomes `Mode::IDLE`.
+* **Enum values** lose the prefix `<ENUM NAME>_` when each value of the enum has it and the remaining text starts with a letter. `MODE_IDLE` of `Mode` becomes `Mode::IDLE`. The comparison ignores case. For a nested enum, the prefix is the name of the enum without the outer message: `STATE_` for `Device.State`.
 * **Nested types** become top-level types: `Outer.Inner` is `Outer_Inner`.
 * **Order:** the enums come first. Each struct comes after the structs that it contains, also when the `.proto` file has a different order.
-* **Field numbers:** a member gets `[[= pb::tag{N}]]`, and a `oneof` gets `[[= pb::oneof_tags<...>{}]]`, only where the numbers are not consecutive.
+* **Field numbers** are in the field list after the structs. The structs have no `pb::tag` annotation, because an annotation is C++26.
 * **`oneof`** becomes a `std::variant` with the name of the `oneof`. The names of its members are not in the C++ code.
 * **A message field without `optional`** is a plain member. The encoder always writes it, see [Presence](#presence).
 * **`string`** is always a `std::string_view`, and `bytes` without an option is a `std::span<const std::uint8_t>`.
@@ -405,11 +421,47 @@ A `.proto` file does not say how many elements a repeated field can have. The pl
 * When more than one line sets the same option for a field, the last line wins.
 * Each repeated field must have a `max_count`. The plugin stops with an error when one is missing.
 * The plugin looks for `<name>.options` with the path that `protoc` has for the `.proto` file, from the current folder. Give more folders with `--micropb_opt=options_dir=<folder>`.
-* An option that the plugin does not know, an option that does not apply to its field and a pattern that matches no field give a warning. Thus an options file of NanoPB works, and a typing error is visible. `max_size` on a `string` field is such a case: a string has no storage in the struct.
+* An option that the plugin does not know and a pattern that matches no field give a warning. An option that does not apply to its field gives a warning when its line has no wildcard. Thus a simple options file of NanoPB works, and a typing error is visible. `max_size` on a `string` field is such a case: a string has no storage in the struct.
+* The file must be UTF-8 text.
 
 ### What the plugin does not accept
 
-The plugin stops with an error for: a file that is not proto3, a `map` field, a message that contains itself, a `oneof` with two members of the same type, and `int_size:IS_8` on a repeated unsigned field (the library reads a sequence of `std::uint8_t` as `bytes`). It ignores services and `extend` blocks.
+The plugin stops with an error for: a file that is not proto3, a `map` field, a message that contains itself, a `oneof` with two members of the same type, and `int_size:IS_8` on a repeated unsigned field (the library reads a sequence of `std::uint8_t` as `bytes`). It ignores services and `extend` blocks. It also ignores `[packed = false]`: the library always packs scalar elements, and each protobuf parser reads the two forms.
+
+The plugin does not read options that are in the `.proto` file, such as `[(nanopb).max_size = 6]`. When it finds no options file, a `bytes` field is a `std::span` and an integer has its full size, without a message. Thus make sure that the options file is found: see the rule for `options_dir` above.
+
+## Compilers without reflection
+
+Reflection has one task in `micropb`: it finds the members of a struct and makes the field list. All other code is C++23. Thus a message type that has a field list works on a compiler without reflection, with `-std=c++23`.
+
+* **Generated structs:** `protoc-gen-micropb` writes a field list for each message. Include the generated header and `<micropb/micropb.hpp>`. Nothing more is necessary.
+* **Your own structs:** write the field list, or use a compiler with reflection.
+
+A field list is a specialization of `pb::fields_of`. It has one `pb::field_at` for each field: the type of the member, the field number and the offset of the member.
+
+```cpp
+struct ping {
+    std::uint32_t seq;
+    std::string_view note;
+};
+
+template <>
+struct pb::fields_of<ping> : pb::field_list<ping,
+    pb::field_at<decltype(ping::seq), 1, offsetof(ping, seq)>,
+    pb::field_at<decltype(ping::note), 2, offsetof(ping, note)>> {};
+```
+
+* The entries can be in any order.
+* A `std::variant` member has one entry for each alternative after `std::monostate`. The entry has the index of the alternative as a fourth argument: `pb::field_at<decltype(msg::choice), 10, offsetof(msg, choice), 1>`.
+* The specialization must come before the first use of the type with `pb::encode`, `pb::decode` or `pb::encoded_size`.
+* A field list has priority over reflection. Thus a generated message uses the same table on each compiler.
+* The rules of [Compile-time checks](#compile-time-checks) also apply to a field list, with the exception of the rules that need reflection: `not_aggregate`, `base_class`, `inaccessible_member`, `bit_field` and the rules for annotations.
+* The tables are the same constants in ROM, and the code size is the same.
+
+Without reflection and without a field list, a message type does not compile. The error is `pb: no_field_list`.
+
+> [!NOTE]
+> This was tested with GCC 16 in C++23 mode without `-freflection`. A test with an older compiler, for example the Arm GNU Toolchain, has not been done.
 
 ## Encode
 
@@ -530,6 +582,15 @@ A message that the codec cannot handle correctly does not compile. Each error is
 | `repeated_repeated`, `repeated_optional`, `repeated_variant` | The element of a repeated field is a repeated field, a `std::optional` or a `std::variant`. |
 | `span_buffer_in_optional`, `span_buffer_in_variant`, `span_buffer_in_repeated` | A `pb::span_buffer` is in a place where it cannot get its storage. |
 
+**Field lists that a person wrote**
+
+| Rule | Cause |
+| --- | --- |
+| `no_field_list` | The compiler has no reflection and the message type has no `pb::fields_of`. |
+| `field_list_type` | `pb::fields_of<T>` derives from the `pb::field_list` of a different type. |
+| `field_list_offset` | The offset of a `pb::field_at` is not in the message. Use `offsetof`. |
+| `field_list_alternative` | A `std::variant` member has an entry without an alternative index, or a different member has one. |
+
 **Decode only**
 
 | Rule | Cause |
@@ -619,7 +680,9 @@ The tests use the flags `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`.
 | `test_codec` | the descriptor tables and one message with each kind of member | `static_assert` for the tables, run time for the codec |
 | `test_encode`, `test_decode` | `encode` and `decode` against the reference vectors | run time |
 | `test_wire_compat` | round trips, each prefix and each single changed byte of each vector | run time |
-| `test_generated` | the headers that the `protoc` plugin wrote for `vectors.proto` and `features.proto`, against bytes from `protoc` | run time |
+| `test_generated` | the headers that the `protoc` plugin wrote for `vectors.proto` and `features.proto`, against bytes from `protoc`. Each field list of the plugin agrees with reflection | run time and `static_assert` |
+| `test_field_list` | a field list that a person wrote: table, encode, decode | run time and `static_assert` |
+| `*_cxx23`, `no_startup_code` | `test_wire`, `test_types`, `test_field_list` and `test_generated` built as C++23 without reflection. The tables need no code before `main()` | run time, `nm` |
 | `generator` | `tools/protoc-gen-micropb.py`: each rule, each option, each error | Python `unittest`, runs the plugin through `protoc` |
 | `compile_fail.*` | each rule of [Compile-time checks](#compile-time-checks) | the file must not compile, and the compiler output must name the rule |
 
@@ -662,7 +725,7 @@ src/micropb/
     micropb.hpp      include this header
     types.hpp        pb::error, pb::repeated, pb::span_buffer, pb::sint32 ..., pb::tag, pb::oneof_tags
     wire.hpp         reader and writer for varints, fixed-width values and keys
-    meta_schema.hpp  reflection: field numbers, type classification, compile-time checks
+    meta_schema.hpp  type classification, compile-time checks, field lists from reflection
     codec.hpp        descriptor tables, interpreter, encoded_size, encode, decode
 tools/
     protoc-gen-micropb.py   protoc plugin: .proto file -> header with structs
@@ -679,6 +742,7 @@ docs/superpowers/    design documents and implementation plans
 ## Status and limits
 
 * **Compiler:** developed and tested with GCC 16.2 on Linux. The MSYS2 build of the table codec and the MinGW variant of `MICROPB_SANITIZE` are not yet verified.
+* **Without reflection:** tested only as GCC 16.2 with `-std=c++23` and without `-freflection`. No older compiler has been used.
 * **ARM:** not yet compiled or measured for an ARM target.
 * **CMake:** `add_subdirectory` also adds the tests of `micropb` to your project.
 * **`protoc` plugin:** tested on Linux with `protoc` 35.1 and the Python package `protobuf` 7.36. `tools/protoc-gen-micropb.bat` is not yet verified on Windows.

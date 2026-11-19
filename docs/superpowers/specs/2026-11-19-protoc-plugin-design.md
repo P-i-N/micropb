@@ -134,3 +134,14 @@ README.md                       new section "Generate structs from a .proto file
 * New warning: a pattern that matches no field. A wildcard rule gives no warning for the fields that it does not apply to.
 * `max_size` applies only to a `bytes` field that is not repeated.
 * A second test schema, `tests/generator/features.proto` with `shared.proto`, covers the rules that `vectors.proto` does not use. Its generated headers are also checked in and compiled.
+
+## Changes after the review and for field lists
+
+* The header now has a field list (`pb::fields_of`) for each message and no annotations: see `2026-11-19-field-lists-design.md`. The rule "a member gets `[[= pb::tag{N}]]` only where the numbers have a gap" no longer applies.
+* `pb`, `std` and eight common macro names (`NULL`, `EOF`, `errno`, `stdin`, `stdout`, `stderr`, `assert`, `offsetof`) get the suffix `_`, as keywords do. The parts of a package name get it also.
+* The options file is read as UTF-8 with or without a byte order mark. A file in a different encoding is a clean error.
+* Warnings are printed also when an error stops the plugin.
+* `max_count` and `max_size` accept 1 to 999999999.
+* Enum values keep their names when the text after the prefix does not start with a letter.
+* The plugin has no syntax that needs Python 3.12.
+* Not changed, by decision of the builder: no message when no options file is found; a `(nanopb)` option in the `.proto` file is not read; an import of a proto2 file or of a well-known type gives an `#include` of a header that the user must generate; a type name collision between two files is not found; `[packed = false]` is ignored.
