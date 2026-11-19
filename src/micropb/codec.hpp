@@ -30,8 +30,8 @@ namespace detail {
 ////////////////////////////////////////////////////////////////////////////////
 // Part 1: descriptors
 
-// A scalar code tells the interpreter how to load and store a scalar. The low
-// two bits are log2 of the size in bytes. The other bits are flags.
+/// A scalar code tells the interpreter how to load and store a scalar. The low
+/// two bits are log2 of the size in bytes. The other bits are flags.
 inline constexpr std::uint8_t scalar_size_mask = 0x03;
 /// The type has a sign: the loaded value sign-extends to 64 bits.
 inline constexpr std::uint8_t scalar_signed = 0x04;
@@ -220,8 +220,9 @@ sequence_view access_sequence( void* sequence )
 	}
 }
 
-/// A value type with a `const` member cannot be made again in its place. Such
-/// a type is encode-only (`check_decodable`), and `ENGAGE` does nothing for it.
+/// Accessor of `std::optional`. The codec cannot make a value with a `const`
+/// member again in its place. Such a value type is encode-only
+/// (`check_decodable`), and `ENGAGE` does nothing for it.
 template <typename O>
 void* access_optional( void* optional, optional_op op )
 {
@@ -509,11 +510,12 @@ inline void emit_bytes( writer& sink, std::uint32_t number, std::span<const std:
 
 inline void emit_message( writer& sink, const message_desc& message, const void* object );
 
-// The three entry points of the interpreter are never inlined and never cloned.
-// When the compiler puts the interpreter into its caller, it makes a copy of
-// the interpreter for each message type, which is what the tables prevent. It
-// also examines the paths of other message types against the type that it
-// knows at the call, and gives warnings about accesses that never occur.
+// The compiler does not inline or clone the three entry points of the
+// interpreter (`gnu::noinline`, `gnu::noclone`). If the compiler puts the
+// interpreter into its caller, it makes a copy of the interpreter for each
+// message type. The tables prevent these copies. The compiler then also
+// examines the paths of other message types against the type that it knows at
+// the call, and gives warnings about accesses that never occur.
 
 /// Encoded size of the fields of the message at `object`, without key and
 /// length prefix. A writer without a span only counts, so the size and the
@@ -526,14 +528,14 @@ inline void emit_message( writer& sink, const message_desc& message, const void*
 	return sink.size();
 }
 
-/// Writes one field. `always` is `true` for explicit presence: the field is
-/// written also when its value is the default value.
+/// Writes one field. `always` is `true` for explicit presence: the function
+/// writes the field also when its value is the default value.
 inline void emit_value( writer& sink, std::uint32_t number, const value_desc& type, const void* value, bool always )
 {
 	switch ( type.kind )
 	{
 		case field_kind::SCALAR: {
-			// Zero bits mean the default value. `-0.0` has a sign bit, so it is written.
+			// Zero bits mean the default value. `-0.0` has a sign bit, so the codec writes it.
 			const std::uint64_t bits = load_scalar( value, type.scalar );
 			if ( always || bits != 0 )
 			{
@@ -757,8 +759,9 @@ inline void decode_message( reader& in, const message_desc& message, void* objec
 inline void decode_value( reader& in, wire_type wire, const value_desc& type, void* value );
 
 /// Reads one element from `in` into the next free item of the sequence at
-/// `value`. A full sequence is an error, before the element is read. The item
-/// starts from its initial state: records of a repeated field do not merge.
+/// `value`. A full sequence is an error: the function examines the capacity
+/// before it reads the element. The item starts from its initial state:
+/// records of a repeated field do not merge.
 inline void decode_element( reader& in, wire_type wire, const sequence_desc& sequence, void* value )
 {
 	const sequence_view items = view_of( sequence, value );
@@ -794,9 +797,9 @@ inline void decode_repeated( reader& in, wire_type wire, const sequence_desc& se
 	}
 }
 
-/// Reads the value of one field into `value`. A field with the wrong wire type
-/// is skipped, as an unknown field. A read that fails does not change a scalar,
-/// a string or a bytes field.
+/// Reads the value of one field into `value`. The function skips a field with
+/// the wrong wire type, as an unknown field. A read that fails does not change
+/// a scalar, a string or a bytes field.
 inline void decode_value( reader& in, wire_type wire, const value_desc& type, void* value )
 {
 	if ( type.kind == field_kind::REPEATED )
@@ -901,8 +904,8 @@ inline void decode_message( reader& in, const message_desc& message, void* objec
 		}
 
 		// A different active alternative gives way to a value-initialized one.
-		// The same alternative stays, so a message merges. A wrong wire type
-		// is skipped and keeps the variant.
+		// The same alternative stays, so a message merges. The codec skips a
+		// field with a wrong wire type and keeps the variant.
 		const variant_desc& variant = *field->type->variant;
 		const value_desc& alternative = *variant.alternatives[field->alternative];
 		if ( key.type != wire_of( alternative ) )
@@ -946,7 +949,7 @@ template <typename T>
 
 /// Decodes the proto3 message in `in` into `msg` and returns `in.size()`. Resets
 /// `msg` first. A `pb::span_buffer` keeps its storage. On error, `msg` holds the
-/// fields that were read before the error. A `std::string_view` or a
+/// fields that `decode` read before the error. A `std::string_view` or a
 /// `std::span` of `msg` points into `in`.
 template <typename T>
 [[nodiscard]] std::expected<std::size_t, error> decode( std::span<const std::uint8_t> in, T& msg )

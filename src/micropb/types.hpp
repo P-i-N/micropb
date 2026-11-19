@@ -26,7 +26,7 @@ enum class error
 	CAPACITY_EXCEEDED,
 };
 
-/// Wire types of proto3 that this library supports. Group types (3, 4) are not supported.
+/// Wire types of proto3 that this library supports. It does not support the group types (3, 4).
 enum class wire_type : std::uint8_t
 {
 	VARINT = 0,
@@ -141,8 +141,8 @@ private:
 	std::size_t _count = 0;
 };
 
-/// Sequence that stores its items in caller-owned storage. The storage must
-/// outlive the buffer. Does not allocate.
+/// Sequence that keeps its items in storage that the caller owns. The storage
+/// must exist for as long as the buffer exists. Does not allocate.
 template <typename T>
 struct span_buffer
 {

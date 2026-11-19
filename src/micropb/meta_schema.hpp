@@ -130,8 +130,8 @@ using element_t = typename sequence_traits<T>::element;
 
 /// A standard integer type: any integer type by size and sign, but not `bool` and not the character types.
 /// Only the sizes 1, 2, 4 and 8 map to the wire: `__int128`, which `-std=gnu++23` makes integral, does not.
-/// A volatile-qualified type is not accepted: the codec reads and writes through `memcpy`, without `volatile`.
-/// `std::int32_t` is `int` on a PC and `long` on `arm-none-eabi`, and both are accepted.
+/// The rule does not accept a volatile-qualified type: the codec reads and writes through `memcpy`, without
+/// `volatile`. `std::int32_t` is `int` on a PC and `long` on `arm-none-eabi`. The rule accepts both.
 template <typename T>
 consteval bool is_standard_integer()
 {
@@ -311,12 +311,12 @@ struct entry_shape
 	std::size_t alternative;
 	/// The number of alternatives of a `std::variant` member, else 0.
 	std::size_t alternatives;
-	/// An empty struct. It can share its address with a different member.
+	/// `true` for an empty struct. An empty struct can share its address with a different member.
 	bool empty;
 };
 
 /// `true` when two entries name the same bytes of the message. The entries of
-/// the different alternatives of one `std::variant` member are not such a case.
+/// different alternatives of one `std::variant` member do not overlap.
 consteval bool entries_overlap( std::span<const entry_shape> entries )
 {
 	for ( std::size_t i = 0; i < entries.size(); ++i )
@@ -659,7 +659,7 @@ consteval std::size_t field_count()
 	return count;
 }
 
-/// Tag table in declaration order. Applies the tag rules of the spec.
+/// Tag table in declaration order. Applies the rules for `pb::tag` and `pb::oneof_tags`.
 template <typename T>
 consteval std::array<field_info, field_count<T>()> collect_fields()
 {
@@ -734,7 +734,8 @@ consteval std::meta::info make_field_list()
 	return std::meta::substitute( ^^field_list, arguments );
 }
 
-/// First the rules for the message type, so that their error comes before an error of reflection.
+/// The field list of the struct `T`. Applies the rules for the message type first, so that their error comes
+/// before an error of reflection.
 template <typename T>
 consteval std::meta::info reflect_field_list()
 {

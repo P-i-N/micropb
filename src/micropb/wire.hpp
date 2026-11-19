@@ -55,10 +55,10 @@ struct field_key
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Writes wire primitives into a fixed buffer. A byte that does not fit is not
-/// written, but the writer counts it: `size()` is the size that the output
-/// needs, and `fits()` tells if the span holds all of it. A writer without a
-/// span only counts. The writer never writes past the span.
+/// Writes wire primitives into a fixed buffer. The writer does not write a byte
+/// that does not fit, but it counts the byte: `size()` is the size that the
+/// output needs, and `fits()` tells if the span holds all of it. A writer
+/// without a span only counts. The writer never writes past the span.
 struct writer
 {
 	constexpr writer() = default;
@@ -101,11 +101,11 @@ struct writer
 		_pos = count > limit - _pos ? limit : _pos + count;
 	}
 
-	/// `true` when the span has no space: each byte from here is only counted.
+	/// `true` when the span has no space: from here, the writer only counts the bytes.
 	[[nodiscard]] constexpr bool counts_only() const { return _pos >= _out.size(); }
 
-	/// Number of bytes that the output needs. This is the number of bytes
-	/// written only when `fits()` is `true`.
+	/// Number of bytes that the output needs. It is the number of bytes that
+	/// the writer wrote only when `fits()` is `true`.
 	[[nodiscard]] constexpr std::size_t size() const { return _pos; }
 
 	[[nodiscard]] constexpr bool fits() const { return _pos <= _out.size(); }
@@ -134,8 +134,8 @@ private:
 /// bytes first, so the reader never reads past the span.
 /// The first read that fails sets the error and moves the reader to the end of
 /// the input. Each read after that returns 0 or an empty span, and the error
-/// stays. The caller reads without a check after each step and looks at
-/// `failed()` or `status()` when it must know.
+/// stays. The caller can read many values without a check, and examine
+/// `failed()` or `status()` after them.
 struct reader
 {
 	/// Largest field number of proto3.
@@ -176,8 +176,9 @@ struct reader
 	/// Returns a view into the input. Does not copy.
 	constexpr std::span<const std::uint8_t> read_length_delimited()
 	{
-		// Compare with the remaining bytes before any addition: no overflow.
-		// After a failed `read_varint` the length is 0 and no bytes remain.
+		// The comparison with the remaining bytes comes before an addition, so it
+		// cannot overflow. After a failed `read_varint`, the length is 0 and no
+		// bytes remain.
 		const std::uint64_t length = read_varint();
 		if ( length > remaining() )
 		{
