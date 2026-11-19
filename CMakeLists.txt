@@ -199,11 +199,16 @@ if(MICROPB_TESTS)
 
     foreach(prefix ${micropb_arm_prefixes})
         # The tables must be ROM constants on Arm too.
-        string(REPLACE "g++" "nm" nm "${micropb_${prefix}_gxx}")
+        get_filename_component(gxx_dir "${micropb_${prefix}_gxx}" DIRECTORY)
+        find_program(nm NAMES arm-none-eabi-nm HINTS "${gxx_dir}" NO_DEFAULT_PATH NO_CACHE)
         set_tests_properties(${prefix}.test_generated PROPERTIES FIXTURES_SETUP ${prefix}_generated)
-        add_test(NAME ${prefix}.no_startup_code COMMAND "${nm}" ${CMAKE_CURRENT_BINARY_DIR}/${prefix}/test_generated.o)
-        set_tests_properties(${prefix}.no_startup_code PROPERTIES
-            FIXTURES_REQUIRED ${prefix}_generated FAIL_REGULAR_EXPRESSION "_GLOBAL__sub_I")
+        if(nm)
+            add_test(NAME ${prefix}.no_startup_code COMMAND "${nm}" ${CMAKE_CURRENT_BINARY_DIR}/${prefix}/test_generated.o)
+            set_tests_properties(${prefix}.no_startup_code PROPERTIES
+                FIXTURES_REQUIRED ${prefix}_generated FAIL_REGULAR_EXPRESSION "_GLOBAL__sub_I")
+        else()
+            message(STATUS "micropb: no arm-none-eabi-nm next to ${micropb_${prefix}_gxx}, ${prefix}.no_startup_code is off")
+        endif()
 
         # A project that uses micropb: configure and build with this compiler.
         set(consumer_command ${CMAKE_COMMAND} -DCOMPILER=${micropb_${prefix}_gxx} -DCPU=${MICROPB_ARM_CPU}

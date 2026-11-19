@@ -1,5 +1,6 @@
 #include <array>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <string_view>
 
