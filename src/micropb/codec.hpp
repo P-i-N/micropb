@@ -877,6 +877,25 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 	}
 }
 
+/// The entry of the field `number` in `message`, or null. The search starts at
+/// the entry `last`. After the end of the table, it continues at the first
+/// entry. After a match, `last` is the index of the entry.
+[[nodiscard]] inline const field_desc* find_field( const message_desc& message,
+                                                   std::uint32_t number,
+                                                   std::size_t& last )
+{
+	for ( std::size_t tried = 0; tried < message.count; ++tried )
+	{
+		const std::size_t index = last + tried < message.count ? last + tried : last + tried - message.count;
+		if ( message.fields[index].number == number )
+		{
+			last = index;
+			return &message.fields[index];
+		}
+	}
+	return nullptr;
+}
+
 /// Reads all fields of `in` into the message at `object`, until the end of
 /// the input or the first error. Does not reset the message: a field that
 /// occurs again changes the value that is there.
@@ -891,16 +910,7 @@ inline void decode_message( reader& in, const message_desc& message, void* objec
 		if ( in.failed() )
 			return;
 
-		const field_desc* field = nullptr;
-		for ( std::size_t tried = 0; tried < message.count && field == nullptr; ++tried )
-		{
-			const std::size_t index = last + tried < message.count ? last + tried : last + tried - message.count;
-			if ( message.fields[index].number == key.number )
-			{
-				field = &message.fields[index];
-				last = index;
-			}
-		}
+		const field_desc* field = find_field( message, key.number, last );
 		if ( field == nullptr )
 		{
 			in.skip( key.type );
