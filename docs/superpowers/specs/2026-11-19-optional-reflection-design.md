@@ -80,7 +80,7 @@ Added on the user's request after the first draft. Today `int_size` changes only
 **Library.**
 
 * `pb::wire_int<T, pb::int_encoding::ZIGZAG>` is accepted for each signed integer type `T` that the integer rule above accepts, of 1, 2, 4 or 8 bytes. A `T` of 1, 2 or 4 bytes is `sint32` on the wire; a `T` of 8 bytes is `sint64`. `pb::sint32` and `pb::sint64` stay as they are; they are two of these types.
-* Decode: the ZigZag value is decoded and then truncated to the width of `T`, by the same rule as `int64` -> `int32` today.
+* Decode: a member of 1, 2 or 8 bytes decodes the varint as 64-bit ZigZag and then truncates the value to the width of `T`. A member of 4 bytes truncates the varint to 32 bits first and then decodes it as 32-bit ZigZag (the rule of Google for `sint32`). The two rules give the same value for each value in range and differ only for an out-of-range `sint64` input: the `sint64` value 2^31 gives 0 in a 4-byte member.
 * Encode: the value is sign-extended and written as ZigZag. For each value that `T` can hold, the bytes are the bytes of `pb::sint32` with the same value. (ZigZag of a value in the `int32` range gives the same varint in 32 and in 64 bits.)
 * An unsigned `T` with `ZIGZAG` is a compile error with a new rule, for example `pb: zigzag_unsigned: ...` (name left to the builder), with a compile-fail test.
 * `pb::wire_int<T, pb::int_encoding::FIXED>` with a `T` other than today's four stays a compile error (non-goal above).

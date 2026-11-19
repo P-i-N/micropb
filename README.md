@@ -423,9 +423,10 @@ A `.proto` file does not say how many elements a repeated field can have. The pl
 | `max_size:N` | a `bytes` field | `pb::repeated<std::uint8_t, N>` |
 | `max_size:N fixed_length:true` | a `bytes` field | `std::array<std::uint8_t, N>` |
 | `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `int32`, `int64`, `uint32`, `uint64`, `sint32`, `sint64` | `std::int8_t` ... `std::uint64_t`, with the sign of the field. A narrow `sint32` or `sint64` gives `pb::wire_int<std::intN_t, pb::int_encoding::ZIGZAG>` |
-| `enum_intsize:IS_8`, `IS_16`, `IS_32` | an enum | `enum class E : std::int8_t`, `std::int16_t` or `std::int32_t` (the default). A value that does not fit is an error. It saves RAM, not bytes on the wire |
+| `enum_intsize:IS_8`, `IS_16`, `IS_32` | an enum | `enum class E : std::int8_t`, `std::int16_t` or `std::int32_t` (the default). A value that does not fit is an error at generation time. On decode, a value outside the range of the type (for example from a newer peer) is truncated, as for `int_size`. It saves RAM, not bytes on the wire |
 
 * The pattern is the name of the field: `package.Message.field`, or `Message.field` without the package. For `enum_intsize` it is the name of the enum: `package.Enum` or `package.Message.Enum`, with or without the package. `*` and `?` are wildcards, thus `* max_count:8` sets a default for all fields.
+* `int_size` also applies to `sint32` and `sint64`, also through a wildcard line: `* int_size:IS_16` or `Device.* int_size:IS_8` narrows each `sint32` and `sint64` field that it matches, which stayed `pb::sint32` and `pb::sint64` before. Check an existing options file before you regenerate headers. Decode truncates a value to the width of the member.
 * When more than one line sets the same option for a field, the last line wins.
 * Each repeated field must have a `max_count`. The plugin stops with an error when one is missing.
 * The plugin looks for `<name>.options` with the path that `protoc` has for the `.proto` file, from the current folder. Give more folders with `--micropb_opt=options_dir=<folder>`.
@@ -695,7 +696,7 @@ CMake builds the tests only when micropb is the top-level project. `-DMICROPB_TE
 
 When CMake finds `arm-none-eabi-g++`, it adds compile tests for each such compiler. They only compile (`-std=c++23 -fno-exceptions -fno-rtti -Wall -Wextra -Werror -Os -mcpu=cortex-m4 -mthumb`); nothing is linked or run. CMake looks in `PATH` and, on Windows, in `C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/*/bin`. To choose the compilers, configure with `-DMICROPB_ARM_COMPILERS="<g++>;<g++>"`. `-DMICROPB_ARM_CPU=<cpu>` changes `-mcpu` (default `cortex-m4`). Without an Arm toolchain, CMake prints one status line, the Arm tests are off, and all other tests run.
 
-The tests are named `arm_<compiler version>.<test>`. The tests `test_wire`, `test_types`, `test_field_list` and `test_generated` are compiled, `no_startup_code` checks `test_generated.o` with `arm-none-eabi-nm`, and `consumer` configures and builds `tests/consumer`, a small project that uses the `micropb` target with that compiler. For a compiler without reflection, `consumer_reflection_on` checks that `-DMICROPB_REFLECTION=ON` stops with the error of micropb.
+The tests are named `arm_<compiler version>.<test>`. The tests `test_wire`, `test_types`, `test_field_list`, `test_generated` and `test_scalars` are compiled, `no_startup_code` checks `test_generated.o` with `arm-none-eabi-nm`, and `consumer` configures and builds `tests/consumer`, a small project that uses the `micropb` target with that compiler. For a compiler without reflection, `consumer_reflection_on` checks that `-DMICROPB_REFLECTION=ON` stops with the error of micropb.
 
 | Tests | What they examine | How |
 | --- | --- | --- |
@@ -705,7 +706,8 @@ The tests are named `arm_<compiler version>.<test>`. The tests `test_wire`, `tes
 | `test_wire_compat` | round trips, each prefix and each single changed byte of each vector | run time |
 | `test_generated` | the headers that the `protoc` plugin wrote for `vectors.proto` and `features.proto`, against bytes from `protoc`. Each field list of the plugin has the members, offsets and alternatives that reflection finds | run time and `static_assert` |
 | `test_field_list` | a field list that a person wrote: table, encode, decode | run time and `static_assert` |
-| `*_cxx23`, `compile_fail.list_*`, `no_startup_code` | `test_wire`, `test_types`, `test_field_list` and `test_generated` built as C++23 without reflection. The tables need no code before `main()` | run time, `nm` |
+| `test_scalars` | the standard integer types by size and sign, and narrow ZigZag members, against the fixed-width types and `sint32`, `sint64` | run time and `static_assert` |
+| `*_cxx23`, `compile_fail.list_*`, `no_startup_code` | `test_wire`, `test_types`, `test_field_list`, `test_generated` and `test_scalars` built as C++23 without reflection. The tables need no code before `main()` | run time, `nm` |
 | `generator` | `tools/protoc-gen-micropb.py`: each rule, each option, each error | Python `unittest`, runs the plugin through `protoc` |
 | `compile_fail.*` | each rule of [Compile-time checks](#compile-time-checks) | the file must not compile, and the compiler output must name the rule |
 
