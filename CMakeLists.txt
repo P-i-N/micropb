@@ -287,6 +287,9 @@ if(MICROPB_TESTS)
     micropb_add_list_compile_fail_test(list_member_twice field_list_overlap)
     micropb_add_list_compile_fail_test(char_member unmapped_type)
     micropb_add_list_compile_fail_test(wchar_member unmapped_type)
+    # `__int128` is an integer type only with GNU extensions, so this target turns them on.
+    micropb_add_list_compile_fail_test(int128_member unmapped_type)
+    set_target_properties(int128_member PROPERTIES CXX_EXTENSIONS ON)
 
     if(MICROPB_HAS_REFLECTION)
         # Size report: not a test. `cmake --build <dir> --target size_report` prints the
