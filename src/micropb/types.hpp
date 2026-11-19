@@ -66,6 +66,34 @@ struct oneof_tags {};
 
 ////////////////////////////////////////////////////////////////////////////////
 
+/// One field of a message: the type `M` of the member, the field number and
+/// the offset of the member in bytes. For an alternative of a `std::variant`
+/// member, `Alternative` is the index of the alternative, which is 1 or more.
+template <typename M, std::uint32_t Number, std::size_t Offset, std::size_t Alternative = 0>
+struct field_at {};
+
+/// The fields of the message type `T`, in any order.
+template <typename T, typename... Fields>
+struct field_list {};
+
+/// The field list of the message type `T`: a struct that derives from
+/// `pb::field_list<T, ...>`. A compiler with reflection makes it from the
+/// members of `T`. For a compiler without reflection, protoc-gen-micropb or a
+/// person writes a specialization:
+///
+///     template <>
+///     struct pb::fields_of<ping> : pb::field_list<ping,
+///         pb::field_at<decltype(ping::seq), 1, offsetof(ping, seq)>> {};
+template <typename T>
+struct fields_of;
+
+namespace detail {
+/// Gives the codec the count member of `repeated` and `span_buffer`.
+struct sequence_access;
+} // namespace detail
+
+////////////////////////////////////////////////////////////////////////////////
+
 /// Sequence of up to `N` items stored inline. Does not allocate.
 template <typename T, std::size_t N>
 struct repeated {
@@ -94,6 +122,8 @@ struct repeated {
     constexpr void clear() { _count = 0; }
 
 private:
+    friend struct detail::sequence_access;
+
     std::array<T, N> _items{};
     std::size_t _count = 0;
 };
@@ -129,6 +159,8 @@ struct span_buffer {
     constexpr void clear() { _count = 0; }
 
 private:
+    friend struct detail::sequence_access;
+
     std::span<T> _storage;
     std::size_t _count = 0;
 };

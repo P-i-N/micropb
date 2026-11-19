@@ -57,6 +57,23 @@ micropb_add_test(test_encode)
 micropb_add_test(test_decode)
 micropb_add_test(test_wire_compat)
 micropb_add_test(test_generated)
+micropb_add_test(test_field_list)
+
+# The tests that do not need reflection, built as C++23 and without -freflection. A message type
+# works there when it has a field list (`pb::fields_of`), which protoc-gen-micropb writes.
+function(micropb_add_cxx23_test name)
+    add_executable(${name}_cxx23 tests/${name}.cpp)
+    target_include_directories(${name}_cxx23 PRIVATE src)
+    set_target_properties(${name}_cxx23 PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
+    target_compile_options(${name}_cxx23 PRIVATE ${micropb_compile_options} ${micropb_sanitize_options})
+    target_link_options(${name}_cxx23 PRIVATE ${micropb_sanitize_link_options})
+    add_test(NAME ${name}_cxx23 COMMAND ${name}_cxx23)
+endfunction()
+
+micropb_add_cxx23_test(test_wire)
+micropb_add_cxx23_test(test_types)
+micropb_add_cxx23_test(test_field_list)
+micropb_add_cxx23_test(test_generated)
 
 # The tests of tools/protoc-gen-micropb.py need Python, the Python package protobuf and protoc.
 # Without them, CTest does not have the test `generator`. The other tests do not need these tools.

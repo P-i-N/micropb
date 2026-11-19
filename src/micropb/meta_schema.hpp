@@ -4,7 +4,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <meta>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -12,56 +11,107 @@
 #include <utility>
 #include <variant>
 
+#if defined(__cpp_impl_reflection)
+#include <meta>
+#endif
+
 #include <micropb/types.hpp>
 #include <micropb/wire.hpp>
+
+// This header has two parts.
+// Part 1 has the rules for member types, field numbers and field lists. It
+// does not use reflection.
+// Part 2 makes the field list of a struct with reflection. A compiler without
+// reflection does not get this part: there, each message type needs a
+// `pb::fields_of` specialization.
 
 namespace pb {
 
 ////////////////////////////////////////////////////////////////////////////////
+// Part 1: rules
 
 /// Category of a member type. It sets how the codec writes and reads the member.
 enum class field_kind : std::uint8_t { SCALAR, STRING, BYTES, FIXED_BYTES, MESSAGE, OPTIONAL, ONEOF, REPEATED };
-
-/// `field_info::alternative` of a field that is not a `std::variant` alternative.
-inline constexpr std::size_t no_alternative = std::size_t(-1);
-
-/// One entry of the tag table: a plain member, or one alternative of a `std::variant` member.
-struct field_info {
-    std::meta::info member;
-    std::uint32_t number;
-    /// Index into the `std::variant`, or `no_alternative`.
-    std::size_t alternative;
-};
-
-////////////////////////////////////////////////////////////////////////////////
 
 namespace detail {
 
 inline constexpr std::uint32_t max_tag = (1u << 29) - 1;
 inline constexpr std::uint32_t reserved_first = 19000;
 inline constexpr std::uint32_t reserved_last = 19999;
+inline constexpr std::size_t max_offset = 65535;
 
 template <typename T, typename... U>
 inline constexpr bool is_one_of = (std::is_same_v<T, U> || ...);
 
-/// `true` when `type` is a specialization of the class template `templ`.
-consteval bool is_instance(std::meta::info type, std::meta::info templ) {
-    type = std::meta::dealias(type);
-    return std::meta::has_template_arguments(type) && std::meta::template_of(type) == templ;
-}
+template <typename T>
+inline constexpr bool is_optional = false;
+template <typename T>
+inline constexpr bool is_optional<std::optional<T>> = true;
 
 template <typename T>
-consteval bool is_instance_of(std::meta::info templ) {
-    return is_instance(^^T, templ);
-}
+inline constexpr bool is_variant = false;
+template <typename... A>
+inline constexpr bool is_variant<std::variant<A...>> = true;
 
-/// Template argument `I` of the specialization `T`, as written.
-template <typename T, std::size_t I>
-using argument_t = typename[:std::meta::template_arguments_of(std::meta::dealias(^^T))[I]:];
+template <typename T>
+inline constexpr bool is_std_array = false;
+template <typename T, std::size_t N>
+inline constexpr bool is_std_array<std::array<T, N>> = true;
+
+template <typename T>
+inline constexpr bool is_std_span = false;
+template <typename T, std::size_t E>
+inline constexpr bool is_std_span<std::span<T, E>> = true;
+
+template <typename T>
+inline constexpr bool is_repeated = false;
+template <typename T, std::size_t N>
+inline constexpr bool is_repeated<repeated<T, N>> = true;
+
+template <typename T>
+inline constexpr bool is_span_buffer = false;
+template <typename T>
+inline constexpr bool is_span_buffer<span_buffer<T>> = true;
+
+/// The sequence types: `std::array`, `std::span<const T>`, `pb::repeated` and
+/// `pb::span_buffer`. `element` has no `const`. `capacity` is the size `N` of
+/// a type that has one, else 0.
+template <typename T>
+struct sequence_traits {
+    static constexpr bool is_sequence = false;
+};
+
+template <typename T, std::size_t N>
+struct sequence_traits<std::array<T, N>> {
+    static constexpr bool is_sequence = true;
+    static constexpr std::size_t capacity = N;
+    using element = std::remove_const_t<T>;
+};
+
+template <typename T, std::size_t E>
+struct sequence_traits<std::span<T, E>> {
+    static constexpr bool is_sequence = std::is_const_v<T>;
+    static constexpr std::size_t capacity = 0;
+    using element = std::remove_const_t<T>;
+};
+
+template <typename T, std::size_t N>
+struct sequence_traits<repeated<T, N>> {
+    static constexpr bool is_sequence = true;
+    static constexpr std::size_t capacity = N;
+    using element = std::remove_const_t<T>;
+};
+
+template <typename T>
+struct sequence_traits<span_buffer<T>> {
+    static constexpr bool is_sequence = true;
+    static constexpr std::size_t capacity = 0;
+    using element = std::remove_const_t<T>;
+};
 
 /// Element type of a sequence type.
 template <typename T>
-using element_t = std::remove_const_t<argument_t<T, 0>>;
+using element_t = typename sequence_traits<T>::element;
 
 template <typename T>
 consteval bool is_scalar() {
@@ -69,15 +119,6 @@ consteval bool is_scalar() {
            is_one_of<T, bool, std::int8_t, std::int16_t, std::int32_t, std::int64_t, std::uint8_t, std::uint16_t,
                      std::uint32_t, std::uint64_t, float, double, sint32, sint64, fixed32, fixed64, sfixed32,
                      sfixed64>;
-}
-
-/// `true` for `std::array`, `std::span<const T>`, `pb::repeated` and `pb::span_buffer`.
-template <typename T>
-consteval bool is_sequence() {
-    if constexpr (is_instance_of<T>(^^std::span))
-        return std::is_const_v<argument_t<T, 0>>;
-    else
-        return is_instance_of<T>(^^std::array) || is_instance_of<T>(^^repeated) || is_instance_of<T>(^^span_buffer);
 }
 
 } // namespace detail
@@ -93,14 +134,14 @@ template <typename T>
         return field_kind::SCALAR;
     } else if constexpr (std::is_same_v<T, std::string_view>) {
         return field_kind::STRING;
-    } else if constexpr (detail::is_instance_of<T>(^^std::optional)) {
+    } else if constexpr (detail::is_optional<T>) {
         return field_kind::OPTIONAL;
-    } else if constexpr (detail::is_instance_of<T>(^^std::variant)) {
+    } else if constexpr (detail::is_variant<T>) {
         return field_kind::ONEOF;
-    } else if constexpr (detail::is_sequence<T>()) {
+    } else if constexpr (detail::sequence_traits<T>::is_sequence) {
         if constexpr (!std::is_same_v<detail::element_t<T>, std::uint8_t>)
             return field_kind::REPEATED;
-        else if constexpr (detail::is_instance_of<T>(^^std::array))
+        else if constexpr (detail::is_std_array<T>)
             return field_kind::FIXED_BYTES;
         else
             return field_kind::BYTES;
@@ -141,80 +182,149 @@ template <typename T>
 namespace detail {
 
 template <typename T>
-consteval std::span<const std::meta::info> members() {
-    return std::define_static_array(
-        std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()));
+consteval bool contains_span_buffer();
+template <typename T>
+consteval void check_member_type();
+template <typename T>
+consteval void check_decodable();
+
+template <typename T, typename... Fields>
+field_list<T, Fields...> list_of(const field_list<T, Fields...>&);
+
+/// The `pb::field_list` that `pb::fields_of<T>` derives from.
+template <typename T>
+using field_list_of = decltype(list_of(std::declval<const fields_of<T>&>()));
+
+template <std::size_t N>
+consteval bool has_number_in(const std::array<std::uint32_t, N>& numbers, std::uint32_t first, std::uint32_t last) {
+    return std::any_of(numbers.begin(), numbers.end(), [&](std::uint32_t n) { return n >= first && n <= last; });
 }
 
-/// Alternatives of the `std::variant` type `T`.
-template <typename T>
-consteval std::span<const std::meta::info> alternatives() {
-    return std::define_static_array(std::meta::template_arguments_of(^^T));
+/// Applies the rules for field numbers. `Sorted` is a `std::array` of the numbers in ascending order.
+template <auto Sorted>
+consteval void check_field_numbers() {
+    static_assert(!has_number_in(Sorted, 0, 0), "pb: tag_zero: field number 0 is not valid");
+    static_assert(!has_number_in(Sorted, max_tag + 1, std::uint32_t(-1)),
+                  "pb: tag_too_large: the largest field number is 2^29 - 1");
+    static_assert(!has_number_in(Sorted, reserved_first, reserved_last),
+                  "pb: tag_reserved: field numbers 19000 to 19999 are reserved by protobuf");
+    static_assert(std::adjacent_find(Sorted.begin(), Sorted.end()) == Sorted.end(),
+                  "pb: duplicate_tag: two fields have the same field number");
 }
+
+/// `true` when the entry of a field list agrees with the member type `M`: a
+/// `std::variant` member has one entry for each alternative after
+/// `std::monostate`, each other member has the alternative 0.
+template <typename M>
+consteval bool is_alternative_valid(std::size_t alternative) {
+    if constexpr (is_variant<M>)
+        return alternative >= 1 && alternative < std::variant_size_v<M>;
+    else
+        return alternative == 0;
+}
+
+/// The alternatives of a `std::variant` type.
+template <typename V>
+struct variant_traits;
+
+template <typename First, typename... More>
+struct variant_traits<std::variant<First, More...>> {
+    template <typename A>
+    static constexpr std::size_t count = (std::size_t{std::is_same_v<A, First>} + ... + std::size_t{std::is_same_v<A, More>});
+
+    static constexpr bool monostate_first = std::is_same_v<First, std::monostate>;
+    static constexpr bool unique = count<First> == 1 && ((count<More> == 1) && ...);
+
+    static consteval bool has_kind(field_kind kind) {
+        return kind_of<First>() == kind || ((kind_of<More>() == kind) || ...);
+    }
+
+    static consteval bool contains_span_buffer() {
+        return detail::contains_span_buffer<First>() || (detail::contains_span_buffer<More>() || ...);
+    }
+
+    static consteval void check_decodable() {
+        detail::check_decodable<First>();
+        (detail::check_decodable<More>(), ...);
+    }
+};
+
+/// The entries of a field list. `M` can have `const`.
+template <typename L>
+struct list_traits;
+
+template <typename T, typename... M, std::uint32_t... Number, std::size_t... Offset, std::size_t... Alternative>
+struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>> {
+    using message = T;
+    static constexpr std::size_t count = sizeof...(M);
+
+    static consteval std::array<std::uint32_t, count> sorted_numbers() {
+        std::array<std::uint32_t, count> numbers{Number...};
+        std::sort(numbers.begin(), numbers.end());
+        return numbers;
+    }
+
+    /// Applies the rules for the entries, the field numbers and the member types.
+    static consteval void check() {
+        static_assert(((Offset <= max_offset) && ...),
+                      "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less");
+        static_assert(((Offset + sizeof(M) <= sizeof(T)) && ...) &&
+                          (is_alternative_valid<std::remove_const_t<M>>(Alternative) && ...),
+                      "pb: field_list_entry: a pb::field_at has an offset that is not in the message, or an "
+                      "alternative index that does not agree with the member type");
+        check_field_numbers<sorted_numbers()>();
+        (check_member_type<M>(), ...);
+    }
+
+    static consteval bool contains_span_buffer() {
+        return (detail::contains_span_buffer<std::remove_const_t<M>>() || ...);
+    }
+
+    static consteval void check_decodable() {
+        static_assert((!std::is_const_v<M> && ...), "pb: decode_const_member: decode cannot write to a const member");
+        (detail::check_decodable<std::remove_const_t<M>>(), ...);
+    }
+};
 
 /// `true` when `T` has a `pb::span_buffer` in a place that `decode` cannot bind:
 /// in it, or in a member, alternative, value or element of it.
 template <typename T>
 consteval bool contains_span_buffer() {
-    constexpr field_kind kind = kind_of<T>();
-    if constexpr (is_instance_of<T>(^^span_buffer)) {
-        return true;
-    } else if constexpr (kind == field_kind::OPTIONAL) {
-        return contains_span_buffer<typename T::value_type>();
-    } else if constexpr (kind == field_kind::REPEATED) {
-        return contains_span_buffer<element_t<T>>();
-    } else if constexpr (kind == field_kind::ONEOF) {
-        template for (constexpr std::meta::info alternative : alternatives<T>()) {
-            if (contains_span_buffer<typename[:alternative:]>())
-                return true;
-        }
-        return false;
-    } else if constexpr (kind == field_kind::MESSAGE) {
-        template for (constexpr std::meta::info member : members<T>()) {
-            if (contains_span_buffer<typename[:std::meta::type_of(member):]>())
-                return true;
-        }
+    if constexpr (std::is_same_v<T, std::monostate>) {
         return false;
     } else {
-        return false;
-    }
-}
-
-inline constexpr std::string_view monostate_message =
-    "pb: monostate_member: std::monostate is allowed only as the first alternative of a std::variant";
-
-template <typename V>
-consteval bool alternatives_unique() {
-    const std::span<const std::meta::info> types = alternatives<V>();
-    for (std::size_t i = 0; i < types.size(); ++i) {
-        for (std::size_t j = i + 1; j < types.size(); ++j) {
-            if (std::meta::dealias(types[i]) == std::meta::dealias(types[j]))
-                return false;
-        }
-    }
-    return true;
-}
-
-/// `true` when an alternative of the `std::variant` type `V` has the kind `kind`.
-template <typename V>
-consteval bool has_alternative_of_kind(field_kind kind) {
-    template for (constexpr std::meta::info alternative : alternatives<V>()) {
-        if (kind_of<typename[:alternative:]>() == kind)
+        constexpr field_kind kind = kind_of<T>();
+        if constexpr (is_span_buffer<T>)
             return true;
+        else if constexpr (kind == field_kind::OPTIONAL)
+            return contains_span_buffer<typename T::value_type>();
+        else if constexpr (kind == field_kind::REPEATED)
+            return contains_span_buffer<element_t<T>>();
+        else if constexpr (kind == field_kind::ONEOF)
+            return variant_traits<T>::contains_span_buffer();
+        else if constexpr (kind == field_kind::MESSAGE)
+            return list_traits<field_list_of<T>>::contains_span_buffer();
+        else
+            return false;
     }
-    return false;
+}
+
+template <typename T>
+consteval void check_not_monostate() {
+    static_assert(!std::is_same_v<T, std::monostate>,
+                  "pb: monostate_member: std::monostate is allowed only as the first alternative of a std::variant");
 }
 
 /// Rejects member types that have a mapping but that proto3 or `decode` cannot use.
 template <typename M>
 consteval void check_member_type() {
     constexpr field_kind kind = kind_of<M>();
-    static_assert(!std::is_same_v<M, std::monostate>, monostate_message);
+    check_not_monostate<M>();
 
     if constexpr (kind == field_kind::OPTIONAL) {
         using value = typename M::value_type;
         constexpr field_kind value_kind = kind_of<value>();
-        static_assert(!std::is_same_v<value, std::monostate>, monostate_message);
+        check_not_monostate<value>();
         static_assert(value_kind != field_kind::REPEATED,
                       "pb: optional_repeated: a repeated field cannot have explicit presence");
         static_assert(value_kind != field_kind::OPTIONAL,
@@ -224,21 +334,21 @@ consteval void check_member_type() {
         static_assert(!contains_span_buffer<value>(),
                       "pb: span_buffer_in_optional: use pb::repeated in a std::optional");
     } else if constexpr (kind == field_kind::ONEOF) {
-        static_assert(std::meta::dealias(alternatives<M>()[0]) == ^^std::monostate,
+        static_assert(variant_traits<M>::monostate_first,
                       "pb: variant_no_monostate: the first alternative of a std::variant must be std::monostate");
-        static_assert(alternatives_unique<M>(), "pb: variant_duplicate_alternative: each alternative of a "
-                                                "std::variant must have a different type");
-        static_assert(!has_alternative_of_kind<M>(field_kind::REPEATED),
+        static_assert(variant_traits<M>::unique, "pb: variant_duplicate_alternative: each alternative of a "
+                                                 "std::variant must have a different type");
+        static_assert(!variant_traits<M>::has_kind(field_kind::REPEATED),
                       "pb: variant_repeated_alternative: a repeated field cannot be a oneof alternative");
-        static_assert(!has_alternative_of_kind<M>(field_kind::OPTIONAL),
+        static_assert(!variant_traits<M>::has_kind(field_kind::OPTIONAL),
                       "pb: variant_optional_alternative: a std::optional cannot be a oneof alternative");
-        static_assert(!has_alternative_of_kind<M>(field_kind::ONEOF),
+        static_assert(!variant_traits<M>::has_kind(field_kind::ONEOF),
                       "pb: variant_variant_alternative: a std::variant cannot be a oneof alternative");
         static_assert(!contains_span_buffer<M>(), "pb: span_buffer_in_variant: use pb::repeated in a std::variant");
     } else if constexpr (kind == field_kind::REPEATED) {
         using element = element_t<M>;
         constexpr field_kind element_kind = kind_of<element>();
-        static_assert(!std::is_same_v<element, std::monostate>, monostate_message);
+        check_not_monostate<element>();
         static_assert(element_kind != field_kind::REPEATED,
                       "pb: repeated_repeated: the element of a repeated field cannot be a repeated field");
         static_assert(element_kind != field_kind::OPTIONAL,
@@ -248,6 +358,65 @@ consteval void check_member_type() {
         static_assert(!contains_span_buffer<element>(),
                       "pb: span_buffer_in_repeated: use pb::repeated as the element of a repeated field");
     }
+}
+
+/// Rejects types that `decode` cannot write: a repeated field in an
+/// encode-only container, bytes in a span with a static extent, and a `const`
+/// member. It examines `T`, and each member, alternative, value and element of it.
+template <typename T>
+consteval void check_decodable() {
+    if constexpr (!std::is_same_v<T, std::monostate>) {
+        constexpr field_kind kind = kind_of<T>();
+
+        if constexpr (kind == field_kind::REPEATED) {
+            static_assert(!is_std_array<T> && !is_std_span<T>,
+                          "pb: decode_encode_only: std::array and std::span<const T> are encode-only, "
+                          "use pb::repeated or pb::span_buffer to decode");
+            check_decodable<element_t<T>>();
+        } else if constexpr (kind == field_kind::BYTES) {
+            static_assert(!is_std_span<T> || std::is_same_v<T, std::span<const std::uint8_t>>,
+                          "pb: decode_fixed_span: a std::span with a static extent is encode-only, "
+                          "use std::span<const std::uint8_t> or std::array to decode");
+        } else if constexpr (kind == field_kind::OPTIONAL) {
+            check_decodable<typename T::value_type>();
+        } else if constexpr (kind == field_kind::ONEOF) {
+            variant_traits<T>::check_decodable();
+        } else if constexpr (kind == field_kind::MESSAGE) {
+            list_traits<field_list_of<T>>::check_decodable();
+        }
+    }
+}
+
+} // namespace detail
+
+#if defined(__cpp_impl_reflection)
+
+////////////////////////////////////////////////////////////////////////////////
+// Part 2: field lists from reflection
+
+/// `field_info::alternative` of a field that is not a `std::variant` alternative.
+inline constexpr std::size_t no_alternative = std::size_t(-1);
+
+/// One entry of the tag table: a plain member, or one alternative of a `std::variant` member.
+struct field_info {
+    std::meta::info member;
+    std::uint32_t number;
+    /// Index into the `std::variant`, or `no_alternative`.
+    std::size_t alternative;
+};
+
+namespace detail {
+
+/// `true` when `type` is a specialization of the class template `templ`.
+consteval bool is_instance(std::meta::info type, std::meta::info templ) {
+    type = std::meta::dealias(type);
+    return std::meta::has_template_arguments(type) && std::meta::template_of(type) == templ;
+}
+
+template <typename T>
+consteval std::span<const std::meta::info> members() {
+    return std::define_static_array(
+        std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current()));
 }
 
 /// Field number from the `pb::tag` annotation of `member`.
@@ -326,7 +495,7 @@ consteval std::array<field_info, field_count<T>()> collect_fields() {
             fields[index++] = {member, next++, no_alternative};
         } else {
             static_assert(!number, "pb: tag_on_variant: use pb::oneof_tags on a std::variant member");
-            constexpr std::size_t count = alternatives<type>().size() - 1;
+            constexpr std::size_t count = std::variant_size_v<type> - 1;
             if constexpr (listed) {
                 static_assert(std::meta::template_arguments_of(*listed).size() == count,
                               "pb: oneof_tags_count: pb::oneof_tags must list one tag for each alternative after "
@@ -351,71 +520,61 @@ consteval std::array<field_info, field_count<T>()> sorted_fields() {
     return fields;
 }
 
-consteval bool has_number_in(std::span<const field_info> fields, std::uint32_t first, std::uint32_t last) {
-    return std::any_of(fields.begin(), fields.end(),
-                       [&](const field_info& f) { return f.number >= first && f.number <= last; });
+template <typename T>
+consteval std::array<std::uint32_t, field_count<T>()> sorted_numbers() {
+    std::array<std::uint32_t, field_count<T>()> numbers{};
+    std::size_t index = 0;
+    for (const field_info& field : sorted_fields<T>())
+        numbers[index++] = field.number;
+    return numbers;
 }
 
-/// `fields` must be sorted by number.
-consteval bool has_duplicate(std::span<const field_info> fields) {
-    return std::adjacent_find(fields.begin(), fields.end(), [](const field_info& a, const field_info& b) {
-               return a.number == b.number;
-           }) != fields.end();
+/// The `pb::field_list` of the struct `T`: one `pb::field_at` for each entry
+/// of the tag table, in declaration order.
+template <typename T>
+consteval std::meta::info reflect_field_list() {
+    check_message_type<T>();
+
+    std::array<std::meta::info, field_count<T>() + 1> arguments{^^T};
+    std::size_t index = 1;
+    for (const field_info& field : collect_fields<T>()) {
+        const auto offset = static_cast<std::size_t>(std::meta::offset_of(field.member).bytes);
+        const std::size_t alternative = field.alternative == no_alternative ? 0 : field.alternative;
+        arguments[index++] = std::meta::substitute(
+            ^^field_at, {std::meta::type_of(field.member), std::meta::reflect_constant(field.number),
+                         std::meta::reflect_constant(offset), std::meta::reflect_constant(alternative)});
+    }
+    return std::meta::substitute(^^field_list, arguments);
 }
+
+template <typename T>
+using reflected_fields = typename[:reflect_field_list<T>():];
 
 } // namespace detail
 
-/// Fields of the message type `T`, sorted by field number. The encoder, the
-/// decoder and the schema generator use this table. An invalid message type,
-/// tag or member type is a compile error.
+/// Fields of the message type `T`, sorted by field number, with the reflection
+/// of each member. The schema generator uses this table. An invalid message
+/// type, tag or member type is a compile error.
 template <typename T>
 [[nodiscard]] consteval std::span<const field_info> build_tag_table() {
     detail::check_message_type<T>();
-    constexpr auto fields = detail::sorted_fields<T>();
-    static_assert(!detail::has_number_in(fields, 0, 0), "pb: tag_zero: field number 0 is not valid");
-    static_assert(!detail::has_number_in(fields, detail::max_tag + 1, std::uint32_t(-1)),
-                  "pb: tag_too_large: the largest field number is 2^29 - 1");
-    static_assert(!detail::has_number_in(fields, detail::reserved_first, detail::reserved_last),
-                  "pb: tag_reserved: field numbers 19000 to 19999 are reserved by protobuf");
-    static_assert(!detail::has_duplicate(fields), "pb: duplicate_tag: two fields have the same field number");
-    return std::define_static_array(fields);
+    detail::check_field_numbers<detail::sorted_numbers<T>()>();
+    return std::define_static_array(detail::sorted_fields<T>());
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-namespace detail {
-
-/// Rejects types that `decode` cannot write: a repeated field in an
-/// encode-only container, bytes in a span with a static extent, and a `const`
-/// member. It examines `T`, and each
-/// member, alternative, value and element of it.
+/// A struct without a `pb::fields_of` specialization gets its field list from reflection.
 template <typename T>
-consteval void check_decodable() {
-    constexpr field_kind kind = kind_of<T>();
+struct fields_of : detail::reflected_fields<T> {};
 
-    if constexpr (kind == field_kind::REPEATED) {
-        static_assert(!is_instance_of<T>(^^std::array) && !is_instance_of<T>(^^std::span),
-                      "pb: decode_encode_only: std::array and std::span<const T> are encode-only, "
-                      "use pb::repeated or pb::span_buffer to decode");
-        check_decodable<element_t<T>>();
-    } else if constexpr (kind == field_kind::BYTES) {
-        static_assert(!is_instance_of<T>(^^std::span) || std::is_same_v<T, std::span<const std::uint8_t>>,
-                      "pb: decode_fixed_span: a std::span with a static extent is encode-only, "
-                      "use std::span<const std::uint8_t> or std::array to decode");
-    } else if constexpr (kind == field_kind::OPTIONAL) {
-        check_decodable<typename T::value_type>();
-    } else if constexpr (kind == field_kind::ONEOF) {
-        template for (constexpr std::meta::info alternative : alternatives<T>())
-            check_decodable<typename[:alternative:]>();
-    } else if constexpr (kind == field_kind::MESSAGE) {
-        template for (constexpr std::meta::info member : members<T>()) {
-            static_assert(!std::meta::is_const(std::meta::type_of(member)),
-                          "pb: decode_const_member: decode cannot write to a const member");
-            check_decodable<std::remove_const_t<typename[:std::meta::type_of(member):]>>();
-        }
-    }
-}
+#else
 
-} // namespace detail
+template <typename T>
+struct fields_of {
+    static_assert(sizeof(T) == 0,
+                  "pb: no_field_list: this message type has no pb::fields_of. Generate it with protoc-gen-micropb, "
+                  "write it by hand, or use a compiler with reflection");
+};
+
+#endif
 
 } // namespace pb

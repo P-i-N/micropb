@@ -5,11 +5,11 @@
 #include <cstdint>
 #include <cstring>
 #include <expected>
-#include <meta>
 #include <optional>
 #include <span>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <variant>
 
 #include <micropb/meta_schema.hpp>
@@ -18,8 +18,8 @@
 
 // The codec has two parts.
 // Part 1 makes descriptors: constant tables that say where each field of a
-// message is and how to read and write it. Reflection makes them at compile
-// time, one time for each type.
+// message is and how to read and write it. Templates make them at compile
+// time from the field list of each message type (`pb::fields_of`).
 // Part 2 is the interpreter: functions that are not templates. They encode,
 // decode and reset each message type from its descriptors.
 
@@ -173,20 +173,19 @@ struct message_descriptor {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/// The data member `name` of the class `type`, also when it is private.
-consteval std::meta::info member_named(std::meta::info type, std::string_view name) {
-    for (std::meta::info member : std::meta::nonstatic_data_members_of(type, std::meta::access_context::unchecked())) {
-        if (std::meta::identifier_of(member) == name)
-            return member;
-    }
-    return std::meta::info{};
-}
+/// The count member of `pb::repeated` and `pb::span_buffer` is private. The
+/// codec reads and writes it through this friend of the two types.
+struct sequence_access {
+    template <typename S>
+    static constexpr std::size_t items_offset = offsetof(S, _items);
+    template <typename S>
+    static constexpr std::size_t count_offset = offsetof(S, _count);
 
-/// The size `N` of `std::array<T, N>` or `pb::repeated<T, N>`.
-template <typename S>
-consteval std::uint32_t static_capacity() {
-    return static_cast<std::uint32_t>(std::meta::extract<std::size_t>(std::meta::template_arguments_of(^^S)[1]));
-}
+    template <typename T>
+    static std::size_t* count_of(span_buffer<T>& buffer) {
+        return &buffer._count;
+    }
+};
 
 /// Accessor of `std::span<const T>` and `pb::span_buffer<T>`. These types keep
 /// their items in a different object, so the interpreter cannot find the items
@@ -194,8 +193,8 @@ consteval std::uint32_t static_capacity() {
 template <typename S>
 sequence_view access_sequence(void* sequence) {
     S& items = *static_cast<S*>(sequence);
-    if constexpr (is_instance_of<S>(^^span_buffer)) {
-        return {items.begin(), items.size(), items.capacity(), &items.[:member_named(^^S, "_count"):]};
+    if constexpr (is_span_buffer<S>) {
+        return {items.begin(), items.size(), items.capacity(), sequence_access::count_of(items)};
     } else {
         const void* data = items.data();
         return {const_cast<void*>(data), items.size(), items.size(), nullptr};
@@ -216,23 +215,29 @@ void* access_optional(void* optional, optional_op op) {
     return value ? &*value : nullptr;
 }
 
+/// The address of alternative `I` of `value` when it is active, else null.
+/// With `select`, makes it active first.
+template <std::size_t I, typename V>
+void* alternative_at(V& value, bool select) {
+    // An alternative with a `const` member is encode-only: no `emplace`.
+    if (select && value.index() != I) {
+        if constexpr (requires { value.template emplace<I>(); })
+            value.template emplace<I>();
+    }
+    return std::get_if<I>(&value);
+}
+
+template <typename V, std::size_t... I>
+void* access_alternative(V& value, std::size_t index, bool select, std::index_sequence<I...>) {
+    void* result = nullptr;
+    (void)((index == I && (result = alternative_at<I>(value, select), true)) || ...);
+    return result;
+}
+
 template <typename V>
 void* access_variant(void* variant, std::size_t index, bool select) {
-    V& value = *static_cast<V*>(variant);
-    std::size_t current = 0;
-    template for (constexpr std::meta::info reflected : alternatives<V>()) {
-        using alternative = typename[:reflected:];
-        if (index == current) {
-            // An alternative with a `const` member is encode-only: no `emplace`.
-            if (select && !std::holds_alternative<alternative>(value)) {
-                if constexpr (requires { value.template emplace<alternative>(); })
-                    value.template emplace<alternative>();
-            }
-            return std::get_if<alternative>(&value);
-        }
-        ++current;
-    }
-    return nullptr;
+    return access_alternative(*static_cast<V*>(variant), index, select,
+                              std::make_index_sequence<std::variant_size_v<V>>{});
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -242,16 +247,16 @@ consteval sequence_desc describe_sequence() {
     using element = element_t<S>;
     constexpr const value_desc* item = &value_descriptor<element>::value;
     constexpr std::uint32_t item_size = sizeof(element);
+    constexpr auto capacity = static_cast<std::uint32_t>(sequence_traits<S>::capacity);
 
-    if constexpr (is_instance_of<S>(^^repeated)) {
-        static_assert(std::meta::offset_of(member_named(^^S, "_items")).bytes == 0);
-        constexpr auto count_offset = static_cast<std::size_t>(std::meta::offset_of(member_named(^^S, "_count")).bytes);
-        static_assert(count_offset <= 65535,
+    if constexpr (is_repeated<S>) {
+        static_assert(sequence_access::items_offset<S> == 0);
+        static_assert(sequence_access::count_offset<S> <= max_offset,
                       "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less");
-        return {item, nullptr, item_size, static_capacity<S>(), static_cast<std::uint16_t>(count_offset),
+        return {item, nullptr, item_size, capacity, static_cast<std::uint16_t>(sequence_access::count_offset<S>),
                 sequence_storage::REPEATED};
-    } else if constexpr (is_instance_of<S>(^^std::array)) {
-        return {item, nullptr, item_size, static_capacity<S>(), 0, sequence_storage::ARRAY};
+    } else if constexpr (is_std_array<S>) {
+        return {item, nullptr, item_size, capacity, 0, sequence_storage::ARRAY};
     } else {
         return {item, access_sequence<S>, item_size, 0, 0, sequence_storage::ACCESSOR};
     }
@@ -264,40 +269,46 @@ template <typename O>
 inline constexpr optional_desc optional_descriptor{&value_descriptor<typename O::value_type>::value,
                                                     access_optional<O>};
 
-template <typename V>
-consteval std::span<const value_desc* const> describe_alternatives() {
-    std::array<const value_desc*, std::variant_size_v<V>> descriptors{};
-    std::size_t index = 0;
-    template for (constexpr std::meta::info reflected : alternatives<V>()) {
-        using alternative = typename[:reflected:];
-        if constexpr (!std::is_same_v<alternative, std::monostate>)
-            descriptors[index] = &value_descriptor<alternative>::value;
-        ++index;
-    }
-    return std::define_static_array(descriptors);
+/// The descriptor of the alternative `A` of a `std::variant`. Null for `std::monostate`.
+template <typename A>
+consteval const value_desc* describe_alternative() {
+    if constexpr (std::is_same_v<A, std::monostate>)
+        return nullptr;
+    else
+        return &value_descriptor<A>::value;
 }
 
 template <typename V>
-inline constexpr variant_desc variant_descriptor{describe_alternatives<V>().data(), access_variant<V>};
+struct variant_alternatives;
 
-/// The field table of the message type `T`: one entry for each entry of the
-/// tag table, in the same order.
-template <typename T>
-consteval std::span<const field_desc> describe_fields() {
-    std::array<field_desc, build_tag_table<T>().size()> fields{};
-    [[maybe_unused]] std::size_t index = 0;
-    template for (constexpr field_info field : build_tag_table<T>()) {
-        using member = std::remove_const_t<typename[:std::meta::type_of(field.member):]>;
-        constexpr auto offset = static_cast<std::size_t>(std::meta::offset_of(field.member).bytes);
-        static_assert(offset <= 65535,
-                      "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less");
+template <typename... A>
+struct variant_alternatives<std::variant<A...>> {
+    static constexpr const value_desc* value[sizeof...(A)] = {describe_alternative<A>()...};
+};
 
-        fields[index++] = {field.number, static_cast<std::uint16_t>(offset),
-                           static_cast<std::uint16_t>(field.alternative == no_alternative ? 0 : field.alternative),
-                           &value_descriptor<member>::value};
+template <typename V>
+inline constexpr variant_desc variant_descriptor{variant_alternatives<V>::value, access_variant<V>};
+
+/// The field table of a message type: one entry for each entry of its field
+/// list, sorted by field number.
+template <typename L>
+struct field_table;
+
+template <typename T, typename... M, std::uint32_t... Number, std::size_t... Offset, std::size_t... Alternative>
+struct field_table<field_list<T, field_at<M, Number, Offset, Alternative>...>> {
+    static consteval std::array<field_desc, sizeof...(M)> make() {
+        list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>>::check();
+
+        std::array<field_desc, sizeof...(M)> fields{
+            field_desc{Number, static_cast<std::uint16_t>(Offset), static_cast<std::uint16_t>(Alternative),
+                       &value_descriptor<std::remove_const_t<M>>::value}...};
+        std::sort(fields.begin(), fields.end(),
+                  [](const field_desc& a, const field_desc& b) { return a.number < b.number; });
+        return fields;
     }
-    return std::define_static_array(fields);
-}
+
+    static constexpr std::array<field_desc, sizeof...(M)> value = make();
+};
 
 template <typename T>
 consteval value_desc describe_value() {
@@ -308,7 +319,7 @@ consteval value_desc describe_value() {
     else if constexpr (kind == field_kind::STRING)
         return {.kind = kind, .scalar = 0, .size = 0};
     else if constexpr (kind == field_kind::FIXED_BYTES)
-        return {.kind = kind, .scalar = 0, .size = static_capacity<T>()};
+        return {.kind = kind, .scalar = 0, .size = static_cast<std::uint32_t>(sequence_traits<T>::capacity)};
     else if constexpr (std::is_same_v<T, std::span<const std::uint8_t>>)
         // Only this exact type is the bytes view that the interpreter copies as
         // one object. A span with a static extent has a different layout: it
@@ -327,9 +338,17 @@ consteval value_desc describe_value() {
 template <typename T>
 constexpr value_desc value_descriptor<T>::value = describe_value<T>();
 
+/// The field list of `T` must name `T`: a list of a different type has the offsets of that type.
 template <typename T>
-constexpr message_desc message_descriptor<T>::value{describe_fields<T>().data(),
-                                                     static_cast<std::uint16_t>(describe_fields<T>().size())};
+consteval message_desc describe_message() {
+    using list = field_list_of<T>;
+    static_assert(std::is_same_v<typename list_traits<list>::message, T>,
+                  "pb: field_list_type: pb::fields_of<T> must derive from pb::field_list<T, ...> with the same T");
+    return {field_table<list>::value.data(), static_cast<std::uint16_t>(field_table<list>::value.size())};
+}
+
+template <typename T>
+constexpr message_desc message_descriptor<T>::value = describe_message<T>();
 
 ////////////////////////////////////////////////////////////////////////////////
 // Part 2: interpreter. No function in this part is a template.
