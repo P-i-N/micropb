@@ -2,11 +2,12 @@
 
 #include <micropb/meta_schema.hpp>
 
-struct msg {
-    std::int32_t a;
+struct msg
+{
+	std::int32_t a;
 
 private:
-    std::int32_t b;
+	std::int32_t b;
 };
 
-static_assert(pb::build_tag_table<msg>().size() == 1);
+static_assert( pb::build_tag_table<msg>().size() == 1 );

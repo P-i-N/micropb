@@ -9,10 +9,14 @@
 
 #include "vectors/vectors.pb.hpp"
 
-std::expected<std::size_t, pb::error> consumer_encode(const micropb::test::scalars& message, std::span<std::uint8_t> out) {
-    return pb::encode(message, out);
+std::expected<std::size_t, pb::error> consumer_encode( const micropb::test::scalars& message,
+                                                       std::span<std::uint8_t> out )
+{
+	return pb::encode( message, out );
 }
 
-std::expected<std::size_t, pb::error> consumer_decode(std::span<const std::uint8_t> in, micropb::test::scalars& message) {
-    return pb::decode(in, message);
+std::expected<std::size_t, pb::error> consumer_decode( std::span<const std::uint8_t> in,
+                                                       micropb::test::scalars& message )
+{
+	return pb::decode( in, message );
 }
