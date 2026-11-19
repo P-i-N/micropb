@@ -62,7 +62,7 @@ using fixed64 = wire_int<std::uint64_t, int_encoding::FIXED>;
 using sfixed32 = wire_int<std::int32_t, int_encoding::FIXED>;
 using sfixed64 = wire_int<std::int64_t, int_encoding::FIXED>;
 
-/// Field number of a message field, used as a compile-time value.
+/// Field number of a message field, as a compile-time value.
 struct tag
 {
 	std::uint32_t value;
@@ -105,7 +105,7 @@ struct sequence_access;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Sequence of up to `N` items stored inline. Does not allocate.
+/// Sequence that keeps up to `N` items in the object. Does not allocate.
 template <typename T, std::size_t N>
 struct repeated
 {

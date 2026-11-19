@@ -101,7 +101,7 @@ struct field_desc
 	const value_desc* type;
 };
 
-/// The fields of a message type, sorted by field number.
+/// The fields of a message type, in ascending field number.
 struct message_desc
 {
 	const field_desc* fields;
@@ -331,7 +331,7 @@ template <typename V>
 inline constexpr variant_desc variant_descriptor{ variant_alternatives<V>::value, access_variant<V> };
 
 /// The field table of a message type: one entry for each entry of its field
-/// list, sorted by field number.
+/// list, in ascending field number.
 template <typename L>
 struct field_table;
 
@@ -512,11 +512,12 @@ inline void emit_bytes( writer& sink, std::uint32_t number, std::span<const std:
 inline void emit_message( writer& sink, const message_desc& message, const void* object );
 
 // The compiler does not inline or clone the three entry points of the
-// interpreter (`gnu::noinline`, `gnu::noclone`). If the compiler puts the
-// interpreter into its caller, it makes a copy of the interpreter for each
-// message type. The tables prevent these copies. The compiler then also
-// examines the paths of other message types against the type that it knows at
-// the call, and gives warnings about accesses that never occur.
+// interpreter (`gnu::noinline`, `gnu::noclone`). The tables let one copy of
+// the interpreter serve all message types. If the compiler puts the
+// interpreter into its caller, it makes a copy for each message type and
+// undoes that. The compiler then also examines the paths of other message
+// types against the type that it knows at the call, and gives warnings about
+// accesses that never occur.
 
 /// Encoded size of the fields of the message at `object`, without key and
 /// length prefix. A writer without a span only counts, so the size and the
@@ -541,14 +542,16 @@ inline void emit_submessage( writer& sink, std::uint32_t number, const message_d
 		return;
 	}
 
-	// No byte is written, so the order is free: count the fields, then the
-	// length prefix. This walks the message only one time.
+	// The writer writes no byte, so the order is free: count the fields, then
+	// the length prefix. This walks the message only one time.
 	const std::size_t start = sink.size();
 	emit_message( sink, message, object );
 	sink.advance( varint_size( sink.size() - start ) );
 }
 
-/// Writes the scalar elements of a repeated field as one packed field.
+/// Writes the scalar elements of a repeated field as one packed field. `items`
+/// must not be empty: with no items, the function writes a key and the length
+/// 0, which `protoc` does not write.
 inline void emit_packed( writer& sink, std::uint32_t number, const sequence_desc& sequence, const sequence_view& items )
 {
 	const std::uint8_t code = sequence.element->scalar;
@@ -867,7 +870,7 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 				std::memcpy( value, bytes.data(), bytes.size() );
 			break;
 		case field_kind::MESSAGE: {
-			// The message is not reset: a second occurrence merges into the first.
+			// The codec does not reset the message: a second occurrence merges into the first.
 			reader part( bytes );
 			decode_message( part, *type.message, value );
 			in.absorb( part );
@@ -960,7 +963,7 @@ template <typename T>
 }
 
 /// Encodes `msg` into `out` in proto3 wire format and returns the number of
-/// bytes written. Does not write past `out`. When `out` is too small, returns
+/// bytes that it wrote. Does not write past `out`. When `out` is too small, returns
 /// `error::BUFFER_TOO_SMALL`; the bytes of `out` that it wrote are not valid.
 template <typename T>
 [[nodiscard]] std::expected<std::size_t, error> encode( const T& msg, std::span<std::uint8_t> out )

@@ -246,7 +246,7 @@ template <typename T>
 		return wire_type::VARINT;
 }
 
-/// `true` when a repeated field with elements of type `T` is packed.
+/// `true` when the codec packs a repeated field with elements of type `T`.
 template <typename T>
 [[nodiscard]] consteval bool is_packed()
 {
@@ -663,7 +663,8 @@ template <typename T>
 	return count;
 }
 
-/// Tag table in declaration order. Applies the rules for `pb::tag` and `pb::oneof_tags`.
+/// Tag table in declaration order. Applies the rules for `pb::tag` and `pb::oneof_tags`, and the rules for the
+/// member types.
 template <typename T>
 [[nodiscard]] consteval std::array<field_info, field_count<T>()> collect_fields()
 {
@@ -752,7 +753,7 @@ using reflected_fields = typename[:reflect_field_list<T>():];
 
 } // namespace detail
 
-/// Fields of the struct `T`, sorted by field number, with the reflection of
+/// Fields of the struct `T`, in ascending field number, with the reflection of
 /// each member. The schema generator uses this table. It reads the members and
 /// annotations of `T`, not a `pb::fields_of` specialization. An invalid message
 /// type, tag or member type is a compile error, by the same rules as in the codec.
