@@ -12,7 +12,9 @@ file in the NanoPB format:
     Message.field  max_count:3 fixed_count:true   std::array<T, 3>
     Message.field  max_size:16                    bytes: pb::repeated<std::uint8_t, 16>
     Message.field  max_size:6 fixed_length:true   bytes: std::array<std::uint8_t, 6>
-    Message.field  int_size:IS_8                  std::int8_t or std::uint8_t (also IS_16, IS_32, IS_64)
+    Message.field  int_size:IS_8                  std::int8_t or std::uint8_t (also IS_16, IS_32, IS_64);
+                                                    sint32, sint64: pb::wire_int<std::int8_t, pb::int_encoding::ZIGZAG>
+    Enum           enum_intsize:IS_8              enum class Enum : std::int8_t (also IS_16, IS_32)
 
 The plugin looks for app.options with the path that protoc has for app.proto: first from the
 current folder, then from each folder of the parameter --micropb_opt=options_dir=<folder>. With
@@ -53,7 +55,10 @@ SCALARS = {
 }
 
 # The types that `int_size` can change.
-SIZED_INTEGERS = (Field.TYPE_INT32, Field.TYPE_INT64, Field.TYPE_UINT32, Field.TYPE_UINT64)
+SIZED_INTEGERS = (Field.TYPE_INT32, Field.TYPE_INT64, Field.TYPE_UINT32, Field.TYPE_UINT64,
+                  Field.TYPE_SINT32, Field.TYPE_SINT64)
+# The size that a ZigZag type has without `int_size`.
+ZIGZAG_SIZES = {Field.TYPE_SINT32: 32, Field.TYPE_SINT64: 64}
 
 # The headers that the generated text can need, each with a pattern that shows the need.
 INCLUDES = [
@@ -136,7 +141,7 @@ class Options:
     """The rules of one options file. `path` is None when the .proto file has no options file."""
 
     PARSERS = {"max_count": positive, "max_size": positive, "fixed_count": boolean, "fixed_length": boolean,
-               "int_size": int_size}
+               "int_size": int_size, "enum_intsize": int_size}
 
     def __init__(self, path):
         self.path = path
@@ -240,14 +245,25 @@ def types_of(file):
     return found
 
 
-def enum_text(enum):
+def enum_text(enum, options):
     """The definition of an enum. The values lose the prefix `<ENUM NAME>_` when each value has it."""
     prefix = screaming_case(enum.desc.name) + "_"
     names = [value.name for value in enum.desc.value]
     if all(name.upper().startswith(prefix) and re.fullmatch(r"[A-Za-z]\w*", name[len(prefix):]) for name in names):
         names = [name[len(prefix):] for name in names]
 
-    lines = [f"enum class {enum.name} : std::int32_t {{"]
+    found = options.of(enum.proto_name, enum.file.package)
+    bits = (found["enum_intsize"][0] if "enum_intsize" in found else 0) or 32  # IS_DEFAULT is 0: the default, 32
+    options.check_use(enum.proto_name, found, {"enum_intsize"})
+    if bits == 64:
+        raise Error(f"{enum.file.name}: {enum.proto_name}: enum_intsize:IS_64 is not possible, a proto3 enum is int32")
+    for value in enum.desc.value:
+        fits = next(size for size in (8, 16, 32) if -(1 << (size - 1)) <= value.number < 1 << (size - 1))
+        if fits > bits:
+            raise Error(f"{enum.file.name}: {enum.proto_name}: the value {value.number} does not fit "
+                        f"enum_intsize:IS_{bits}, IS_{fits} is the smallest")
+
+    lines = [f"enum class {enum.name} : std::int{bits}_t {{"]
     lines += [f"    {ident(name)} = {value.number}," for name, value in zip(names, enum.desc.value)]
     return "\n".join(lines + ["};"])
 
@@ -295,7 +311,10 @@ class Header:
 
         if field.type in SIZED_INTEGERS:
             bits = option("int_size")
-            if bits:
+            if bits and field.type in ZIGZAG_SIZES:
+                if bits != ZIGZAG_SIZES[field.type]:
+                    text = f"pb::wire_int<std::int{bits}_t, pb::int_encoding::ZIGZAG>"
+            elif bits:
                 text = re.sub(r"\d+", str(bits), text)
             if repeated and text == "std::uint8_t":
                 raise self.error(f"{name}: int_size:IS_8 on a repeated unsigned field gives a bytes field")
@@ -406,9 +425,12 @@ class Header:
         for message in messages:
             for field in message.desc.field:
                 self.options.of(f"{message.proto_name}.{field.name}", self.file.package)
+        for each in types:
+            if each.is_enum:
+                self.options.of(each.proto_name, self.file.package)
         self.options.check_rules()
 
-        blocks = [enum_text(each) for each in types if each.is_enum]
+        blocks = [enum_text(each, self.options) for each in types if each.is_enum]
         blocks += [self.struct_text(each) for each in self.in_dependency_order(messages)]
         body = "\n\n".join(blocks)
         lists = "\n\n".join(self.field_lists)

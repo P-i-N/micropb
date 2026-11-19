@@ -265,6 +265,20 @@ class OptionsTest(unittest.TestCase):
         self.assertEqual(members(text, "m"),
                          ["std::int8_t a;", "std::uint16_t b;", "std::int32_t c;", "std::uint64_t d;"])
 
+    def test_int_size_on_sint(self):
+        text = header("message m { sint32 a = 1; sint32 b = 2; sint64 c = 3; sint32 d = 4; sint64 e = 5; }",
+                      "m.a int_size:IS_8\n" "m.b int_size:IS_16\n" "m.c int_size:IS_32\n" "m.d int_size:IS_32\n" "m.e int_size:IS_64\n")
+        self.assertEqual(members(text, "m"), [
+            "pb::wire_int<std::int8_t, pb::int_encoding::ZIGZAG> a;",
+            "pb::wire_int<std::int16_t, pb::int_encoding::ZIGZAG> b;",
+            "pb::wire_int<std::int32_t, pb::int_encoding::ZIGZAG> c;",
+            "pb::sint32 d;",
+            "pb::sint64 e;"])
+
+    def test_int_size_on_repeated_sint(self):
+        text = header("message m { repeated sint32 a = 1; }", "m.a max_count:4 int_size:IS_8\n")
+        self.assertEqual(members(text, "m"), ["pb::repeated<pb::wire_int<std::int8_t, pb::int_encoding::ZIGZAG>, 4> a;"])
+
     def test_int_size_on_repeated_field(self):
         text = header("message m { repeated int32 a = 1; }", "m.a max_count:4 int_size:IS_16\n")
         self.assertEqual(members(text, "m"), ["pb::repeated<std::int16_t, 4> a;"])
@@ -319,6 +333,28 @@ class OptionsTest(unittest.TestCase):
                      "-Iproto", "--micropb_opt=options_dir=opts", protos=["proto/a.proto"])
         self.assertEqual(result.rc, 0, result.stderr)
         self.assertEqual(members(result.headers["a.pb.hpp"], "m"), ["pb::repeated<std::int32_t, 9> a;"])
+
+    def test_enum_intsize(self):
+        for size, name in (("IS_8", "std::int8_t"), ("IS_16", "std::int16_t"), ("IS_32", "std::int32_t")):
+            text = header("enum E { E_A = 0; E_B = 1; }", f"E enum_intsize:{size}\n")
+            self.assertIn(f"enum class E : {name} {{", text)
+
+    def test_enum_intsize_default(self):
+        # IS_DEFAULT is the default, std::int32_t, as in NanoPB; `header` fails on a warning.
+        text = header("enum E { E_A = 0; E_B = 1; }", "E enum_intsize:IS_DEFAULT\n")
+        self.assertIn("enum class E : std::int32_t {", text)
+
+    def test_enum_intsize_nested_and_wildcard(self):
+        body = "message M { enum Mode { MODE_A = 0; } Mode m = 1; }"
+        text = header(body, "M.Mode enum_intsize:IS_8\n")
+        self.assertIn("enum class M_Mode : std::int8_t {", text)
+        for pattern in ("pkg.*.Mode", "*Mode"):
+            text = header("package pkg; " + body, f"{pattern} enum_intsize:IS_8\n")
+            self.assertIn("enum class M_Mode : std::int8_t {", text)
+
+    def test_enum_intsize_bounds(self):
+        text = header("enum E { E_A = 0; E_LOW = -128; E_HIGH = 127; }", "E enum_intsize:IS_8\n")
+        self.assertIn("enum class E : std::int8_t {", text)
 
 
 class StructureTest(unittest.TestCase):
@@ -634,6 +670,18 @@ class ErrorTest(unittest.TestCase):
         text = error(PROTO3 + "message m { repeated uint32 a = 1; }", "m.a max_count:4 int_size:IS_8\n")
         self.assertIn("a.proto: m.a: int_size:IS_8 on a repeated unsigned field gives a bytes field", text)
 
+    def test_enum_intsize_value_does_not_fit(self):
+        cases = (("E_B = 128", "IS_8", "128", "IS_16"), ("E_B = -129", "IS_8", "-129", "IS_16"),
+                 ("E_B = 40000", "IS_16", "40000", "IS_32"))
+        for value, size, shown, fits in cases:
+            text = error(PROTO3 + f"enum E {{ E_A = 0; {value}; }}", f"E enum_intsize:{size}\n")
+            self.assertIn(f"a.proto: E: the value {shown} does not fit enum_intsize:{size}, {fits} is the smallest",
+                          text)
+
+    def test_enum_intsize_64(self):
+        text = error(PROTO3 + "enum E { E_A = 0; }", "E enum_intsize:IS_64\n")
+        self.assertIn("a.proto: E: enum_intsize:IS_64 is not possible, a proto3 enum is int32", text)
+
     def test_bad_options_lines(self):
         proto = PROTO3 + "message m { repeated int32 a = 1; }"
         cases = {
@@ -668,18 +716,34 @@ class WarningTest(unittest.TestCase):
         self.assertEqual(result.rc, 0, result.stderr)
         return result.stderr, result.headers["a.pb.hpp"]
 
+    def test_enum_intsize_on_a_field(self):
+        stderr, _ = self.warnings("message m { int32 a = 1; }", "m.a enum_intsize:IS_8\n")
+        self.assertIn("a.options:1: warning: enum_intsize does not apply to m.a", stderr)
+
+    def test_enum_rule_is_not_a_rule_without_a_match(self):
+        stderr, text = self.warnings("enum E { E_A = 0; }", "E enum_intsize:IS_8\n")
+        self.assertNotIn("matches no field", stderr)
+        self.assertIn("std::int8_t", text)
+
     def test_unknown_option(self):
         stderr, text = self.warnings("message m { repeated int32 a = 1; }", "m.a max_count:4 type:FT_POINTER\n")
         self.assertIn("a.options:1: warning: the unknown option 'type' is ignored", stderr)
         self.assertEqual(members(text, "m"), ["pb::repeated<std::int32_t, 4> a;"])
 
     def test_option_that_does_not_apply(self):
-        stderr, text = self.warnings("package p; message m { string name = 1; int32 a = 2; sint32 b = 3; }",
+        stderr, text = self.warnings("package p; message m { string name = 1; int32 a = 2; fixed32 b = 3; }",
                                      "m.name max_size:40\n\nm.a max_count:4\nm.b int_size:IS_8\n")
         self.assertIn("a.options:1: warning: max_size does not apply to p.m.name", stderr)
         self.assertIn("a.options:3: warning: max_count does not apply to p.m.a", stderr)
         self.assertIn("a.options:4: warning: int_size does not apply to p.m.b", stderr)
-        self.assertEqual(members(text, "m"), ["std::string_view name;", "std::int32_t a;", "pb::sint32 b;"])
+        self.assertEqual(members(text, "m"), ["std::string_view name;", "std::int32_t a;", "pb::fixed32 b;"])
+
+    def test_int_size_does_not_apply_to_fixed_and_enum_fields(self):
+        stderr, text = self.warnings("enum e { E_A = 0; } message m { sfixed32 a = 1; e b = 2; fixed64 c = 3; }",
+                                     "m.a int_size:IS_8\nm.b int_size:IS_16\nm.c int_size:IS_32\n")
+        for name in "abc":
+            self.assertIn(f"warning: int_size does not apply to m.{name}", stderr)
+        self.assertEqual(members(text, "m"), ["pb::sfixed32 a;", "e b;", "pb::fixed64 c;"])
 
     def test_max_size_does_not_apply_to_repeated_bytes(self):
         stderr, text = self.warnings("message m { repeated bytes a = 1; }", "m.a max_count:2 max_size:8\n")

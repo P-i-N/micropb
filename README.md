@@ -165,16 +165,20 @@ classDiagram
 
 ## Add it to a project
 
-**Requirements:** GCC 16.2 or newer with `-std=c++26 -freflection`. No other compiler has been used. For a compiler without reflection, see [Compilers without reflection](#compilers-without-reflection).
+**Requirements:** a C++23 compiler. A struct without a field list needs GCC 16.2 or newer with `-std=c++26 -freflection`; no other compiler has been used. For structs with a field list, see [Compilers without reflection](#compilers-without-reflection).
 
-With CMake, add the directory and link the `micropb` target. The target is an `INTERFACE` library: it gives the include directory, C++26 and `-freflection`. The target `micropb_cxx23` gives the include directory and C++23 only.
+With CMake, add the directory and link the `micropb` target. The target is an `INTERFACE` library: it gives the include directory, and C++26 with `-freflection` when the compiler supports them, otherwise C++23.
 
 ```cmake
 add_subdirectory(micropb)
 target_link_libraries(firmware PRIVATE micropb)
 ```
 
-Without CMake, add `src/` to the include path and compile with `-std=c++26 -freflection`.
+* `MICROPB_REFLECTION` is `AUTO` (the default), `ON` or `OFF`. `AUTO` checks whether the compiler accepts `-std=c++26 -freflection`. `ON` stops with an error when it does not. `OFF` never uses reflection. CMake prints `micropb: reflection on` or `micropb: reflection off (C++23, field lists only)`. Without reflection, each message type needs a field list.
+* `MICROPB_TESTS` builds micropb's own tests. It is on by default only when micropb is the top-level project, so `add_subdirectory(micropb)` in a firmware project does not build host tests with the firmware compiler.
+* The target `micropb_cxx23` gives the include directory and C++23 only. It never uses reflection.
+
+Without CMake, add `src/` to the include path and compile with C++23, or with `-std=c++26 -freflection`.
 
 Include one header:
 
@@ -197,7 +201,8 @@ A message is a class aggregate: only public data members, no base class, no cons
 | `std::uint32_t`, `std::uint64_t` | `uint32`, `uint64` | |
 | `std::int8_t`, `std::int16_t` | `int32` | Decode truncates to the width of the member. |
 | `std::uint8_t`, `std::uint16_t` | `uint32` | Decode truncates to the width of the member. |
-| `pb::sint32`, `pb::sint64` | `sint32`, `sint64` | ZigZag: small for negative values. |
+| `signed char`, `short`, `int`, `long`, `long long` and the unsigned forms | The proto type of the fixed-width type of the same size and sign | `long` is `int32` on Windows and `arm-none-eabi`, and `int64` on Linux x86-64. |
+| `pb::wire_int<T, pb::int_encoding::ZIGZAG>` with a signed integer `T` | `sint32` (1, 2 or 4 bytes), `sint64` (8 bytes) | ZigZag: small for negative values. Decode truncates to the width of the member. `pb::sint32` and `pb::sint64` are the 4- and 8-byte cases. An unsigned `T` does not compile. |
 | `pb::fixed32`, `pb::fixed64` | `fixed32`, `fixed64` | |
 | `pb::sfixed32`, `pb::sfixed64` | `sfixed32`, `sfixed64` | |
 | `float`, `double` | `float`, `double` | |
@@ -210,7 +215,9 @@ A message is a class aggregate: only public data members, no base class, no cons
 | `std::variant<std::monostate, A, B>` | `oneof` | `std::monostate` means that no alternative is set. |
 | `pb::repeated<T, N>` | `repeated T` | See [Repeated fields](#repeated-fields). |
 
-Use only the fixed-width integer types of `<cstdint>`. They mean the same on each target: `std::int32_t` is `int` on a PC, but `long` on `arm-none-eabi`. A type such as `long` or `char` does not compile when it is not one of these aliases on the target.
+Plain `char` and the character types (`wchar_t`, `char8_t`, `char16_t`, `char32_t`) do not compile. The fixed-width types of `<cstdint>` are the portable choice when the `.proto` file must be the same for each target: `std::int32_t` is `int` on a PC, but `long` on `arm-none-eabi`.
+
+The narrow `sint32` is what `int_size` on a `sint32` field gives, see [The options file](#the-options-file).
 
 `pb::sint32` and the other `pb::` integer types are small wrappers. They convert to and from the integer type that they hold:
 
@@ -415,9 +422,11 @@ A `.proto` file does not say how many elements a repeated field can have. The pl
 | `max_count:N fixed_count:true` | a repeated field | `std::array<T, N>` (encode only) |
 | `max_size:N` | a `bytes` field | `pb::repeated<std::uint8_t, N>` |
 | `max_size:N fixed_length:true` | a `bytes` field | `std::array<std::uint8_t, N>` |
-| `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `int32`, `int64`, `uint32`, `uint64` | `std::int8_t` ... `std::uint64_t`, with the sign of the field |
+| `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `int32`, `int64`, `uint32`, `uint64`, `sint32`, `sint64` | `std::int8_t` ... `std::uint64_t`, with the sign of the field. A narrow `sint32` or `sint64` gives `pb::wire_int<std::intN_t, pb::int_encoding::ZIGZAG>` |
+| `enum_intsize:IS_8`, `IS_16`, `IS_32` | an enum | `enum class E : std::int8_t`, `std::int16_t` or `std::int32_t` (the default). A value that does not fit is an error at generation time. On decode, a value outside the range of the type (for example from a newer peer) is truncated, as for `int_size`. It saves RAM, not bytes on the wire |
 
-* The pattern is the name of the field: `package.Message.field`, or `Message.field` without the package. `*` and `?` are wildcards, thus `* max_count:8` sets a default for all fields.
+* The pattern is the name of the field: `package.Message.field`, or `Message.field` without the package. For `enum_intsize` it is the name of the enum: `package.Enum` or `package.Message.Enum`, with or without the package. `*` and `?` are wildcards, thus `* max_count:8` sets a default for all fields.
+* `int_size` also applies to `sint32` and `sint64`, also through a wildcard line: `* int_size:IS_16` or `Device.* int_size:IS_8` narrows each `sint32` and `sint64` field that it matches, which stayed `pb::sint32` and `pb::sint64` before. Check an existing options file before you regenerate headers. Decode truncates a value to the width of the member.
 * When more than one line sets the same option for a field, the last line wins.
 * Each repeated field must have a `max_count`. The plugin stops with an error when one is missing.
 * The plugin looks for `<name>.options` with the path that `protoc` has for the `.proto` file, from the current folder. Give more folders with `--micropb_opt=options_dir=<folder>`.
@@ -467,7 +476,7 @@ Without reflection and without a field list, a message type does not compile. Th
 > The compiler cannot compare a list that a person wrote with the struct. Always write `decltype(T::member)` and `offsetof(T, member)` with the same member, as in the example. An entry with a different type or a different offset compiles, and the codec then reads or writes the wrong memory. The library finds only these mistakes: a member that is in the list two times, a `std::variant` without all its alternatives, an offset that is not in the message, and the list of a different type. It does not find a member that is not in the list.
 
 > [!NOTE]
-> This was tested with GCC 16 in C++23 mode without `-freflection`. A test with an older compiler, for example the Arm GNU Toolchain, has not been done.
+> Tested with GCC 16 in C++23 mode without `-freflection`, and with the Arm GNU Toolchain 13.3 and 14.2 (compile only, `-mcpu=cortex-m4`).
 
 ## Encode
 
@@ -681,6 +690,14 @@ On Windows with MSYS2 UCRT64, add `-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++
 
 The tests use the flags `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`.
 
+CMake builds the tests only when micropb is the top-level project. `-DMICROPB_TESTS=ON` or `OFF` overrides this.
+
+#### Arm tests
+
+When CMake finds `arm-none-eabi-g++`, it adds compile tests for each such compiler. They only compile (`-std=c++23 -fno-exceptions -fno-rtti -Wall -Wextra -Werror -Os -mcpu=cortex-m4 -mthumb`); nothing is linked or run. CMake looks in `PATH` and, on Windows, in `C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/*/bin`. To choose the compilers, configure with `-DMICROPB_ARM_COMPILERS="<g++>;<g++>"`. `-DMICROPB_ARM_CPU=<cpu>` changes `-mcpu` (default `cortex-m4`). Without an Arm toolchain, CMake prints one status line, the Arm tests are off, and all other tests run.
+
+The tests are named `arm_<compiler version>.<test>`. The tests `test_wire`, `test_types`, `test_field_list`, `test_generated` and `test_scalars` are compiled, `no_startup_code` checks `test_generated.o` with `arm-none-eabi-nm`, and `consumer` configures and builds `tests/consumer`, a small project that uses the `micropb` target with that compiler. For a compiler without reflection, `consumer_reflection_on` checks that `-DMICROPB_REFLECTION=ON` stops with the error of micropb.
+
 | Tests | What they examine | How |
 | --- | --- | --- |
 | `test_wire`, `test_types`, `test_schema` | wire primitives, containers, field numbers and type rules | `static_assert`, and again at run time |
@@ -689,7 +706,8 @@ The tests use the flags `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`.
 | `test_wire_compat` | round trips, each prefix and each single changed byte of each vector | run time |
 | `test_generated` | the headers that the `protoc` plugin wrote for `vectors.proto` and `features.proto`, against bytes from `protoc`. Each field list of the plugin has the members, offsets and alternatives that reflection finds | run time and `static_assert` |
 | `test_field_list` | a field list that a person wrote: table, encode, decode | run time and `static_assert` |
-| `*_cxx23`, `compile_fail.list_*`, `no_startup_code` | `test_wire`, `test_types`, `test_field_list` and `test_generated` built as C++23 without reflection. The tables need no code before `main()` | run time, `nm` |
+| `test_scalars` | the standard integer types by size and sign, and narrow ZigZag members, against the fixed-width types and `sint32`, `sint64` | run time and `static_assert` |
+| `*_cxx23`, `compile_fail.list_*`, `no_startup_code` | `test_wire`, `test_types`, `test_field_list`, `test_generated` and `test_scalars` built as C++23 without reflection. The tables need no code before `main()` | run time, `nm` |
 | `generator` | `tools/protoc-gen-micropb.py`: each rule, each option, each error | Python `unittest`, runs the plugin through `protoc` |
 | `compile_fail.*` | each rule of [Compile-time checks](#compile-time-checks) | the file must not compile, and the compiler output must name the rule |
 
@@ -748,11 +766,11 @@ docs/superpowers/    design documents and implementation plans
 
 ## Status and limits
 
-* **Compiler:** developed and tested with GCC 16.2 on Linux. The MSYS2 build of the table codec and the MinGW variant of `MICROPB_SANITIZE` are not yet verified.
-* **Without reflection:** tested only as GCC 16.2 with `-std=c++23` and without `-freflection`. No older compiler has been used. The code needs `std::expected`, so GCC 12 or newer. Clang is not tested: it does not know the attribute `gnu::noclone` of the codec and gives a warning for it.
-* **ARM:** not yet compiled or measured for an ARM target.
-* **CMake:** `add_subdirectory` also adds the tests of `micropb` to your project.
-* **`protoc` plugin:** tested on Linux with `protoc` 35.1 and the Python package `protobuf` 7.36. `tools/protoc-gen-micropb.bat` is not yet verified on Windows.
+* **Compiler:** developed and tested with GCC 16.2 on Linux, and on Windows with GCC 16.2 from MSYS2 UCRT64 (all tests pass, no warnings). The MinGW variant of `MICROPB_SANITIZE` is not yet verified.
+* **Without reflection:** tested as GCC 16.2 with `-std=c++23` and without `-freflection`, and with the Arm GNU Toolchain 13.3 and 14.2 (compile only). The code needs `std::expected`, so GCC 12 or newer. Clang is not tested: it does not know the attribute `gnu::noclone` of the codec and gives a warning for it.
+* **ARM:** compiled with the Arm GNU Toolchain 13.3 and 14.2 (`-mcpu=cortex-m4`, also built through the CMake target in a separate project), not run and not measured.
+* **`protoc` plugin:** tested on Linux with `protoc` 35.1 and the Python package `protobuf` 7.36, and on Windows with `protoc` 36.2 and `protobuf` 6.31.1. On Windows, `tools/protoc-gen-micropb.bat` starts the first `python` in `PATH`, and that Python must have the `protobuf` package. When `C:\msys64\ucrt64\bin` comes first in `PATH`, this is the MSYS2 Python, which has no `protobuf` package unless you install `mingw-w64-ucrt-x86_64-python-protobuf`.
+* **CMake:** the tests are built only when micropb is the top-level project, or with `-DMICROPB_TESTS=ON`.
 * **Planned:** a generator that writes the `.proto` file from the C++ structs.
 * **Not supported:** `map`, proto2, groups, `Any` and the other well-known types, JSON, streaming encode or decode. Unknown fields are skipped and not kept.
 * **Not `constexpr`:** `encode`, `decode` and `encoded_size` run only at run time.
