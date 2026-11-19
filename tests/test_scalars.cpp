@@ -183,9 +183,56 @@ bool test_narrow_zigzag() {
     return truncated_used && truncated.b == static_cast<std::int16_t>(100000);
 }
 
+/// A `sint64` value that does not fit the member. The two decode rules differ here (see the specification):
+/// a 4-byte member truncates the varint to 32 bits and then decodes ZigZag, as Google does for `sint32`;
+/// a 1-, 2- or 8-byte member decodes 64-bit ZigZag and then truncates.
+/// 2^31 is the ZigZag varint 2^32. 4 bytes: the low 32 bits of 2^32 are 0, and ZigZag(0) is 0.
+/// 2 bytes: ZigZag-decoding 2^32 gives 2^31, whose low 16 bits are 0.
+struct one_sint64 {
+    pb::sint64 a;
+};
+struct one_sint32 {
+    pb::sint32 a;
+};
+struct one_zz16 {
+    zz16 a;
+};
+
+} // namespace
+
+template <>
+struct pb::fields_of<one_sint64> : pb::field_list<one_sint64, pb::field_at<decltype(one_sint64::a), 1, offsetof(one_sint64, a)>> {};
+template <>
+struct pb::fields_of<one_sint32> : pb::field_list<one_sint32, pb::field_at<decltype(one_sint32::a), 1, offsetof(one_sint32, a)>> {};
+template <>
+struct pb::fields_of<one_zz16> : pb::field_list<one_zz16, pb::field_at<decltype(one_zz16::a), 1, offsetof(one_zz16, a)>> {};
+
+namespace {
+
+bool test_out_of_range_sint64() {
+    one_sint64 source{};
+    source.a = std::int64_t{2147483648};
+    std::array<std::uint8_t, 16> bytes{};
+    const auto size = pb::encode(source, std::span<std::uint8_t>(bytes));
+    if (!size)
+        return false;
+    const std::span<const std::uint8_t> input(bytes.data(), *size);
+
+    one_sint32 four{};
+    four.a = 7;
+    const auto four_used = pb::decode(input, four);
+    if (!four_used || four.a != 0)
+        return false;
+
+    one_zz16 two{};
+    two.a = std::int16_t{7};
+    const auto two_used = pb::decode(input, two);
+    return two_used && two.a == 0;
+}
+
 } // namespace
 
 int main() {
-    const bool ok = test_standard_integers() && test_narrow_zigzag();
+    const bool ok = test_standard_integers() && test_narrow_zigzag() && test_out_of_range_sint64();
     return ok ? 0 : 1;
 }

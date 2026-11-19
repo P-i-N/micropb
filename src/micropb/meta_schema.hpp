@@ -115,10 +115,11 @@ using element_t = typename sequence_traits<T>::element;
 
 /// A standard integer type: any integer type by size and sign, but not `bool` and not the character types.
 /// Only the sizes 1, 2, 4 and 8 map to the wire: `__int128`, which `-std=gnu++23` makes integral, does not.
+/// A volatile-qualified type is not accepted: the codec reads and writes through `memcpy`, without `volatile`.
 /// `std::int32_t` is `int` on a PC and `long` on `arm-none-eabi`, and both are accepted.
 template <typename T>
 consteval bool is_standard_integer() {
-    return std::is_integral_v<T> && (sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8) &&
+    return std::is_integral_v<T> && !std::is_volatile_v<T> && (sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4 || sizeof(T) == 8) &&
            !is_one_of<std::remove_cv_t<T>, bool, char, wchar_t, char8_t, char16_t, char32_t>;
 }
 
