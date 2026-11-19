@@ -165,16 +165,20 @@ classDiagram
 
 ## Add it to a project
 
-**Requirements:** GCC 16.2 or newer with `-std=c++26 -freflection`. No other compiler has been used. For a compiler without reflection, see [Compilers without reflection](#compilers-without-reflection).
+**Requirements:** a C++23 compiler. A struct without a field list needs GCC 16.2 or newer with `-std=c++26 -freflection`; no other compiler has been used. For structs with a field list, see [Compilers without reflection](#compilers-without-reflection).
 
-With CMake, add the directory and link the `micropb` target. The target is an `INTERFACE` library: it gives the include directory, C++26 and `-freflection`. The target `micropb_cxx23` gives the include directory and C++23 only.
+With CMake, add the directory and link the `micropb` target. The target is an `INTERFACE` library: it gives the include directory, and C++26 with `-freflection` when the compiler supports them, otherwise C++23.
 
 ```cmake
 add_subdirectory(micropb)
 target_link_libraries(firmware PRIVATE micropb)
 ```
 
-Without CMake, add `src/` to the include path and compile with `-std=c++26 -freflection`.
+* `MICROPB_REFLECTION` is `AUTO` (the default), `ON` or `OFF`. `AUTO` checks whether the compiler accepts `-std=c++26 -freflection`. `ON` stops with an error when it does not. `OFF` never uses reflection. CMake prints `micropb: reflection on` or `micropb: reflection off (C++23, field lists only)`. Without reflection, each message type needs a field list.
+* `MICROPB_TESTS` builds micropb's own tests. It is on by default only when micropb is the top-level project, so `add_subdirectory(micropb)` in a firmware project does not build host tests with the firmware compiler.
+* The target `micropb_cxx23` gives the include directory and C++23 only. It never uses reflection.
+
+Without CMake, add `src/` to the include path and compile with C++23, or with `-std=c++26 -freflection`.
 
 Include one header:
 
@@ -751,7 +755,6 @@ docs/superpowers/    design documents and implementation plans
 * **Compiler:** developed and tested with GCC 16.2 on Linux, and on Windows with GCC 16.2 from MSYS2 UCRT64 (all tests pass, no warnings). The MinGW variant of `MICROPB_SANITIZE` is not yet verified.
 * **Without reflection:** tested only as GCC 16.2 with `-std=c++23` and without `-freflection`. No older compiler has been used. The code needs `std::expected`, so GCC 12 or newer. Clang is not tested: it does not know the attribute `gnu::noclone` of the codec and gives a warning for it.
 * **ARM:** not yet compiled or measured for an ARM target.
-* **CMake:** `add_subdirectory` also adds the tests of `micropb` to your project.
 * **`protoc` plugin:** tested on Linux with `protoc` 35.1 and the Python package `protobuf` 7.36, and on Windows with `protoc` 36.2 and `protobuf` 6.31.1. On Windows, `tools/protoc-gen-micropb.bat` starts the first `python` in `PATH`, and that Python must have the `protobuf` package. When `C:\msys64\ucrt64\bin` comes first in `PATH`, this is the MSYS2 Python, which has no `protobuf` package unless you install `mingw-w64-ucrt-x86_64-python-protobuf`.
 * **Planned:** a generator that writes the `.proto` file from the C++ structs.
 * **Not supported:** `map`, proto2, groups, `Any` and the other well-known types, JSON, streaming encode or decode. Unknown fields are skipped and not kept.
