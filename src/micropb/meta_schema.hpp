@@ -122,10 +122,38 @@ consteval bool is_standard_integer() {
            !is_one_of<std::remove_cv_t<T>, bool, char, wchar_t, char8_t, char16_t, char32_t>;
 }
 
+/// `wire_int<T, ZIGZAG>`: `sint32` or `sint64` with a stored integer type of any size.
+template <typename T>
+inline constexpr bool is_zigzag = false;
+template <typename T>
+inline constexpr bool is_zigzag<wire_int<T, int_encoding::ZIGZAG>> = true;
+
+/// The stored integer type of a `wire_int`.
+template <typename T>
+using stored_t = decltype(T::value);
+
+/// A ZigZag member whose stored type is a signed standard integer: 1, 2 or 4 bytes are `sint32`, 8 bytes are `sint64`.
+template <typename T>
+consteval bool is_signed_zigzag() {
+    if constexpr (is_zigzag<T>)
+        return is_standard_integer<stored_t<T>>() && std::is_signed_v<stored_t<T>>;
+    else
+        return false;
+}
+
+/// A ZigZag member whose stored type is an unsigned standard integer.
+template <typename T>
+consteval bool is_unsigned_zigzag() {
+    if constexpr (is_zigzag<T>)
+        return is_standard_integer<stored_t<T>>() && !std::is_signed_v<stored_t<T>>;
+    else
+        return false;
+}
+
 template <typename T>
 consteval bool is_scalar() {
-    return std::is_enum_v<T> || is_standard_integer<T>() ||
-           is_one_of<T, bool, float, double, sint32, sint64, fixed32, fixed64, sfixed32, sfixed64>;
+    return std::is_enum_v<T> || is_standard_integer<T>() || is_signed_zigzag<T>() ||
+           is_one_of<T, bool, float, double, fixed32, fixed64, sfixed32, sfixed64>;
 }
 
 } // namespace detail
@@ -139,6 +167,9 @@ template <typename T>
         if constexpr (std::is_enum_v<T>)
             static_assert(sizeof(T) <= 4, "pb: enum_too_wide: a proto3 enum is int32, so the enum must fit in 32 bits");
         return field_kind::SCALAR;
+    } else if constexpr (detail::is_unsigned_zigzag<T>()) {
+        static_assert(!std::is_same_v<T, T>,
+                      "pb: zigzag_unsigned: a ZigZag (sint32, sint64) member needs a signed integer type");
     } else if constexpr (std::is_same_v<T, std::string_view>) {
         return field_kind::STRING;
     } else if constexpr (detail::is_optional<T>) {

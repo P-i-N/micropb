@@ -51,7 +51,7 @@ template <typename T>
         return size | scalar_bool;
     else if constexpr (std::is_enum_v<T>)
         return size | scalar_enum | (std::is_signed_v<std::underlying_type_t<T>> ? scalar_signed : 0);
-    else if constexpr (is_one_of<T, sint32, sint64>)
+    else if constexpr (detail::is_zigzag<T>)
         return size | scalar_signed | scalar_zigzag;
     else if constexpr (wire_type_of<T>() != wire_type::VARINT)
         return size | scalar_fixed;

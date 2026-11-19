@@ -289,6 +289,7 @@ if(MICROPB_TESTS)
     micropb_add_list_compile_fail_test(wchar_member unmapped_type)
     # `__int128` is an integer type only with GNU extensions, so this target turns them on.
     micropb_add_list_compile_fail_test(int128_member unmapped_type)
+    micropb_add_list_compile_fail_test(zigzag_unsigned zigzag_unsigned)
     set_target_properties(int128_member PROPERTIES CXX_EXTENSIONS ON)
 
     if(MICROPB_HAS_REFLECTION)
