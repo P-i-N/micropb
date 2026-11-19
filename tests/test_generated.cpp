@@ -22,6 +22,7 @@ namespace {
 
 namespace gen = micropb::test;
 
+static_assert(sizeof(features::Device_State) == 1);
 static_assert(std::is_same_v<decltype(gen::scalars::i8), std::int8_t>);
 static_assert(std::is_same_v<decltype(gen::scalars::u16), std::uint16_t>);
 static_assert(std::is_same_v<decltype(gen::text::mac), std::array<std::uint8_t, 6>>);

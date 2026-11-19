@@ -334,6 +334,23 @@ class OptionsTest(unittest.TestCase):
         self.assertEqual(result.rc, 0, result.stderr)
         self.assertEqual(members(result.headers["a.pb.hpp"], "m"), ["pb::repeated<std::int32_t, 9> a;"])
 
+    def test_enum_intsize(self):
+        for size, name in (("IS_8", "std::int8_t"), ("IS_16", "std::int16_t"), ("IS_32", "std::int32_t")):
+            text = header("enum E { E_A = 0; E_B = 1; }", f"E enum_intsize:{size}\n")
+            self.assertIn(f"enum class E : {name} {{", text)
+
+    def test_enum_intsize_nested_and_wildcard(self):
+        body = "message M { enum Mode { MODE_A = 0; } Mode m = 1; }"
+        text = header(body, "M.Mode enum_intsize:IS_8\n")
+        self.assertIn("enum class M_Mode : std::int8_t {", text)
+        for pattern in ("pkg.*.Mode", "*Mode"):
+            text = header("package pkg; " + body, f"{pattern} enum_intsize:IS_8\n")
+            self.assertIn("enum class M_Mode : std::int8_t {", text)
+
+    def test_enum_intsize_bounds(self):
+        text = header("enum E { E_A = 0; E_LOW = -128; E_HIGH = 127; }", "E enum_intsize:IS_8\n")
+        self.assertIn("enum class E : std::int8_t {", text)
+
 
 class StructureTest(unittest.TestCase):
     def test_optional(self):
@@ -648,6 +665,18 @@ class ErrorTest(unittest.TestCase):
         text = error(PROTO3 + "message m { repeated uint32 a = 1; }", "m.a max_count:4 int_size:IS_8\n")
         self.assertIn("a.proto: m.a: int_size:IS_8 on a repeated unsigned field gives a bytes field", text)
 
+    def test_enum_intsize_value_does_not_fit(self):
+        cases = (("E_B = 128", "IS_8", "128", "IS_16"), ("E_B = -129", "IS_8", "-129", "IS_16"),
+                 ("E_B = 40000", "IS_16", "40000", "IS_32"))
+        for value, size, shown, fits in cases:
+            text = error(PROTO3 + f"enum E {{ E_A = 0; {value}; }}", f"E enum_intsize:{size}\n")
+            self.assertIn(f"a.proto: E: the value {shown} does not fit enum_intsize:{size}, {fits} is the smallest",
+                          text)
+
+    def test_enum_intsize_64(self):
+        text = error(PROTO3 + "enum E { E_A = 0; }", "E enum_intsize:IS_64\n")
+        self.assertIn("a.proto: E: enum_intsize:IS_64 is not possible, a proto3 enum is int32", text)
+
     def test_bad_options_lines(self):
         proto = PROTO3 + "message m { repeated int32 a = 1; }"
         cases = {
@@ -681,6 +710,15 @@ class WarningTest(unittest.TestCase):
         result = run({"a.proto": PROTO3 + proto, "a.options": options})
         self.assertEqual(result.rc, 0, result.stderr)
         return result.stderr, result.headers["a.pb.hpp"]
+
+    def test_enum_intsize_on_a_field(self):
+        stderr, _ = self.warnings("message m { int32 a = 1; }", "m.a enum_intsize:IS_8\n")
+        self.assertIn("a.options:1: warning: enum_intsize does not apply to m.a", stderr)
+
+    def test_enum_rule_is_not_a_rule_without_a_match(self):
+        stderr, text = self.warnings("enum E { E_A = 0; }", "E enum_intsize:IS_8\n")
+        self.assertNotIn("matches no field", stderr)
+        self.assertIn("std::int8_t", text)
 
     def test_unknown_option(self):
         stderr, text = self.warnings("message m { repeated int32 a = 1; }", "m.a max_count:4 type:FT_POINTER\n")

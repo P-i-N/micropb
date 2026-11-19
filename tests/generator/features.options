@@ -9,3 +9,4 @@ Device.token           max_size:8
 Device.Slot.key        max_size:16
 Calibration.gains      max_count:4 fixed_count:true
 Calibration.id         max_size:6 fixed_length:true
+Device.State           enum_intsize:IS_8

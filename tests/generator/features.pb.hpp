@@ -19,7 +19,7 @@ enum class RxMode : std::int32_t {
     VARIABLE = 1,
 };
 
-enum class Device_State : std::int32_t {
+enum class Device_State : std::int8_t {
     IDLE = 0,
     BUSY = 1,
 };

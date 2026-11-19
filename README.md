@@ -423,8 +423,9 @@ A `.proto` file does not say how many elements a repeated field can have. The pl
 | `max_size:N` | a `bytes` field | `pb::repeated<std::uint8_t, N>` |
 | `max_size:N fixed_length:true` | a `bytes` field | `std::array<std::uint8_t, N>` |
 | `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `int32`, `int64`, `uint32`, `uint64`, `sint32`, `sint64` | `std::int8_t` ... `std::uint64_t`, with the sign of the field. A narrow `sint32` or `sint64` gives `pb::wire_int<std::intN_t, pb::int_encoding::ZIGZAG>` |
+| `enum_intsize:IS_8`, `IS_16`, `IS_32` | an enum | `enum class E : std::int8_t`, `std::int16_t` or `std::int32_t` (the default). A value that does not fit is an error. It saves RAM, not bytes on the wire |
 
-* The pattern is the name of the field: `package.Message.field`, or `Message.field` without the package. `*` and `?` are wildcards, thus `* max_count:8` sets a default for all fields.
+* The pattern is the name of the field: `package.Message.field`, or `Message.field` without the package. For `enum_intsize` it is the name of the enum: `package.Enum` or `package.Message.Enum`, with or without the package. `*` and `?` are wildcards, thus `* max_count:8` sets a default for all fields.
 * When more than one line sets the same option for a field, the last line wins.
 * Each repeated field must have a `max_count`. The plugin stops with an error when one is missing.
 * The plugin looks for `<name>.options` with the path that `protoc` has for the `.proto` file, from the current folder. Give more folders with `--micropb_opt=options_dir=<folder>`.
