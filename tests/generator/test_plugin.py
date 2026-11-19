@@ -339,6 +339,11 @@ class OptionsTest(unittest.TestCase):
             text = header("enum E { E_A = 0; E_B = 1; }", f"E enum_intsize:{size}\n")
             self.assertIn(f"enum class E : {name} {{", text)
 
+    def test_enum_intsize_default(self):
+        # IS_DEFAULT is the default, std::int32_t, as in NanoPB; `header` fails on a warning.
+        text = header("enum E { E_A = 0; E_B = 1; }", "E enum_intsize:IS_DEFAULT\n")
+        self.assertIn("enum class E : std::int32_t {", text)
+
     def test_enum_intsize_nested_and_wildcard(self):
         body = "message M { enum Mode { MODE_A = 0; } Mode m = 1; }"
         text = header(body, "M.Mode enum_intsize:IS_8\n")

@@ -253,7 +253,7 @@ def enum_text(enum, options):
         names = [name[len(prefix):] for name in names]
 
     found = options.of(enum.proto_name, enum.file.package)
-    bits = found["enum_intsize"][0] if "enum_intsize" in found else 32
+    bits = (found["enum_intsize"][0] if "enum_intsize" in found else 0) or 32  # IS_DEFAULT is 0: the default, 32
     options.check_use(enum.proto_name, found, {"enum_intsize"})
     if bits == 64:
         raise Error(f"{enum.file.name}: {enum.proto_name}: enum_intsize:IS_64 is not possible, a proto3 enum is int32")
