@@ -284,7 +284,7 @@ template <auto Sorted>
 consteval void check_field_numbers()
 {
 	static_assert( !has_number_in( Sorted, 0, 0 ), "pb: tag_zero: field number 0 is not valid" );
-	static_assert( !has_number_in( Sorted, reader::max_field_number + 1, std::uint32_t( -1 ) ),
+	static_assert( !has_number_in( Sorted, max_field_number + 1, std::uint32_t( -1 ) ),
 	               "pb: tag_too_large: the largest field number is 2^29 - 1" );
 	static_assert( !has_number_in( Sorted, reserved_first, reserved_last ),
 	               "pb: tag_reserved: field numbers 19000 to 19999 are reserved by protobuf" );

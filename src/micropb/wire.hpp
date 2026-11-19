@@ -12,6 +12,11 @@ namespace pb {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+namespace detail {
+/// Largest field number of proto3.
+inline constexpr std::uint32_t max_field_number = ( 1u << 29 ) - 1;
+} // namespace detail
+
 /// Number of bytes that `value` uses as a varint (1 to 10).
 [[nodiscard]] constexpr std::size_t varint_size( std::uint64_t value )
 {
@@ -139,7 +144,7 @@ private:
 struct reader
 {
 	/// Largest field number of proto3.
-	static constexpr std::uint32_t max_field_number = ( 1u << 29 ) - 1;
+	static constexpr std::uint32_t max_field_number = detail::max_field_number;
 
 	constexpr explicit reader( std::span<const std::uint8_t> in ) : _in( in ) {}
 
