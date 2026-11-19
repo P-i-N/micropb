@@ -452,6 +452,7 @@ struct pb::fields_of<ping> : pb::field_list<ping,
 ```
 
 * The entries can be in any order.
+* The list is in the scope of `pb`. When your type has a name that `pb` also has, for example `tag` or `error`, write `::tag`.
 * A `std::variant` member must have one entry for each alternative after `std::monostate`. The entry has the index of the alternative as a fourth argument: `pb::field_at<decltype(msg::choice), 10, offsetof(msg, choice), 1>`.
 * `offsetof` is a macro. For a type with a comma in its name, such as `box<T, N>`, make an alias first.
 * A `const` member is encode-only. Use `decltype`, which keeps the `const`.
