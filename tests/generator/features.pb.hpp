@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -38,14 +39,14 @@ struct Device {
     Device_State state;
     ::features::limits limits;
     ::features::limits backup;
-    [[= pb::tag{10}]] std::uint32_t serial;
+    std::uint32_t serial;
     std::int16_t offset;
     std::optional<pb::repeated<std::uint8_t, 8>> token;
     std::optional<Device_Slot> spare;
     pb::repeated<Device_Slot, 2> slots;
     pb::repeated<Device_State, 3> history;
     pb::repeated<std::int8_t, 4> trims;
-    [[= pb::oneof_tags<20, 22, 25>{}]] std::variant<std::monostate, std::uint32_t, std::string_view, Device_Slot> event;
+    std::variant<std::monostate, std::uint32_t, std::string_view, Device_Slot> event;
     bool ready;
 };
 
@@ -63,3 +64,46 @@ struct Calibration {
 };
 
 } // namespace features
+
+// Field lists: with these, the messages also work on a compiler without reflection.
+
+template <>
+struct pb::fields_of<features::limits> : pb::field_list<features::limits,
+    pb::field_at<decltype(features::limits::low), 1, offsetof(features::limits, low)>,
+    pb::field_at<decltype(features::limits::high), 2, offsetof(features::limits, high)>> {};
+
+template <>
+struct pb::fields_of<features::Device_Slot> : pb::field_list<features::Device_Slot,
+    pb::field_at<decltype(features::Device_Slot::index), 1, offsetof(features::Device_Slot, index)>,
+    pb::field_at<decltype(features::Device_Slot::key), 2, offsetof(features::Device_Slot, key)>> {};
+
+template <>
+struct pb::fields_of<features::Device> : pb::field_list<features::Device,
+    pb::field_at<decltype(features::Device::class_), 1, offsetof(features::Device, class_)>,
+    pb::field_at<decltype(features::Device::state), 2, offsetof(features::Device, state)>,
+    pb::field_at<decltype(features::Device::limits), 3, offsetof(features::Device, limits)>,
+    pb::field_at<decltype(features::Device::backup), 4, offsetof(features::Device, backup)>,
+    pb::field_at<decltype(features::Device::serial), 10, offsetof(features::Device, serial)>,
+    pb::field_at<decltype(features::Device::offset), 11, offsetof(features::Device, offset)>,
+    pb::field_at<decltype(features::Device::token), 12, offsetof(features::Device, token)>,
+    pb::field_at<decltype(features::Device::spare), 13, offsetof(features::Device, spare)>,
+    pb::field_at<decltype(features::Device::slots), 14, offsetof(features::Device, slots)>,
+    pb::field_at<decltype(features::Device::history), 15, offsetof(features::Device, history)>,
+    pb::field_at<decltype(features::Device::trims), 16, offsetof(features::Device, trims)>,
+    pb::field_at<decltype(features::Device::event), 20, offsetof(features::Device, event), 1>,
+    pb::field_at<decltype(features::Device::event), 22, offsetof(features::Device, event), 2>,
+    pb::field_at<decltype(features::Device::event), 25, offsetof(features::Device, event), 3>,
+    pb::field_at<decltype(features::Device::ready), 26, offsetof(features::Device, ready)>> {};
+
+template <>
+struct pb::fields_of<features::Frame> : pb::field_list<features::Frame,
+    pb::field_at<decltype(features::Frame::device), 1, offsetof(features::Frame, device)>,
+    pb::field_at<decltype(features::Frame::slot), 2, offsetof(features::Frame, slot)>,
+    pb::field_at<decltype(features::Frame::origin), 3, offsetof(features::Frame, origin)>,
+    pb::field_at<decltype(features::Frame::unit), 4, offsetof(features::Frame, unit)>,
+    pb::field_at<decltype(features::Frame::mode), 5, offsetof(features::Frame, mode)>> {};
+
+template <>
+struct pb::fields_of<features::Calibration> : pb::field_list<features::Calibration,
+    pb::field_at<decltype(features::Calibration::gains), 1, offsetof(features::Calibration, gains)>,
+    pb::field_at<decltype(features::Calibration::id), 2, offsetof(features::Calibration, id)>> {};

@@ -3,8 +3,9 @@
 
     protoc --plugin=protoc-gen-micropb=tools/protoc-gen-micropb.py --micropb_out=gen app.proto
 
-The output is gen/app.pb.hpp. The sizes of repeated fields come from app.options, a file in the
-NanoPB format in the folder of app.proto:
+The output is gen/app.pb.hpp: plain structs, and a field list for each struct, so that the header
+also works on a compiler without reflection. The sizes of repeated fields come from app.options, a
+file in the NanoPB format:
 
     # <name pattern> <option>:<value> ...
     Message.field  max_count:8                    pb::repeated<T, 8>
@@ -13,8 +14,11 @@ NanoPB format in the folder of app.proto:
     Message.field  max_size:6 fixed_length:true   bytes: std::array<std::uint8_t, 6>
     Message.field  int_size:IS_8                  std::int8_t or std::uint8_t (also IS_16, IS_32, IS_64)
 
-The plugin looks for the options file from the current folder and from each folder of the
-parameter --micropb_opt=options_dir=<folder>. It needs Python 3 and the Python package protobuf.
+The plugin looks for app.options with the path that protoc has for app.proto: first from the
+current folder, then from each folder of the parameter --micropb_opt=options_dir=<folder>. With
+`-I proto proto/app.proto`, give `--micropb_opt=options_dir=proto`.
+
+It needs Python 3 and the Python package protobuf.
 """
 
 import fnmatch
@@ -54,6 +58,7 @@ SIZED_INTEGERS = (Field.TYPE_INT32, Field.TYPE_INT64, Field.TYPE_UINT32, Field.T
 # The headers that the generated text can need, each with a pattern that shows the need.
 INCLUDES = [
     ("<array>", r"std::array<"),
+    ("<cstddef>", r"offsetof\("),
     ("<cstdint>", r"std::u?int\d+_t"),
     ("<optional>", r"std::optional<"),
     ("<span>", r"std::span<"),
@@ -70,10 +75,23 @@ KEYWORDS = set("""
     static_cast struct switch template this thread_local throw true try typedef typeid typename union unsigned
     using virtual void volatile wchar_t while xor xor_eq""".split())
 
+# Names that the generated code or a standard header uses: the two namespaces, and common macros.
+RESERVED = KEYWORDS | set("pb std NULL EOF errno stdin stdout stderr assert offsetof".split())
+
 
 def ident(name):
-    """`name` as a C++ identifier: a keyword gets the suffix `_`."""
-    return name + "_" if name in KEYWORDS else name
+    """`name` as a C++ identifier: a keyword or a reserved name gets the suffix `_`."""
+    return name + "_" if name in RESERVED else name
+
+
+def namespace_of(package):
+    """`a.b` gives `a::b`."""
+    return "::".join(ident(part) for part in package.split(".") if part)
+
+
+def stem(proto_name):
+    """`dir/app.proto` gives `dir/app`."""
+    return re.sub(r"\.proto$", "", proto_name)
 
 
 def screaming_case(name):
@@ -85,8 +103,8 @@ def screaming_case(name):
 
 
 def positive(text):
-    if not text.isdigit() or int(text) == 0:
-        raise ValueError("a number above 0")
+    if not re.fullmatch(r"[0-9]{1,9}", text) or int(text) == 0:
+        raise ValueError("a number from 1 to 999999999")
     return int(text)
 
 
@@ -125,9 +143,15 @@ class Options:
         self.rules = []
         self.warnings = []
         if path:
-            with open(path, encoding="utf-8") as file:
-                for number, line in enumerate(file, 1):
-                    self.add(number, re.sub(r"(#|//).*", "", line).split(None, 1))
+            try:
+                with open(path, encoding="utf-8-sig") as file:
+                    lines = file.readlines()
+            except UnicodeDecodeError:
+                raise Error(f"{path}: the file is not UTF-8 text") from None
+            except OSError as problem:
+                raise Error(f"{path}: {problem.strerror}") from None
+            for number, line in enumerate(lines, 1):
+                self.add(number, re.sub(r"(#|//).*", "", line).split(None, 1))
 
     def add(self, number, parts):
         """Adds the rule of line `number`. `parts` is the name pattern and the remaining text."""
@@ -176,7 +200,7 @@ class Options:
 def find_options(proto_name, folders):
     """The path of the options file for `proto_name`, or None."""
     for folder in [""] + folders:
-        path = os.path.join(folder, re.sub(r"\.proto$", "", proto_name) + ".options")
+        path = os.path.join(folder, stem(proto_name) + ".options")
         if os.path.isfile(path):
             return path
     return None
@@ -220,7 +244,7 @@ def enum_text(enum):
     """The definition of an enum. The values lose the prefix `<ENUM NAME>_` when each value has it."""
     prefix = screaming_case(enum.desc.name) + "_"
     names = [value.name for value in enum.desc.value]
-    if all(name.upper().startswith(prefix) and name[len(prefix):].isidentifier() for name in names):
+    if all(name.upper().startswith(prefix) and re.fullmatch(r"[A-Za-z]\w*", name[len(prefix):]) for name in names):
         names = [name[len(prefix):] for name in names]
 
     lines = [f"enum class {enum.name} : std::int32_t {{"]
@@ -236,17 +260,19 @@ class Header:
         self.types = types
         self.options = options
         self.imports = set()
+        self.field_lists = []
 
     def error(self, text):
         return Error(f"{self.file.name}: {text}")
 
     def reference(self, target, member_names):
-        """The name of the type `target` in a struct that has the members `member_names`."""
+        """The name of the type `target` in a struct that has the members `member_names`. Also records the
+        file of `target` as an import that the header uses."""
         if target.file.name != self.file.name:
             self.imports.add(target.file.name)
         if target.file.package == self.file.package and target.name not in member_names:
             return target.name
-        return "::" + "::".join(filter(None, target.file.package.split(".") + [target.name]))
+        return "::" + "::".join(filter(None, [namespace_of(target.file.package), target.name]))
 
     def field_type(self, message, field, member_names):
         """The C++ type for `field`, without `std::optional`."""
@@ -284,7 +310,7 @@ class Header:
         if repeated:
             count, fixed = option("max_count"), option("fixed_count")
             if not count:
-                file = self.options.path or re.sub(r"\.proto$", "", self.file.name) + ".options"
+                file = self.options.path or stem(self.file.name) + ".options"
                 hint = "" if self.options.path else (f". No file {file} was found. If it is in another folder, "
                                                      "use --micropb_opt=options_dir=<folder>.")
                 raise self.error(f"{name}: a repeated field needs a capacity. "
@@ -295,10 +321,8 @@ class Header:
         return text
 
     def struct_text(self, message):
-        """The definition of the struct of `message`. A member has a number only where the numbers have a gap."""
+        """The definition of the struct of `message`. Also makes the field list of the struct."""
         desc = message.desc
-        if not desc.field:
-            return f"struct {message.name} {{}};"
 
         def oneof_of(field):  # the index of the oneof of `field`. `optional` is a oneof only for protoc.
             return field.oneof_index if field.HasField("oneof_index") and not field.proto3_optional else None
@@ -307,16 +331,15 @@ class Header:
         member_names |= {ident(desc.oneof_decl[oneof_of(field)].name) for field in desc.field
                          if oneof_of(field) is not None}
 
-        lines, number, done = [f"struct {message.name} {{"], 1, set()
+        lines, entries, done = [], [], set()  # an entry: member name, field number, index of the alternative
         for field in desc.field:
             index = oneof_of(field)
             if index is None:
                 text = self.field_type(message, field, member_names)
                 if field.proto3_optional:
                     text = f"std::optional<{text}>"
-                tag = "" if field.number == number else f"[[= pb::tag{{{field.number}}}]] "
-                lines.append(f"    {tag}{text} {ident(field.name)};")
-                number = field.number + 1
+                lines.append(f"    {text} {ident(field.name)};")
+                entries.append((ident(field.name), field.number, 0))
             elif index not in done:
                 done.add(index)
                 group = [other for other in desc.field if oneof_of(other) == index]
@@ -326,14 +349,25 @@ class Header:
                     if types.count(text) > 1:
                         raise self.error(f"{message.proto_name}.{name}: a oneof cannot have two members "
                                          f"of the type {text}")
-                numbers = [other.number for other in group]
-                tags = ", ".join(str(n) for n in numbers)
-                tag = "" if numbers == list(range(number, number + len(group))) else f"[[= pb::oneof_tags<{tags}>{{}}]] "
-                lines.append(f"    {tag}std::variant<std::monostate, {', '.join(types)}> {ident(name)};")
-                number = numbers[-1] + 1
-        return "\n".join(lines + ["};"])
+                lines.append(f"    std::variant<std::monostate, {', '.join(types)}> {ident(name)};")
+                entries += [(ident(name), other.number, position) for position, other in enumerate(group, 1)]
 
-    def sorted(self, messages):
+        self.field_lists.append(self.field_list_text(message, entries))
+        if not lines:
+            return f"struct {message.name} {{}};"
+        return "\n".join([f"struct {message.name} {{"] + lines + ["};"])
+
+    def field_list_text(self, message, entries):
+        """The `pb::fields_of` specialization of `message`. It gives each field its number, so that the struct
+        needs no reflection and no annotation."""
+        name = "::".join(filter(None, [namespace_of(self.file.package), message.name]))
+        lines = [f"template <>\nstruct pb::fields_of<{name}> : pb::field_list<{name}"]
+        for member, number, alternative in entries:
+            index = f", {alternative}" if alternative else ""
+            lines.append(f"    pb::field_at<decltype({name}::{member}), {number}, offsetof({name}, {member}){index}>")
+        return ",\n".join(lines) + "> {};"
+
+    def in_dependency_order(self, messages):
         """`messages` in an order where each message comes after the messages of this file that it contains."""
         order, stack = [], []
 
@@ -366,25 +400,35 @@ class Header:
             if names.count(name) > 1:
                 raise self.error(f"two types have the C++ name {name}")
 
-        blocks = [enum_text(each) for each in types if each.is_enum]
-        blocks += [self.struct_text(each) for each in self.sorted([each for each in types if not each.is_enum])]
-        body = "\n\n".join(blocks)
+        # The warning for a rule that matches no field must not get lost when an error comes later.
+        messages = [each for each in types if not each.is_enum]
+        for message in messages:
+            for field in message.desc.field:
+                self.options.of(f"{message.proto_name}.{field.name}", self.file.package)
         self.options.check_rules()
 
+        blocks = [enum_text(each) for each in types if each.is_enum]
+        blocks += [self.struct_text(each) for each in self.in_dependency_order(messages)]
+        body = "\n\n".join(blocks)
+        lists = "\n\n".join(self.field_lists)
+
         out = [f"// Generated by protoc-gen-micropb from {self.file.name}. Do not edit.", "#pragma once", ""]
-        includes = [f"#include {name}" for name, pattern in INCLUDES if re.search(pattern, body)]
+        includes = [f"#include {name}" for name, pattern in INCLUDES if re.search(pattern, body + lists)]
         if includes:
             out += includes + [""]
-        if "pb::" in body:
+        if "pb::" in body + lists:
             out += ["#include <micropb/types.hpp>", ""]
         if self.imports:
-            out += [f'#include "{re.sub(r"\.proto$", "", name)}.pb.hpp"' for name in sorted(self.imports)] + [""]
+            out += [f'#include "{stem(name)}.pb.hpp"' for name in sorted(self.imports)] + [""]
 
-        namespace = self.file.package.replace(".", "::")
+        namespace = namespace_of(self.file.package)
         if namespace:
             out += [f"namespace {namespace} {{", "", body, "", f"}} // namespace {namespace}"]
         else:
             out += [body]
+        if lists:
+            out += ["", "// Field lists: with these, the messages also work on a compiler without reflection.", "",
+                    lists]
         return "\n".join(out) + "\n"
 
 
@@ -408,9 +452,11 @@ def generate(request):
         types = {"." + each.proto_name: each for file in request.proto_file for each in types_of(file)}
         for name in request.file_to_generate:
             options = Options(find_options(name, folders))
-            text = Header(files[name], types, options).text()
-            response.file.add(name=re.sub(r"\.proto$", "", name) + ".pb.hpp", content=text)
-            warnings += options.warnings
+            try:
+                text = Header(files[name], types, options).text()
+            finally:
+                warnings += options.warnings
+            response.file.add(name=stem(name) + ".pb.hpp", content=text)
     except Error as error:
         response.ClearField("file")
         response.error = str(error)

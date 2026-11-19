@@ -75,6 +75,12 @@ micropb_add_cxx23_test(test_types)
 micropb_add_cxx23_test(test_field_list)
 micropb_add_cxx23_test(test_generated)
 
+# The tables must be constants in ROM: the program must have no code that makes them before main().
+if(NOT MICROPB_SANITIZE)
+    add_test(NAME no_startup_code COMMAND ${CMAKE_NM} $<TARGET_FILE:test_generated_cxx23>)
+    set_tests_properties(no_startup_code PROPERTIES FAIL_REGULAR_EXPRESSION "_GLOBAL__sub_I")
+endif()
+
 # The tests of tools/protoc-gen-micropb.py need Python, the Python package protobuf and protoc.
 # Without them, CTest does not have the test `generator`. The other tests do not need these tools.
 find_package(Python3 COMPONENTS Interpreter)
