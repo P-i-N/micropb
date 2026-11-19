@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -52,7 +53,7 @@ template <typename T>
 		return size | scalar_bool;
 	else if constexpr ( std::is_enum_v<T> )
 		return size | scalar_enum | ( std::is_signed_v<std::underlying_type_t<T>> ? scalar_signed : 0 );
-	else if constexpr ( detail::is_zigzag<T> )
+	else if constexpr ( is_zigzag<T> )
 		return size | scalar_signed | scalar_zigzag;
 	else if constexpr ( wire_type_of<T>() != wire_type::VARINT )
 		return size | scalar_fixed;
@@ -257,7 +258,7 @@ template <typename V, std::size_t... I>
 [[nodiscard]] void* access_alternative( V& value, std::size_t index, bool select, std::index_sequence<I...> )
 {
 	void* result = nullptr;
-	( void )( ( index == I && ( result = alternative_at<I>( value, select ), true ) ) || ... );
+	static_cast<void>( ( ( index == I && ( result = alternative_at<I>( value, select ), true ) ) || ... ) );
 	return result;
 }
 
