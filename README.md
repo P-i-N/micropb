@@ -380,12 +380,12 @@ struct Sample {
 // Field lists: with these, the messages also work on a compiler without reflection.
 
 template <>
-struct pb::fields_of<app::Sample> : pb::field_list<app::Sample,
-    pb::field_at<decltype(app::Sample::time), 1, offsetof(app::Sample, time)>,
-    pb::field_at<decltype(app::Sample::values), 2, offsetof(app::Sample, values)>,
-    pb::field_at<decltype(app::Sample::mac), 3, offsetof(app::Sample, mac)>,
-    pb::field_at<decltype(app::Sample::offset), 10, offsetof(app::Sample, offset)>,
-    pb::field_at<decltype(app::Sample::mode), 11, offsetof(app::Sample, mode)>> {};
+struct pb::fields_of<::app::Sample> : pb::field_list<::app::Sample,
+    pb::field_at<decltype(::app::Sample::time), 1, offsetof(::app::Sample, time)>,
+    pb::field_at<decltype(::app::Sample::values), 2, offsetof(::app::Sample, values)>,
+    pb::field_at<decltype(::app::Sample::mac), 3, offsetof(::app::Sample, mac)>,
+    pb::field_at<decltype(::app::Sample::offset), 10, offsetof(::app::Sample, offset)>,
+    pb::field_at<decltype(::app::Sample::mode), 11, offsetof(::app::Sample, mode)>> {};
 ```
 
 The structs are plain structs. The field lists after them give each member its field number. With them, the header needs no reflection and no annotation, see [Compilers without reflection](#compilers-without-reflection).
@@ -452,13 +452,18 @@ struct pb::fields_of<ping> : pb::field_list<ping,
 ```
 
 * The entries can be in any order.
-* A `std::variant` member has one entry for each alternative after `std::monostate`. The entry has the index of the alternative as a fourth argument: `pb::field_at<decltype(msg::choice), 10, offsetof(msg, choice), 1>`.
+* A `std::variant` member must have one entry for each alternative after `std::monostate`. The entry has the index of the alternative as a fourth argument: `pb::field_at<decltype(msg::choice), 10, offsetof(msg, choice), 1>`.
+* `offsetof` is a macro. For a type with a comma in its name, such as `box<T, N>`, make an alias first.
+* A `const` member is encode-only. Use `decltype`, which keeps the `const`.
 * The specialization must come before the first use of the type with `pb::encode`, `pb::decode` or `pb::encoded_size`.
 * A field list has priority over reflection. Thus a generated message uses the same table on each compiler.
 * The rules of [Compile-time checks](#compile-time-checks) also apply to a field list, with the exception of the rules that need reflection: `not_aggregate`, `base_class`, `inaccessible_member`, `bit_field` and the rules for annotations.
 * The tables are the same constants in ROM, and the code size is the same.
 
 Without reflection and without a field list, a message type does not compile. The error is `pb: no_field_list`.
+
+> [!WARNING]
+> The compiler cannot compare a list that a person wrote with the struct. Always write `decltype(T::member)` and `offsetof(T, member)` with the same member, as in the example. An entry with a different type or a different offset compiles, and the codec then reads or writes the wrong memory. The library finds only these mistakes: a member that is in the list two times, a `std::variant` without all its alternatives, an offset that is not in the message, and the list of a different type. It does not find a member that is not in the list.
 
 > [!NOTE]
 > This was tested with GCC 16 in C++23 mode without `-freflection`. A test with an older compiler, for example the Arm GNU Toolchain, has not been done.
@@ -589,7 +594,8 @@ A message that the codec cannot handle correctly does not compile. Each error is
 | `no_field_list` | The compiler has no reflection and the message type has no `pb::fields_of`. |
 | `field_list_type` | `pb::fields_of<T>` derives from the `pb::field_list` of a different type. |
 | `field_list_offset` | The offset of a `pb::field_at` is not in the message. Use `offsetof`. |
-| `field_list_alternative` | A `std::variant` member has an entry without an alternative index, or a different member has one. |
+| `field_list_alternative` | A `std::variant` member does not have one entry for each alternative with its index, or a different member has an index. |
+| `field_list_overlap` | Two entries name the same member. |
 
 **Decode only**
 
@@ -597,7 +603,7 @@ A message that the codec cannot handle correctly does not compile. Each error is
 | --- | --- |
 | `decode_encode_only` | A repeated field is in a `std::array` or a `std::span<const T>`. |
 | `decode_fixed_span` | A bytes field is in a `std::span` with a static extent. |
-| `decode_const_member` | A message has a `const` member. A `const` nested struct compiles for `encode`. |
+| `decode_const_member` | A message has a `const` member. A `const` member compiles for `encode`. |
 
 ## Talk to a PC tool
 
@@ -680,9 +686,9 @@ The tests use the flags `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`.
 | `test_codec` | the descriptor tables and one message with each kind of member | `static_assert` for the tables, run time for the codec |
 | `test_encode`, `test_decode` | `encode` and `decode` against the reference vectors | run time |
 | `test_wire_compat` | round trips, each prefix and each single changed byte of each vector | run time |
-| `test_generated` | the headers that the `protoc` plugin wrote for `vectors.proto` and `features.proto`, against bytes from `protoc`. Each field list of the plugin agrees with reflection | run time and `static_assert` |
+| `test_generated` | the headers that the `protoc` plugin wrote for `vectors.proto` and `features.proto`, against bytes from `protoc`. Each field list of the plugin has the members, offsets and alternatives that reflection finds | run time and `static_assert` |
 | `test_field_list` | a field list that a person wrote: table, encode, decode | run time and `static_assert` |
-| `*_cxx23`, `no_startup_code` | `test_wire`, `test_types`, `test_field_list` and `test_generated` built as C++23 without reflection. The tables need no code before `main()` | run time, `nm` |
+| `*_cxx23`, `compile_fail.list_*`, `no_startup_code` | `test_wire`, `test_types`, `test_field_list` and `test_generated` built as C++23 without reflection. The tables need no code before `main()` | run time, `nm` |
 | `generator` | `tools/protoc-gen-micropb.py`: each rule, each option, each error | Python `unittest`, runs the plugin through `protoc` |
 | `compile_fail.*` | each rule of [Compile-time checks](#compile-time-checks) | the file must not compile, and the compiler output must name the rule |
 
@@ -742,7 +748,7 @@ docs/superpowers/    design documents and implementation plans
 ## Status and limits
 
 * **Compiler:** developed and tested with GCC 16.2 on Linux. The MSYS2 build of the table codec and the MinGW variant of `MICROPB_SANITIZE` are not yet verified.
-* **Without reflection:** tested only as GCC 16.2 with `-std=c++23` and without `-freflection`. No older compiler has been used.
+* **Without reflection:** tested only as GCC 16.2 with `-std=c++23` and without `-freflection`. No older compiler has been used. The code needs `std::expected`, so GCC 12 or newer. Clang is not tested: it does not know the attribute `gnu::noclone` of the codec and gives a warning for it.
 * **ARM:** not yet compiled or measured for an ARM target.
 * **CMake:** `add_subdirectory` also adds the tests of `micropb` to your project.
 * **`protoc` plugin:** tested on Linux with `protoc` 35.1 and the Python package `protobuf` 7.36. `tools/protoc-gen-micropb.bat` is not yet verified on Windows.

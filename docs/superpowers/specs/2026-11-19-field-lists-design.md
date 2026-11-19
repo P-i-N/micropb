@@ -114,7 +114,11 @@ GCC 16 is the only compiler on this machine. "No reflection" is tested as GCC 16
 ## Changes during the implementation
 
 * **The generated structs have no `pb::tag` and no `pb::oneof_tags` annotation.** An annotation is C++26 syntax, so a C++23 compiler does not accept it. The field numbers are only in the field list. Thus, on GCC 16, the list that reflection makes for a generated struct has the numbers 1, 2, 3 ..., and the test compares members, offsets and alternatives but not numbers. The numbers are tested against the hand-written structs of `tests/vectors/messages.hpp` and against bytes from `protoc`.
-* **Three more rules** for lists that a person writes: `field_list_type`, `field_list_offset`, `field_list_alternative`. A wrong list would make the codec read or write memory outside the message.
+* **Four more rules** for lists that a person writes: `field_list_type`, `field_list_offset`, `field_list_alternative`, `field_list_overlap`. They find the mistakes that a compiler can find without reflection. They cannot find an entry whose type or offset is that of a different member: such a list makes the codec read or write the wrong memory. The README has a warning.
+* **`const` members:** a `const` member of each kind is accepted for `encode`. Before this change a `const` scalar and a `const std::string_view` did not compile. The first version of this change by mistake rejected `const` containers; the final review found it.
+* **`build_tag_table`** applies its rules through the same function as the codec (`list_traits::check`), so the compile-fail tests examine the code that the codec uses.
+* **Full names in generated lists:** the plugin writes `::app::Sample`, because the list is in the scope of `pb` and a package such as `detail` would find `pb::detail`.
+* `static_assert(false)` in a template became a condition that depends on the type, so that a compiler before GCC 13 also accepts the header (not tested).
 * **A CMake target `micropb_cxx23`**: the include directory and C++23, without `-freflection`.
 * The C++23 configuration is not a second build folder. It is a set of more test targets (`*_cxx23`) in the same build.
 * `std::monostate` has no field list. The rule functions skip it.

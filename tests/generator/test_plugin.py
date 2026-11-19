@@ -150,16 +150,16 @@ class CoreTest(unittest.TestCase):
             // Field lists: with these, the messages also work on a compiler without reflection.
 
             template <>
-            struct pb::fields_of<app::link::Inner> : pb::field_list<app::link::Inner,
-                pb::field_at<decltype(app::link::Inner::x), 1, offsetof(app::link::Inner, x)>> {};
+            struct pb::fields_of<::app::link::Inner> : pb::field_list<::app::link::Inner,
+                pb::field_at<decltype(::app::link::Inner::x), 1, offsetof(::app::link::Inner, x)>> {};
 
             template <>
-            struct pb::fields_of<app::link::Outer> : pb::field_list<app::link::Outer,
-                pb::field_at<decltype(app::link::Outer::child), 1, offsetof(app::link::Outer, child)>,
-                pb::field_at<decltype(app::link::Outer::mode), 2, offsetof(app::link::Outer, mode)>,
-                pb::field_at<decltype(app::link::Outer::name), 3, offsetof(app::link::Outer, name)>,
-                pb::field_at<decltype(app::link::Outer::data), 4, offsetof(app::link::Outer, data)>,
-                pb::field_at<decltype(app::link::Outer::delta), 5, offsetof(app::link::Outer, delta)>> {};
+            struct pb::fields_of<::app::link::Outer> : pb::field_list<::app::link::Outer,
+                pb::field_at<decltype(::app::link::Outer::child), 1, offsetof(::app::link::Outer, child)>,
+                pb::field_at<decltype(::app::link::Outer::mode), 2, offsetof(::app::link::Outer, mode)>,
+                pb::field_at<decltype(::app::link::Outer::name), 3, offsetof(::app::link::Outer, name)>,
+                pb::field_at<decltype(::app::link::Outer::data), 4, offsetof(::app::link::Outer, data)>,
+                pb::field_at<decltype(::app::link::Outer::delta), 5, offsetof(::app::link::Outer, delta)>> {};
             """))
 
     def test_scalar_types(self):
@@ -191,7 +191,7 @@ class CoreTest(unittest.TestCase):
     def test_empty_message(self):
         text = header("message m {}")
         self.assertIn("struct m {};\n", text)
-        self.assertIn("template <>\nstruct pb::fields_of<m> : pb::field_list<m> {};\n", text)
+        self.assertIn("template <>\nstruct pb::fields_of<::m> : pb::field_list<::m> {};\n", text)
 
     def test_enum_prefix_from_camel_case_name(self):
         text = header("enum RxMode { RX_MODE_FIXED = 0; RX_MODE_VARIABLE = -1; }")
@@ -221,6 +221,7 @@ def members(text, name):
 def field_list(text, name):
     """The entries of the field list of the type `name` in the header `text`, each as `<member> = <number>`.
     An alternative of a oneof has `/<index>` after the number."""
+    name = "::" + name  # the full name: the text is in the scope of `pb`, which has names of its own
     block = text.split(f"struct pb::fields_of<{name}> : pb::field_list<{name}")[1].split("{};")[0]
     entry = rf"pb::field_at<decltype\({name}::(\w+)\), (\d+), offsetof\({name}, (\w+)\)(?:, (\d+))?>"
     assert block.count("pb::field_at<") == len(re.findall(entry, block)), block
@@ -730,7 +731,7 @@ class CheckedInTest(unittest.TestCase):
     # The folder to run protoc in, the folder of the headers, the .proto files, more protoc arguments.
     GENERATED = [
         (REPO / "tests/vectors", REPO / "tests/vectors", ["vectors.proto"], []),
-        (REPO, REPO / "tests/generator", ["features.proto", "shared.proto"],
+        (REPO, REPO / "tests/generator", ["features.proto", "shared.proto", "detail.proto"],
          ["-Itests/generator", "--micropb_opt=options_dir=tests/generator"]),
     ]
 

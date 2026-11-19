@@ -23,6 +23,6 @@ struct Point {
 // Field lists: with these, the messages also work on a compiler without reflection.
 
 template <>
-struct pb::fields_of<shared::types::Point> : pb::field_list<shared::types::Point,
-    pb::field_at<decltype(shared::types::Point::x), 1, offsetof(shared::types::Point, x)>,
-    pb::field_at<decltype(shared::types::Point::y), 2, offsetof(shared::types::Point, y)>> {};
+struct pb::fields_of<::shared::types::Point> : pb::field_list<::shared::types::Point,
+    pb::field_at<decltype(::shared::types::Point::x), 1, offsetof(::shared::types::Point, x)>,
+    pb::field_at<decltype(::shared::types::Point::y), 2, offsetof(::shared::types::Point, y)>> {};

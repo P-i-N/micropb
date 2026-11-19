@@ -360,7 +360,8 @@ class Header:
     def field_list_text(self, message, entries):
         """The `pb::fields_of` specialization of `message`. It gives each field its number, so that the struct
         needs no reflection and no annotation."""
-        name = "::".join(filter(None, [namespace_of(self.file.package), message.name]))
+        # The full name with `::` at the start: this text is in the scope of `pb`, which has names of its own.
+        name = "::" + "::".join(filter(None, [namespace_of(self.file.package), message.name]))
         lines = [f"template <>\nstruct pb::fields_of<{name}> : pb::field_list<{name}"]
         for member, number, alternative in entries:
             index = f", {alternative}" if alternative else ""

@@ -84,62 +84,62 @@ struct envelope {
 // Field lists: with these, the messages also work on a compiler without reflection.
 
 template <>
-struct pb::fields_of<micropb::test::scalars> : pb::field_list<micropb::test::scalars,
-    pb::field_at<decltype(micropb::test::scalars::i32), 1, offsetof(micropb::test::scalars, i32)>,
-    pb::field_at<decltype(micropb::test::scalars::i64), 2, offsetof(micropb::test::scalars, i64)>,
-    pb::field_at<decltype(micropb::test::scalars::u32), 3, offsetof(micropb::test::scalars, u32)>,
-    pb::field_at<decltype(micropb::test::scalars::u64), 4, offsetof(micropb::test::scalars, u64)>,
-    pb::field_at<decltype(micropb::test::scalars::s32), 5, offsetof(micropb::test::scalars, s32)>,
-    pb::field_at<decltype(micropb::test::scalars::s64), 6, offsetof(micropb::test::scalars, s64)>,
-    pb::field_at<decltype(micropb::test::scalars::flag), 7, offsetof(micropb::test::scalars, flag)>,
-    pb::field_at<decltype(micropb::test::scalars::f), 8, offsetof(micropb::test::scalars, f)>,
-    pb::field_at<decltype(micropb::test::scalars::d), 9, offsetof(micropb::test::scalars, d)>,
-    pb::field_at<decltype(micropb::test::scalars::fx32), 10, offsetof(micropb::test::scalars, fx32)>,
-    pb::field_at<decltype(micropb::test::scalars::fx64), 11, offsetof(micropb::test::scalars, fx64)>,
-    pb::field_at<decltype(micropb::test::scalars::sfx32), 12, offsetof(micropb::test::scalars, sfx32)>,
-    pb::field_at<decltype(micropb::test::scalars::sfx64), 13, offsetof(micropb::test::scalars, sfx64)>,
-    pb::field_at<decltype(micropb::test::scalars::c), 14, offsetof(micropb::test::scalars, c)>,
-    pb::field_at<decltype(micropb::test::scalars::i8), 15, offsetof(micropb::test::scalars, i8)>,
-    pb::field_at<decltype(micropb::test::scalars::u16), 16, offsetof(micropb::test::scalars, u16)>> {};
+struct pb::fields_of<::micropb::test::scalars> : pb::field_list<::micropb::test::scalars,
+    pb::field_at<decltype(::micropb::test::scalars::i32), 1, offsetof(::micropb::test::scalars, i32)>,
+    pb::field_at<decltype(::micropb::test::scalars::i64), 2, offsetof(::micropb::test::scalars, i64)>,
+    pb::field_at<decltype(::micropb::test::scalars::u32), 3, offsetof(::micropb::test::scalars, u32)>,
+    pb::field_at<decltype(::micropb::test::scalars::u64), 4, offsetof(::micropb::test::scalars, u64)>,
+    pb::field_at<decltype(::micropb::test::scalars::s32), 5, offsetof(::micropb::test::scalars, s32)>,
+    pb::field_at<decltype(::micropb::test::scalars::s64), 6, offsetof(::micropb::test::scalars, s64)>,
+    pb::field_at<decltype(::micropb::test::scalars::flag), 7, offsetof(::micropb::test::scalars, flag)>,
+    pb::field_at<decltype(::micropb::test::scalars::f), 8, offsetof(::micropb::test::scalars, f)>,
+    pb::field_at<decltype(::micropb::test::scalars::d), 9, offsetof(::micropb::test::scalars, d)>,
+    pb::field_at<decltype(::micropb::test::scalars::fx32), 10, offsetof(::micropb::test::scalars, fx32)>,
+    pb::field_at<decltype(::micropb::test::scalars::fx64), 11, offsetof(::micropb::test::scalars, fx64)>,
+    pb::field_at<decltype(::micropb::test::scalars::sfx32), 12, offsetof(::micropb::test::scalars, sfx32)>,
+    pb::field_at<decltype(::micropb::test::scalars::sfx64), 13, offsetof(::micropb::test::scalars, sfx64)>,
+    pb::field_at<decltype(::micropb::test::scalars::c), 14, offsetof(::micropb::test::scalars, c)>,
+    pb::field_at<decltype(::micropb::test::scalars::i8), 15, offsetof(::micropb::test::scalars, i8)>,
+    pb::field_at<decltype(::micropb::test::scalars::u16), 16, offsetof(::micropb::test::scalars, u16)>> {};
 
 template <>
-struct pb::fields_of<micropb::test::text> : pb::field_list<micropb::test::text,
-    pb::field_at<decltype(micropb::test::text::name), 1, offsetof(micropb::test::text, name)>,
-    pb::field_at<decltype(micropb::test::text::data), 2, offsetof(micropb::test::text, data)>,
-    pb::field_at<decltype(micropb::test::text::mac), 3, offsetof(micropb::test::text, mac)>> {};
+struct pb::fields_of<::micropb::test::text> : pb::field_list<::micropb::test::text,
+    pb::field_at<decltype(::micropb::test::text::name), 1, offsetof(::micropb::test::text, name)>,
+    pb::field_at<decltype(::micropb::test::text::data), 2, offsetof(::micropb::test::text, data)>,
+    pb::field_at<decltype(::micropb::test::text::mac), 3, offsetof(::micropb::test::text, mac)>> {};
 
 template <>
-struct pb::fields_of<micropb::test::inner> : pb::field_list<micropb::test::inner,
-    pb::field_at<decltype(micropb::test::inner::x), 1, offsetof(micropb::test::inner, x)>,
-    pb::field_at<decltype(micropb::test::inner::label), 2, offsetof(micropb::test::inner, label)>> {};
+struct pb::fields_of<::micropb::test::inner> : pb::field_list<::micropb::test::inner,
+    pb::field_at<decltype(::micropb::test::inner::x), 1, offsetof(::micropb::test::inner, x)>,
+    pb::field_at<decltype(::micropb::test::inner::label), 2, offsetof(::micropb::test::inner, label)>> {};
 
 template <>
-struct pb::fields_of<micropb::test::outer> : pb::field_list<micropb::test::outer,
-    pb::field_at<decltype(micropb::test::outer::child), 1, offsetof(micropb::test::outer, child)>,
-    pb::field_at<decltype(micropb::test::outer::maybe), 2, offsetof(micropb::test::outer, maybe)>,
-    pb::field_at<decltype(micropb::test::outer::maybe_child), 3, offsetof(micropb::test::outer, maybe_child)>,
-    pb::field_at<decltype(micropb::test::outer::gap), 10, offsetof(micropb::test::outer, gap)>> {};
+struct pb::fields_of<::micropb::test::outer> : pb::field_list<::micropb::test::outer,
+    pb::field_at<decltype(::micropb::test::outer::child), 1, offsetof(::micropb::test::outer, child)>,
+    pb::field_at<decltype(::micropb::test::outer::maybe), 2, offsetof(::micropb::test::outer, maybe)>,
+    pb::field_at<decltype(::micropb::test::outer::maybe_child), 3, offsetof(::micropb::test::outer, maybe_child)>,
+    pb::field_at<decltype(::micropb::test::outer::gap), 10, offsetof(::micropb::test::outer, gap)>> {};
 
 template <>
-struct pb::fields_of<micropb::test::lists> : pb::field_list<micropb::test::lists,
-    pb::field_at<decltype(micropb::test::lists::ints), 1, offsetof(micropb::test::lists, ints)>,
-    pb::field_at<decltype(micropb::test::lists::floats), 2, offsetof(micropb::test::lists, floats)>,
-    pb::field_at<decltype(micropb::test::lists::names), 3, offsetof(micropb::test::lists, names)>,
-    pb::field_at<decltype(micropb::test::lists::items), 4, offsetof(micropb::test::lists, items)>,
-    pb::field_at<decltype(micropb::test::lists::zz), 5, offsetof(micropb::test::lists, zz)>> {};
+struct pb::fields_of<::micropb::test::lists> : pb::field_list<::micropb::test::lists,
+    pb::field_at<decltype(::micropb::test::lists::ints), 1, offsetof(::micropb::test::lists, ints)>,
+    pb::field_at<decltype(::micropb::test::lists::floats), 2, offsetof(::micropb::test::lists, floats)>,
+    pb::field_at<decltype(::micropb::test::lists::names), 3, offsetof(::micropb::test::lists, names)>,
+    pb::field_at<decltype(::micropb::test::lists::items), 4, offsetof(::micropb::test::lists, items)>,
+    pb::field_at<decltype(::micropb::test::lists::zz), 5, offsetof(::micropb::test::lists, zz)>> {};
 
 template <>
-struct pb::fields_of<micropb::test::pose> : pb::field_list<micropb::test::pose,
-    pb::field_at<decltype(micropb::test::pose::pos), 1, offsetof(micropb::test::pose, pos)>,
-    pb::field_at<decltype(micropb::test::pose::rot), 2, offsetof(micropb::test::pose, rot)>> {};
+struct pb::fields_of<::micropb::test::pose> : pb::field_list<::micropb::test::pose,
+    pb::field_at<decltype(::micropb::test::pose::pos), 1, offsetof(::micropb::test::pose, pos)>,
+    pb::field_at<decltype(::micropb::test::pose::rot), 2, offsetof(::micropb::test::pose, rot)>> {};
 
 template <>
-struct pb::fields_of<micropb::test::ping> : pb::field_list<micropb::test::ping,
-    pb::field_at<decltype(micropb::test::ping::seq), 1, offsetof(micropb::test::ping, seq)>> {};
+struct pb::fields_of<::micropb::test::ping> : pb::field_list<::micropb::test::ping,
+    pb::field_at<decltype(::micropb::test::ping::seq), 1, offsetof(::micropb::test::ping, seq)>> {};
 
 template <>
-struct pb::fields_of<micropb::test::envelope> : pb::field_list<micropb::test::envelope,
-    pb::field_at<decltype(micropb::test::envelope::id), 1, offsetof(micropb::test::envelope, id)>,
-    pb::field_at<decltype(micropb::test::envelope::payload), 2, offsetof(micropb::test::envelope, payload), 1>,
-    pb::field_at<decltype(micropb::test::envelope::payload), 3, offsetof(micropb::test::envelope, payload), 2>,
-    pb::field_at<decltype(micropb::test::envelope::payload), 4, offsetof(micropb::test::envelope, payload), 3>> {};
+struct pb::fields_of<::micropb::test::envelope> : pb::field_list<::micropb::test::envelope,
+    pb::field_at<decltype(::micropb::test::envelope::id), 1, offsetof(::micropb::test::envelope, id)>,
+    pb::field_at<decltype(::micropb::test::envelope::payload), 2, offsetof(::micropb::test::envelope, payload), 1>,
+    pb::field_at<decltype(::micropb::test::envelope::payload), 3, offsetof(::micropb::test::envelope, payload), 2>,
+    pb::field_at<decltype(::micropb::test::envelope::payload), 4, offsetof(::micropb::test::envelope, payload), 3>> {};

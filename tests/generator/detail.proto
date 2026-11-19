@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+// The namespace `pb` of the library also has the names `detail`, `tag`, `reader` and `repeated`.
+// The field lists of the generated header must find the types of this file, not those names.
+package detail;
+
+message tag {
+  uint32 error = 1;
+}
+
+message reader {
+  tag tag = 1;
+  repeated tag repeated = 2;
+}

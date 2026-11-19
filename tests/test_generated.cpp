@@ -1,3 +1,4 @@
+#include "generator/detail.pb.hpp"
 #include "generator/features.pb.hpp"
 #include "vectors/vectors.hpp"
 #include "vectors/vectors.pb.hpp"
@@ -53,7 +54,8 @@ inline constexpr bool lists_agree_with_reflection = (same_members<d::reflected_f
 static_assert(lists_agree_with_reflection<gen::scalars, gen::text, gen::inner, gen::outer, gen::lists, gen::pose,
                                           gen::ping, gen::envelope>);
 static_assert(lists_agree_with_reflection<features::limits, features::Device_Slot, features::Device, features::Frame,
-                                          features::Calibration, shared::types::Point>);
+                                          features::Calibration, shared::types::Point, ::detail::tag,
+                                          ::detail::reader>);
 
 /// The field numbers that the plugin wrote are those of the struct that a person wrote for the same message.
 template <typename Generated, typename Written>
@@ -178,10 +180,19 @@ bool test_frame_decode() {
            frame.origin.y == 4 && frame.unit == shared::types::Unit::METER && frame.mode == features::RxMode::VARIABLE;
 }
 
+/// `detail.proto` has names that the namespace `pb` also has. `tag { error: 5 } repeated { error: 1 }`
+bool test_names_of_the_library() {
+    ::detail::reader message{};
+    message.tag.error = 5;
+    return message.repeated.push_back({1}) &&
+           encodes_to(message, std::array<std::uint8_t, 8>{0x0a, 0x02, 0x08, 0x05, 0x12, 0x02, 0x08, 0x01}) &&
+           round_trips<::detail::reader>(std::array<std::uint8_t, 8>{0x0a, 0x02, 0x08, 0x05, 0x12, 0x02, 0x08, 0x01});
+}
+
 } // namespace
 
 int main() {
     const bool ok = test_reference_vectors() && test_reference_values() && test_field_numbers() &&
-                    test_fixed_arrays() && test_frame_encode() && test_frame_decode();
+                    test_fixed_arrays() && test_frame_encode() && test_frame_decode() && test_names_of_the_library();
     return ok ? 0 : 1;
 }
