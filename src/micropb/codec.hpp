@@ -196,7 +196,7 @@ struct sequence_access
 	static constexpr std::size_t count_offset = offsetof( S, _count );
 
 	template <typename T>
-	static std::size_t* count_of( span_buffer<T>& buffer )
+	[[nodiscard]] static std::size_t* count_of( span_buffer<T>& buffer )
 	{
 		return &buffer._count;
 	}
@@ -206,7 +206,7 @@ struct sequence_access
 /// their items in a different object, so the interpreter cannot find the items
 /// from an offset.
 template <typename S>
-sequence_view access_sequence( void* sequence )
+[[nodiscard]] sequence_view access_sequence( void* sequence )
 {
 	S& items = *static_cast<S*>( sequence );
 	if constexpr ( is_span_buffer<S> )
@@ -224,7 +224,7 @@ sequence_view access_sequence( void* sequence )
 /// member again in its place. Such a value type is encode-only
 /// (`check_decodable`), and `ENGAGE` does nothing for it.
 template <typename O>
-void* access_optional( void* optional, optional_op op )
+[[nodiscard]] void* access_optional( void* optional, optional_op op )
 {
 	O& value = *static_cast<O*>( optional );
 	if ( op == optional_op::RESET )
@@ -242,7 +242,7 @@ void* access_optional( void* optional, optional_op op )
 /// The address of alternative `I` of `value` when it is active, else null.
 /// With `select`, makes it active first.
 template <std::size_t I, typename V>
-void* alternative_at( V& value, bool select )
+[[nodiscard]] void* alternative_at( V& value, bool select )
 {
 	// An alternative with a `const` member is encode-only: no `emplace`.
 	if ( select && value.index() != I )
@@ -254,7 +254,7 @@ void* alternative_at( V& value, bool select )
 }
 
 template <typename V, std::size_t... I>
-void* access_alternative( V& value, std::size_t index, bool select, std::index_sequence<I...> )
+[[nodiscard]] void* access_alternative( V& value, std::size_t index, bool select, std::index_sequence<I...> )
 {
 	void* result = nullptr;
 	( void )( ( index == I && ( result = alternative_at<I>( value, select ), true ) ) || ... );
@@ -262,7 +262,7 @@ void* access_alternative( V& value, std::size_t index, bool select, std::index_s
 }
 
 template <typename V>
-void* access_variant( void* variant, std::size_t index, bool select )
+[[nodiscard]] void* access_variant( void* variant, std::size_t index, bool select )
 {
 	return access_alternative(
 	  *static_cast<V*>( variant ), index, select, std::make_index_sequence<std::variant_size_v<V>>{} );
@@ -271,7 +271,7 @@ void* access_variant( void* variant, std::size_t index, bool select )
 ////////////////////////////////////////////////////////////////////////////////
 
 template <typename S>
-consteval sequence_desc describe_sequence()
+[[nodiscard]] consteval sequence_desc describe_sequence()
 {
 	using element = element_t<S>;
 	constexpr const value_desc* item = &value_descriptor<element>::value;
@@ -309,7 +309,7 @@ inline constexpr optional_desc optional_descriptor{ &value_descriptor<typename O
 
 /// The descriptor of the alternative `A` of a `std::variant`. Null for `std::monostate`.
 template <typename A>
-consteval const value_desc* describe_alternative()
+[[nodiscard]] consteval const value_desc* describe_alternative()
 {
 	if constexpr ( std::is_same_v<A, std::monostate> )
 		return nullptr;
@@ -337,7 +337,7 @@ struct field_table;
 template <typename T, typename... M, std::uint32_t... Number, std::size_t... Offset, std::size_t... Alternative>
 struct field_table<field_list<T, field_at<M, Number, Offset, Alternative>...>>
 {
-	static consteval std::array<field_desc, sizeof...( M )> make()
+	[[nodiscard]] static consteval std::array<field_desc, sizeof...( M )> make()
 	{
 		list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>>::check();
 
@@ -354,7 +354,7 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative>...>>
 };
 
 template <typename T>
-consteval value_desc describe_value()
+[[nodiscard]] consteval value_desc describe_value()
 {
 	constexpr field_kind kind = kind_of<T>();
 
@@ -384,7 +384,7 @@ constexpr value_desc value_descriptor<T>::value = describe_value<T>();
 
 /// The field list of `T` must name `T`: a list of a different type has the offsets of that type.
 template <typename T>
-consteval message_desc describe_message()
+[[nodiscard]] consteval message_desc describe_message()
 {
 	using list = field_list_of<T>;
 	static_assert( std::is_same_v<typename list_traits<list>::message, T>,

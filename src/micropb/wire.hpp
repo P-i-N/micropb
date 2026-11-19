@@ -143,7 +143,7 @@ struct reader
 
 	constexpr explicit reader( std::span<const std::uint8_t> in ) : _in( in ) {}
 
-	constexpr std::uint64_t read_varint()
+	[[nodiscard]] constexpr std::uint64_t read_varint()
 	{
 		std::uint64_t value = 0;
 		for ( std::size_t i = 0; i < 10; ++i )
@@ -169,12 +169,12 @@ struct reader
 		return 0;
 	}
 
-	constexpr std::uint32_t read_fixed32() { return static_cast<std::uint32_t>( read_le( 4 ) ); }
+	[[nodiscard]] constexpr std::uint32_t read_fixed32() { return static_cast<std::uint32_t>( read_le( 4 ) ); }
 
-	constexpr std::uint64_t read_fixed64() { return read_le( 8 ); }
+	[[nodiscard]] constexpr std::uint64_t read_fixed64() { return read_le( 8 ); }
 
 	/// Returns a view into the input. Does not copy.
-	constexpr std::span<const std::uint8_t> read_length_delimited()
+	[[nodiscard]] constexpr std::span<const std::uint8_t> read_length_delimited()
 	{
 		// The comparison with the remaining bytes comes before an addition, so it
 		// cannot overflow. After a failed `read_varint`, the length is 0 and no
@@ -192,7 +192,7 @@ struct reader
 	}
 
 	/// The key is valid only when `failed()` is `false` after the call.
-	constexpr field_key read_key()
+	[[nodiscard]] constexpr field_key read_key()
 	{
 		const std::uint64_t key = read_varint();
 		if ( _failed )
@@ -255,7 +255,7 @@ struct reader
 private:
 	[[nodiscard]] constexpr std::size_t remaining() const { return _in.size() - _pos; }
 
-	constexpr std::uint64_t read_le( std::size_t count )
+	[[nodiscard]] constexpr std::uint64_t read_le( std::size_t count )
 	{
 		if ( remaining() < count )
 		{

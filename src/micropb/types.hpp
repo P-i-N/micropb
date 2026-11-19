@@ -50,7 +50,7 @@ struct wire_int
 {
 	constexpr wire_int() = default;
 	constexpr wire_int( T v ) : value( v ) {}
-	constexpr operator T() const { return value; }
+	[[nodiscard]] constexpr operator T() const { return value; }
 
 	T value{};
 };
@@ -119,8 +119,8 @@ struct repeated
 	[[nodiscard]] constexpr const T* end() const { return _items.data() + _count; }
 
 	/// `index` must be less than `size()`.
-	constexpr T& operator[]( std::size_t index ) { return _items[index]; }
-	constexpr const T& operator[]( std::size_t index ) const { return _items[index]; }
+	[[nodiscard]] constexpr T& operator[]( std::size_t index ) { return _items[index]; }
+	[[nodiscard]] constexpr const T& operator[]( std::size_t index ) const { return _items[index]; }
 
 	/// Returns `false` and does not add `item` when the sequence is full.
 	[[nodiscard]] constexpr bool push_back( const T& item )
@@ -158,8 +158,8 @@ struct span_buffer
 	[[nodiscard]] constexpr const T* end() const { return _storage.data() + _count; }
 
 	/// `index` must be less than `size()`.
-	constexpr T& operator[]( std::size_t index ) { return _storage[index]; }
-	constexpr const T& operator[]( std::size_t index ) const { return _storage[index]; }
+	[[nodiscard]] constexpr T& operator[]( std::size_t index ) { return _storage[index]; }
+	[[nodiscard]] constexpr const T& operator[]( std::size_t index ) const { return _storage[index]; }
 
 	/// Returns `false` and does not add `item` when the storage is full.
 	[[nodiscard]] constexpr bool push_back( const T& item )

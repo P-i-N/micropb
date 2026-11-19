@@ -133,7 +133,7 @@ using element_t = typename sequence_traits<T>::element;
 /// The rule does not accept a volatile-qualified type: the codec reads and writes through `memcpy`, without
 /// `volatile`. `std::int32_t` is `int` on a PC and `long` on `arm-none-eabi`. The rule accepts both.
 template <typename T>
-consteval bool is_standard_integer()
+[[nodiscard]] consteval bool is_standard_integer()
 {
 	return std::is_integral_v<T> && !std::is_volatile_v<T> &&
 	       ( sizeof( T ) == 1 || sizeof( T ) == 2 || sizeof( T ) == 4 || sizeof( T ) == 8 ) &&
@@ -152,7 +152,7 @@ using stored_t = decltype( T::value );
 
 /// A ZigZag member whose stored type is a signed standard integer: 1, 2 or 4 bytes are `sint32`, 8 bytes are `sint64`.
 template <typename T>
-consteval bool is_signed_zigzag()
+[[nodiscard]] consteval bool is_signed_zigzag()
 {
 	if constexpr ( is_zigzag<T> )
 		return is_standard_integer<stored_t<T>>() && std::is_signed_v<stored_t<T>>;
@@ -162,7 +162,7 @@ consteval bool is_signed_zigzag()
 
 /// A ZigZag member whose stored type is an unsigned standard integer.
 template <typename T>
-consteval bool is_unsigned_zigzag()
+[[nodiscard]] consteval bool is_unsigned_zigzag()
 {
 	if constexpr ( is_zigzag<T> )
 		return is_standard_integer<stored_t<T>>() && !std::is_signed_v<stored_t<T>>;
@@ -171,7 +171,7 @@ consteval bool is_unsigned_zigzag()
 }
 
 template <typename T>
-consteval bool is_scalar()
+[[nodiscard]] consteval bool is_scalar()
 {
 	return std::is_enum_v<T> || is_standard_integer<T>() || is_signed_zigzag<T>() ||
 	       is_one_of<T, bool, float, double, fixed32, fixed64, sfixed32, sfixed64>;
@@ -259,21 +259,23 @@ template <typename T>
 namespace detail {
 
 template <typename T>
-consteval bool contains_span_buffer();
+[[nodiscard]] consteval bool contains_span_buffer();
 template <typename T>
 consteval void check_member_type();
 template <typename T>
 consteval void check_decodable();
 
 template <typename T, typename... Fields>
-field_list<T, Fields...> list_of( const field_list<T, Fields...>& );
+[[nodiscard]] field_list<T, Fields...> list_of( const field_list<T, Fields...>& );
 
 /// The `pb::field_list` that `pb::fields_of<T>` derives from.
 template <typename T>
 using field_list_of = decltype( list_of( std::declval<const fields_of<T>&>() ) );
 
 template <std::size_t N>
-consteval bool has_number_in( const std::array<std::uint32_t, N>& numbers, std::uint32_t first, std::uint32_t last )
+[[nodiscard]] consteval bool has_number_in( const std::array<std::uint32_t, N>& numbers,
+                                            std::uint32_t first,
+                                            std::uint32_t last )
 {
 	return std::any_of( numbers.begin(), numbers.end(), [&]( std::uint32_t n ) { return n >= first && n <= last; } );
 }
@@ -295,7 +297,7 @@ consteval void check_field_numbers()
 /// `std::variant` member has one entry for each alternative after
 /// `std::monostate`, each other member has the alternative 0.
 template <typename M>
-consteval bool is_alternative_valid( std::size_t alternative )
+[[nodiscard]] consteval bool is_alternative_valid( std::size_t alternative )
 {
 	if constexpr ( is_variant<M> )
 		return alternative >= 1 && alternative < std::variant_size_v<M>;
@@ -317,7 +319,7 @@ struct entry_shape
 
 /// `true` when two entries name the same bytes of the message. The entries of
 /// different alternatives of one `std::variant` member do not overlap.
-consteval bool entries_overlap( std::span<const entry_shape> entries )
+[[nodiscard]] consteval bool entries_overlap( std::span<const entry_shape> entries )
 {
 	for ( std::size_t i = 0; i < entries.size(); ++i )
 	{
@@ -338,7 +340,7 @@ consteval bool entries_overlap( std::span<const entry_shape> entries )
 }
 
 /// `true` when each `std::variant` member has one entry for each alternative after `std::monostate`.
-consteval bool alternatives_complete( std::span<const entry_shape> entries )
+[[nodiscard]] consteval bool alternatives_complete( std::span<const entry_shape> entries )
 {
 	for ( const entry_shape& entry : entries )
 	{
@@ -369,12 +371,12 @@ struct variant_traits<std::variant<First, More...>>
 	static constexpr bool monostate_first = std::is_same_v<First, std::monostate>;
 	static constexpr bool unique = count<First> == 1 && ( ( count<More> == 1 ) && ... );
 
-	static consteval bool has_kind( field_kind kind )
+	[[nodiscard]] static consteval bool has_kind( field_kind kind )
 	{
 		return kind_of<First>() == kind || ( ( kind_of<More>() == kind ) || ... );
 	}
 
-	static consteval bool contains_span_buffer()
+	[[nodiscard]] static consteval bool contains_span_buffer()
 	{
 		return detail::contains_span_buffer<First>() || ( detail::contains_span_buffer<More>() || ... );
 	}
@@ -396,7 +398,7 @@ struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>>
 	using message = T;
 	static constexpr std::size_t count = sizeof...( M );
 
-	static consteval std::array<std::uint32_t, count> sorted_numbers()
+	[[nodiscard]] static consteval std::array<std::uint32_t, count> sorted_numbers()
 	{
 		std::array<std::uint32_t, count> numbers{ Number... };
 		std::sort( numbers.begin(), numbers.end() );
@@ -426,7 +428,7 @@ struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>>
 		( check_member_type<std::remove_const_t<M>>(), ... );
 	}
 
-	static consteval bool contains_span_buffer()
+	[[nodiscard]] static consteval bool contains_span_buffer()
 	{
 		return ( detail::contains_span_buffer<std::remove_const_t<M>>() || ... );
 	}
@@ -441,7 +443,7 @@ struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>>
 /// `true` when `T` has a `pb::span_buffer` in a place that `decode` cannot bind:
 /// in it, or in a member, alternative, value or element of it.
 template <typename T>
-consteval bool contains_span_buffer()
+[[nodiscard]] consteval bool contains_span_buffer()
 {
 	if constexpr ( std::is_same_v<T, std::monostate> )
 	{
@@ -583,20 +585,20 @@ struct field_info
 namespace detail {
 
 /// `true` when `type` is a specialization of the class template `templ`.
-consteval bool is_instance( std::meta::info type, std::meta::info templ )
+[[nodiscard]] consteval bool is_instance( std::meta::info type, std::meta::info templ )
 {
 	type = std::meta::dealias( type );
 	return std::meta::has_template_arguments( type ) && std::meta::template_of( type ) == templ;
 }
 
 template <typename T>
-consteval std::span<const std::meta::info> members()
+[[nodiscard]] consteval std::span<const std::meta::info> members()
 {
 	return std::define_static_array( std::meta::nonstatic_data_members_of( ^^T, std::meta::access_context::current() ) );
 }
 
 /// Field number from the `pb::tag` annotation of `member`.
-consteval std::optional<std::uint32_t> tag_annotation( std::meta::info member )
+[[nodiscard]] consteval std::optional<std::uint32_t> tag_annotation( std::meta::info member )
 {
 	for ( std::meta::info annotation : std::meta::annotations_of( member ) )
 	{
@@ -607,7 +609,7 @@ consteval std::optional<std::uint32_t> tag_annotation( std::meta::info member )
 }
 
 /// Type of the `pb::oneof_tags` annotation of `member`.
-consteval std::optional<std::meta::info> oneof_tags_annotation( std::meta::info member )
+[[nodiscard]] consteval std::optional<std::meta::info> oneof_tags_annotation( std::meta::info member )
 {
 	for ( std::meta::info annotation : std::meta::annotations_of( member ) )
 	{
@@ -619,7 +621,7 @@ consteval std::optional<std::meta::info> oneof_tags_annotation( std::meta::info 
 }
 
 template <typename T>
-consteval bool has_bit_field()
+[[nodiscard]] consteval bool has_bit_field()
 {
 	for ( std::meta::info member : std::meta::nonstatic_data_members_of( ^^T, std::meta::access_context::unchecked() ) )
 	{
@@ -645,7 +647,7 @@ consteval void check_message_type()
 }
 
 template <typename T>
-consteval std::size_t field_count()
+[[nodiscard]] consteval std::size_t field_count()
 {
 	std::size_t count = 0;
 	for ( std::meta::info member : members<T>() )
@@ -661,7 +663,7 @@ consteval std::size_t field_count()
 
 /// Tag table in declaration order. Applies the rules for `pb::tag` and `pb::oneof_tags`.
 template <typename T>
-consteval std::array<field_info, field_count<T>()> collect_fields()
+[[nodiscard]] consteval std::array<field_info, field_count<T>()> collect_fields()
 {
 	std::array<field_info, field_count<T>()> fields{};
 	std::size_t index = 0;
@@ -705,7 +707,7 @@ consteval std::array<field_info, field_count<T>()> collect_fields()
 }
 
 template <typename T>
-consteval std::array<field_info, field_count<T>()> sorted_fields()
+[[nodiscard]] consteval std::array<field_info, field_count<T>()> sorted_fields()
 {
 	auto fields = collect_fields<T>();
 	std::sort(
@@ -716,7 +718,7 @@ consteval std::array<field_info, field_count<T>()> sorted_fields()
 /// The `pb::field_list` of the struct `T`: one `pb::field_at` for each entry
 /// of the tag table, in declaration order.
 template <typename T>
-consteval std::meta::info make_field_list()
+[[nodiscard]] consteval std::meta::info make_field_list()
 {
 	std::array<std::meta::info, field_count<T>() + 1> arguments{ ^^T };
 	std::size_t index = 1;
@@ -737,7 +739,7 @@ consteval std::meta::info make_field_list()
 /// The field list of the struct `T`. Applies the rules for the message type first, so that their error comes
 /// before an error of reflection.
 template <typename T>
-consteval std::meta::info reflect_field_list()
+[[nodiscard]] consteval std::meta::info reflect_field_list()
 {
 	check_message_type<T>();
 	return make_field_list<T>();
