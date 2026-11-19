@@ -34,7 +34,7 @@ constexpr bool test_zigzag() {
     if (zigzag_encode(i64_min) != u64_max)
         return false;
 
-    for (std::int32_t v : {0, -1, 1, -2, 2, i32_max, i32_min})
+    for (std::int32_t v : std::initializer_list<std::int32_t>{0, -1, 1, -2, 2, i32_max, i32_min})
         if (zigzag_decode(zigzag_encode(v)) != v)
             return false;
     for (std::int64_t v : {std::int64_t{0}, std::int64_t{-1}, std::int64_t{1}, i64_min,

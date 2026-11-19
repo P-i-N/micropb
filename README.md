@@ -471,7 +471,7 @@ Without reflection and without a field list, a message type does not compile. Th
 > The compiler cannot compare a list that a person wrote with the struct. Always write `decltype(T::member)` and `offsetof(T, member)` with the same member, as in the example. An entry with a different type or a different offset compiles, and the codec then reads or writes the wrong memory. The library finds only these mistakes: a member that is in the list two times, a `std::variant` without all its alternatives, an offset that is not in the message, and the list of a different type. It does not find a member that is not in the list.
 
 > [!NOTE]
-> This was tested with GCC 16 in C++23 mode without `-freflection`. A test with an older compiler, for example the Arm GNU Toolchain, has not been done.
+> Tested with GCC 16 in C++23 mode without `-freflection`, and with the Arm GNU Toolchain 13.3 and 14.2 (compile only, `-mcpu=cortex-m4`).
 
 ## Encode
 
@@ -685,6 +685,14 @@ On Windows with MSYS2 UCRT64, add `-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++
 
 The tests use the flags `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`.
 
+CMake builds the tests only when micropb is the top-level project. `-DMICROPB_TESTS=ON` or `OFF` overrides this.
+
+#### Arm tests
+
+When CMake finds `arm-none-eabi-g++`, it adds compile tests for each such compiler. They only compile (`-std=c++23 -fno-exceptions -fno-rtti -Wall -Wextra -Werror -Os -mcpu=cortex-m4 -mthumb`); nothing is linked or run. CMake looks in `PATH` and, on Windows, in `C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/*/bin`. To choose the compilers, configure with `-DMICROPB_ARM_COMPILERS="<g++>;<g++>"`. `-DMICROPB_ARM_CPU=<cpu>` changes `-mcpu` (default `cortex-m4`). Without an Arm toolchain, CMake prints one status line, the Arm tests are off, and all other tests run.
+
+The tests are named `arm_<compiler version>.<test>`. The tests `test_wire`, `test_types`, `test_field_list` and `test_generated` are compiled, `no_startup_code` checks `test_generated.o` with `arm-none-eabi-nm`, and `consumer` configures and builds `tests/consumer`, a small project that uses the `micropb` target with that compiler. For a compiler without reflection, `consumer_reflection_on` checks that `-DMICROPB_REFLECTION=ON` stops with the error of micropb.
+
 | Tests | What they examine | How |
 | --- | --- | --- |
 | `test_wire`, `test_types`, `test_schema` | wire primitives, containers, field numbers and type rules | `static_assert`, and again at run time |
@@ -753,9 +761,10 @@ docs/superpowers/    design documents and implementation plans
 ## Status and limits
 
 * **Compiler:** developed and tested with GCC 16.2 on Linux, and on Windows with GCC 16.2 from MSYS2 UCRT64 (all tests pass, no warnings). The MinGW variant of `MICROPB_SANITIZE` is not yet verified.
-* **Without reflection:** tested only as GCC 16.2 with `-std=c++23` and without `-freflection`. No older compiler has been used. The code needs `std::expected`, so GCC 12 or newer. Clang is not tested: it does not know the attribute `gnu::noclone` of the codec and gives a warning for it.
-* **ARM:** not yet compiled or measured for an ARM target.
+* **Without reflection:** tested as GCC 16.2 with `-std=c++23` and without `-freflection`, and with the Arm GNU Toolchain 13.3 and 14.2 (compile only). The code needs `std::expected`, so GCC 12 or newer. Clang is not tested: it does not know the attribute `gnu::noclone` of the codec and gives a warning for it.
+* **ARM:** compiled with the Arm GNU Toolchain 13.3 and 14.2 (`-mcpu=cortex-m4`, also built through the CMake target in a separate project), not run and not measured.
 * **`protoc` plugin:** tested on Linux with `protoc` 35.1 and the Python package `protobuf` 7.36, and on Windows with `protoc` 36.2 and `protobuf` 6.31.1. On Windows, `tools/protoc-gen-micropb.bat` starts the first `python` in `PATH`, and that Python must have the `protobuf` package. When `C:\msys64\ucrt64\bin` comes first in `PATH`, this is the MSYS2 Python, which has no `protobuf` package unless you install `mingw-w64-ucrt-x86_64-python-protobuf`.
+* **CMake:** the tests are built only when micropb is the top-level project, or with `-DMICROPB_TESTS=ON`.
 * **Planned:** a generator that writes the `.proto` file from the C++ structs.
 * **Not supported:** `map`, proto2, groups, `Any` and the other well-known types, JSON, streaming encode or decode. Unknown fields are skipped and not kept.
 * **Not `constexpr`:** `encode`, `decode` and `encoded_size` run only at run time.

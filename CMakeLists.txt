@@ -127,6 +127,98 @@ if(MICROPB_TESTS)
         set_tests_properties(no_startup_code PROPERTIES FAIL_REGULAR_EXPRESSION "_GLOBAL__sub_I")
     endif()
 
+    # Arm tests: compile only (no linking, no running). They need arm-none-eabi-g++; without it they are
+    # off. MICROPB_ARM_COMPILERS can list the compilers; by default it is PATH and the Arm GNU Toolchain
+    # folders on Windows.
+    set(MICROPB_ARM_COMPILERS "" CACHE STRING "arm-none-eabi-g++ compilers for the Arm tests (empty: find them)")
+    set(MICROPB_ARM_CPU cortex-m4 CACHE STRING "Value of -mcpu for the Arm tests")
+    set(micropb_arm_compilers ${MICROPB_ARM_COMPILERS})
+    if(NOT micropb_arm_compilers)
+        find_program(MICROPB_ARM_GXX_ON_PATH arm-none-eabi-g++)
+        file(GLOB micropb_arm_gnu_toolchains
+            "C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/*/bin/arm-none-eabi-g++.exe")
+        foreach(gxx ${MICROPB_ARM_GXX_ON_PATH} ${micropb_arm_gnu_toolchains})
+            get_filename_component(gxx "${gxx}" REALPATH)
+            list(APPEND micropb_arm_compilers "${gxx}")
+        endforeach()
+        list(REMOVE_DUPLICATES micropb_arm_compilers)
+    endif()
+    if(NOT micropb_arm_compilers)
+        message(STATUS "micropb: no arm-none-eabi-g++ found, the Arm tests are off")
+    endif()
+
+    set(micropb_arm_flags -std=c++23 -fno-exceptions -fno-rtti -Wall -Wextra -Werror -Os
+        -mcpu=${MICROPB_ARM_CPU} -mthumb)
+    set(micropb_arm_prefixes)
+    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/arm_reflection_check.cpp "
+#if !defined(__cpp_impl_reflection)
+#error no reflection
+#endif
+")
+    foreach(gxx ${micropb_arm_compilers})
+        execute_process(COMMAND "${gxx}" -dumpversion OUTPUT_VARIABLE version OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE version_result)
+        if(NOT version_result EQUAL 0)
+            message(FATAL_ERROR "micropb: '${gxx}' does not run (-dumpversion)")
+        endif()
+        set(prefix arm_${version})
+        if(prefix IN_LIST micropb_arm_prefixes)
+            message(WARNING "micropb: two Arm compilers have the version ${version}, ignoring '${gxx}'")
+            continue()
+        endif()
+        list(APPEND micropb_arm_prefixes ${prefix})
+        set(micropb_${prefix}_gxx "${gxx}")
+        file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${prefix})
+        # Does this compiler have reflection? Compile only.
+        execute_process(COMMAND "${gxx}" -std=c++26 -freflection -c
+            ${CMAKE_CURRENT_BINARY_DIR}/arm_reflection_check.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/${prefix}/reflection_check.o
+            RESULT_VARIABLE reflection_result OUTPUT_QUIET ERROR_QUIET)
+        if(reflection_result EQUAL 0)
+            set(micropb_${prefix}_reflection on)
+        else()
+            set(micropb_${prefix}_reflection off)
+        endif()
+        message(STATUS "micropb: Arm compiler ${prefix} (${gxx}), reflection ${micropb_${prefix}_reflection}")
+    endforeach()
+
+    # Compile tests/<name>.cpp for each Arm compiler.
+    function(micropb_add_arm_test name)
+        foreach(prefix ${micropb_arm_prefixes})
+            add_test(NAME ${prefix}.${name}
+                COMMAND "${micropb_${prefix}_gxx}" ${micropb_arm_flags}
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/src -I${CMAKE_CURRENT_SOURCE_DIR}/tests
+                    -c ${CMAKE_CURRENT_SOURCE_DIR}/tests/${name}.cpp
+                    -o ${CMAKE_CURRENT_BINARY_DIR}/${prefix}/${name}.o)
+        endforeach()
+    endfunction()
+
+    micropb_add_arm_test(test_wire)
+    micropb_add_arm_test(test_types)
+    micropb_add_arm_test(test_field_list)
+    micropb_add_arm_test(test_generated)
+
+    foreach(prefix ${micropb_arm_prefixes})
+        # The tables must be ROM constants on Arm too.
+        string(REPLACE "g++" "nm" nm "${micropb_${prefix}_gxx}")
+        set_tests_properties(${prefix}.test_generated PROPERTIES FIXTURES_SETUP ${prefix}_generated)
+        add_test(NAME ${prefix}.no_startup_code COMMAND "${nm}" ${CMAKE_CURRENT_BINARY_DIR}/${prefix}/test_generated.o)
+        set_tests_properties(${prefix}.no_startup_code PROPERTIES
+            FIXTURES_REQUIRED ${prefix}_generated FAIL_REGULAR_EXPRESSION "_GLOBAL__sub_I")
+
+        # A project that uses micropb: configure and build with this compiler.
+        set(consumer_command ${CMAKE_COMMAND} -DCOMPILER=${micropb_${prefix}_gxx} -DCPU=${MICROPB_ARM_CPU}
+            -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR} -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/${prefix}_consumer
+            -DREFLECTION=${micropb_${prefix}_reflection})
+        add_test(NAME ${prefix}.consumer
+            COMMAND ${consumer_command} -DMODE=build -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/consumer/run.cmake)
+        set_tests_properties(${prefix}.consumer PROPERTIES RESOURCE_LOCK ${prefix}_consumer)
+        if(micropb_${prefix}_reflection STREQUAL "off")
+            add_test(NAME ${prefix}.consumer_reflection_on
+                COMMAND ${consumer_command} -DMODE=reflection_on -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/consumer/run.cmake)
+            set_tests_properties(${prefix}.consumer_reflection_on PROPERTIES RESOURCE_LOCK ${prefix}_consumer)
+        endif()
+    endforeach()
+
     # The tests of tools/protoc-gen-micropb.py need Python, the Python package protobuf and protoc.
     # Without them, CTest does not have the test `generator`. The other tests do not need these tools.
     find_package(Python3 COMPONENTS Interpreter)
