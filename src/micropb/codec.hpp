@@ -529,6 +529,51 @@ inline void emit_message( writer& sink, const message_desc& message, const void*
 	return sink.size();
 }
 
+/// Writes a field of a message type: the key, the length prefix and the fields.
+inline void emit_submessage( writer& sink, std::uint32_t number, const message_desc& message, const void* object )
+{
+	sink.write_key( number, wire_type::LENGTH_DELIMITED );
+	if ( !sink.counts_only() )
+	{
+		// The length prefix comes before the fields, so measure them first.
+		sink.write_varint( encoded_size( message, object ) );
+		emit_message( sink, message, object );
+		return;
+	}
+
+	// No byte is written, so the order is free: count the fields, then the
+	// length prefix. This walks the message only one time.
+	const std::size_t start = sink.size();
+	emit_message( sink, message, object );
+	sink.advance( varint_size( sink.size() - start ) );
+}
+
+/// Writes the scalar elements of a repeated field as one packed field.
+inline void emit_packed( writer& sink, std::uint32_t number, const sequence_desc& sequence, const sequence_view& items )
+{
+	const std::uint8_t code = sequence.element->scalar;
+
+	// The length prefix comes before the values, so measure them first.
+	writer measure;
+	if ( code & scalar_fixed )
+	{
+		measure.advance( items.count * sequence.element_size );
+	}
+	else
+	{
+		for ( std::size_t i = 0; i < items.count; ++i )
+			measure.write_varint( load_scalar( member_at( items.data, i * sequence.element_size ), code ) );
+	}
+
+	sink.write_key( number, wire_type::LENGTH_DELIMITED );
+	sink.write_varint( measure.size() );
+	for ( std::size_t i = 0; i < items.count; ++i )
+	{
+		const void* item = member_at( items.data, i * sequence.element_size );
+		emit_scalar( sink, code, load_scalar( item, code ) );
+	}
+}
+
 /// Writes one field. `always` is `true` for explicit presence: the function
 /// writes the field also when its value is the default value.
 inline void emit_value( writer& sink, std::uint32_t number, const value_desc& type, const void* value, bool always )
@@ -569,24 +614,7 @@ inline void emit_value( writer& sink, std::uint32_t number, const value_desc& ty
 			// The length is never 0 here, except for an array of length 0.
 			emit_bytes( sink, number, { static_cast<const std::uint8_t*>( value ), type.size }, always );
 			break;
-		case field_kind::MESSAGE: {
-			sink.write_key( number, wire_type::LENGTH_DELIMITED );
-			if ( !sink.counts_only() )
-			{
-				// The length prefix comes before the fields, so measure them first.
-				sink.write_varint( encoded_size( *type.message, value ) );
-				emit_message( sink, *type.message, value );
-			}
-			else
-			{
-				// No byte is written, so the order is free: count the fields, then
-				// the length prefix. This walks the message only one time.
-				const std::size_t start = sink.size();
-				emit_message( sink, *type.message, value );
-				sink.advance( varint_size( sink.size() - start ) );
-			}
-			break;
-		}
+		case field_kind::MESSAGE: emit_submessage( sink, number, *type.message, value ); break;
 		case field_kind::OPTIONAL: {
 			const optional_desc& optional = *type.optional;
 			if ( const void* held = optional.access( const_cast<void*>( value ), optional_op::GET ) )
@@ -607,25 +635,7 @@ inline void emit_value( writer& sink, std::uint32_t number, const value_desc& ty
 				break;
 			}
 
-			// Scalars are one packed field: measure the values, then write them.
-			writer measure;
-			if ( element.scalar & scalar_fixed )
-			{
-				measure.advance( items.count * sequence.element_size );
-			}
-			else
-			{
-				for ( std::size_t i = 0; i < items.count; ++i )
-					measure.write_varint( load_scalar( member_at( items.data, i * sequence.element_size ), element.scalar ) );
-			}
-
-			sink.write_key( number, wire_type::LENGTH_DELIMITED );
-			sink.write_varint( measure.size() );
-			for ( std::size_t i = 0; i < items.count; ++i )
-			{
-				const void* item = member_at( items.data, i * sequence.element_size );
-				emit_scalar( sink, element.scalar, load_scalar( item, element.scalar ) );
-			}
+			emit_packed( sink, number, sequence, items );
 			break;
 		}
 		case field_kind::ONEOF:
