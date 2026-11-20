@@ -1,288 +1,75 @@
 # micropb
 
-A small proto3 encoder and decoder for embedded C++. It sends messages between a device and PC tools, for example on a USB serial port.
+A header-only proto3 encoder and decoder for embedded C++23. Use it to exchange messages between microcontroller firmware and PC host tools (Python, C#, C++, Go) over a serial port, USB, CAN, or radio link.
 
-A message is a plain struct with a field list (`pb::fields_of`). A `protoc` plugin writes the structs and their field lists from a `.proto` file, or you write them by hand.
+```proto
+// sensor.proto
+syntax = "proto3";
+package sensor;
+
+message Reading {
+  uint32 id = 1;
+  sint32 temperature_mc = 2;
+  optional string label = 3;
+}
+```
+
+`protoc-gen-micropb` generates a plain C++23 struct and its compile-time field list. Three functions handle all messages: `pb::encode`, `pb::decode`, and `pb::encoded_size`.
 
 ```cpp
-struct ping {
-    std::uint32_t seq;
-};
+#include <array>
+#include <cstdint>
+#include <span>
 
-template <>
-struct pb::fields_of<ping> : pb::field_list<ping,
-    pb::field_at<decltype(ping::seq), 1, offsetof(ping, seq)>> {};
+#include <micropb/micropb.hpp>
+#include "sensor.pb.hpp"
 
-std::array<std::uint8_t, 16> buffer{};
-const auto size = pb::encode(ping{7}, buffer); // 08 07
+bool round_trip() {
+    std::array<std::uint8_t, 32> wire{};
+
+    const sensor::Reading tx{.id = 1, .temperature_mc = -250, .label = "ambient"};
+    const auto written = pb::encode(tx, wire); // std::expected<std::size_t, pb::error>
+    if (!written)
+        return false;
+
+    sensor::Reading rx{};
+    const auto read = pb::decode(std::span<const std::uint8_t>(wire).first(*written), rx);
+    return read && rx.id == 1 && rx.temperature_mc == -250 && rx.label == "ambient";
+}
 ```
+
+## Why micropb
+
+* **Plain C++23 types, no callbacks:** messages are aggregates with `enum class`, `std::optional`, `std::variant`, `std::string_view`, `std::span`, `std::array`, and `pb::repeated<T, N>`. There are no `_has_field` flags, manual union tags, or stream callbacks.
+* **Small Flash footprint across many message types:** one non-template interpreter encodes and decodes all messages from `constexpr` descriptor tables in ROM. Adding an 8-field message type adds ~270 bytes (`14.3 KB` total for 32 message types, compared to `35.5 KB` when instantiating one codec template per type).
+* **No heap, no exceptions, no RTTI:** compiles cleanly with `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`. Errors return `std::expected<std::size_t, pb::error>`.
+* **Zero startup code:** descriptor tables are `constexpr` constants in read-only memory. Nothing runs before `main()`.
+* **Zero-copy views and optional arena storage:** decoded `string` and `bytes` fields point directly into the input buffer. Repeated fields use fixed in-struct storage (`pb::repeated<T, N>`) or contiguous blocks in a caller-owned `pb::arena` (`std::span<const T>`).
+* **Compile-time schema checks:** duplicate or reserved field numbers, unmapped types, recursive messages, and missing arenas fail at compile time with named `static_assert` rules (`pb: <rule>:`).
+* **Wire-identical to `protoc`:** tested byte-for-byte against `protoc` output, plus prefix truncation and single-byte mutation tests.
+* **Zero external dependencies:** 5 C++23 headers using only the standard library, plus a single-file Python 3 `protoc` plugin that reads NanoPB-compatible `.options` files without third-party Python packages.
 
 ## Contents
 
-* [Features](#features)
-* [Example](#example)
-* [How it works](#how-it-works)
+* [Examples](#examples)
 * [Add it to a project](#add-it-to-a-project)
-* [Define messages](#define-messages)
-* [Generate structs from a .proto file](#generate-structs-from-a-proto-file)
-* [Encode](#encode)
-* [Decode](#decode)
+* [API](#api)
+* [Type mapping and rules](#type-mapping-and-rules)
+* [Generate headers from `.proto`](#generate-headers-from-proto)
 * [Errors](#errors)
 * [Compile-time checks](#compile-time-checks)
-* [Talk to a PC tool](#talk-to-a-pc-tool)
+* [Framing and PC tools](#framing-and-pc-tools)
 * [Code size](#code-size)
 * [Build and test](#build-and-test)
 * [Repository layout](#repository-layout)
 * [Status and limits](#status-and-limits)
 * [License](#license)
 
-## Features
+## Examples
 
-* **Three functions:** `pb::encode`, `pb::decode` and `pb::encoded_size`.
-* **Small code:** one interpreter encodes and decodes all message types. Each more message type adds a constant table, not a copy of the codec.
-* **No heap, no exceptions, no RTTI.** Errors are `std::expected` values. All storage is in your structs or in buffers that you supply, for example a `pb::arena` for the items of repeated fields.
-* **Zero-copy decode** of strings and bytes: a `std::string_view` or a `std::span` points into the input buffer.
-* **Same bytes as `protoc`.** The tests compare the output with reference vectors from the Google C++ runtime.
-* **Mistakes are compile errors.** A duplicate field number or a type without a proto3 mapping does not compile.
-* **Header-only:** five headers, C++23 standard library only.
+### 1. Fixed capacities with an `.options` file
 
-## Example
-
-```cpp
-#include <array>
-#include <cstddef>
-#include <cstdint>
-#include <span>
-#include <variant>
-
-#include <micropb/micropb.hpp>
-
-struct pose {
-    pb::repeated<float, 3> pos;
-    pb::repeated<float, 4> rot;
-};
-
-struct ping {
-    std::uint32_t seq;
-};
-
-struct envelope {
-    std::uint32_t id;
-    std::variant<std::monostate, pose, ping> payload; // oneof
-};
-
-template <>
-struct pb::fields_of<pose> : pb::field_list<pose,
-    pb::field_at<decltype(pose::pos), 1, offsetof(pose, pos)>,
-    pb::field_at<decltype(pose::rot), 2, offsetof(pose, rot)>> {};
-
-template <>
-struct pb::fields_of<ping> : pb::field_list<ping,
-    pb::field_at<decltype(ping::seq), 1, offsetof(ping, seq)>> {};
-
-template <>
-struct pb::fields_of<envelope> : pb::field_list<envelope,
-    pb::field_at<decltype(envelope::id), 1, offsetof(envelope, id)>,
-    pb::field_at<decltype(envelope::payload), 2, offsetof(envelope, payload), 1>,
-    pb::field_at<decltype(envelope::payload), 3, offsetof(envelope, payload), 2>> {};
-
-bool send_and_receive() {
-    std::array<std::uint8_t, 64> buffer{};
-    const auto size = pb::encode(envelope{1, ping{7}}, buffer); // std::expected<std::size_t, pb::error>
-    if (!size)
-        return false;
-
-    envelope in{};
-    const auto used = pb::decode(std::span<const std::uint8_t>(buffer).first(*size), in);
-    if (!used)
-        return false;
-
-    const auto* received = std::get_if<ping>(&in.payload);
-    return in.id == 1 && received && received->seq == 7;
-}
-```
-
-The encoded message has 6 bytes:
-
-| Bytes | Meaning |
-| --- | --- |
-| `08 01` | field 1 (`id`), varint, value 1 |
-| `1a 02` | field 3 (`ping`, the second alternative of `payload`), 2 bytes follow |
-| `08 07` | in `ping`: field 1 (`seq`), varint, value 7 |
-
-## How it works
-
-Each message type has a field list: the type, the field number and the offset of each member. The `protoc` plugin writes it into the generated header, or you write it by hand. Templates make constant descriptor tables from the list. At run time, one interpreter reads the tables for all message types.
-
-* The interpreter reads and writes scalars with `std::memcpy`, through the byte offset of the member.
-* `std::optional` and `std::variant` have no layout that the standard specifies. The interpreter uses them only through one small accessor function for each type.
-* The tables are `constexpr` objects. The linker puts them in read-only memory, and there is no initialization at run time.
-
-## Add it to a project
-
-**Requirements:** a C++23 compiler (GCC 12 or newer, for `std::expected`).
-
-With CMake, add the directory and link the `micropb` target:
-
-```cmake
-add_subdirectory(micropb)
-target_link_libraries(firmware PRIVATE micropb)
-```
-
-* `micropb` is an `INTERFACE` library. It gives the include directory and C++23.
-* `MICROPB_TESTS` builds the tests of micropb. It is on only when micropb is the top-level project.
-
-Without CMake, add `src/` to the include path and compile with `-std=c++23`.
-
-Include one header:
-
-```cpp
-#include <micropb/micropb.hpp>
-```
-
-The library does not use exceptions or RTTI, so `-fno-exceptions -fno-rtti` are safe.
-
-## Define messages
-
-A message is a class aggregate: only public data members, no constructor. Each message type has a field list (`pb::fields_of`).
-
-### Type mapping
-
-| C++ type | proto3 type | Notes |
-| --- | --- | --- |
-| `bool` | `bool` | |
-| `std::int32_t`, `std::int64_t` | `int32`, `int64` | A negative value is a 10-byte varint. |
-| `std::uint32_t`, `std::uint64_t` | `uint32`, `uint64` | |
-| `std::int8_t`, `std::int16_t` | `int32` | Decode truncates to the width of the member. |
-| `std::uint8_t`, `std::uint16_t` | `uint32` | Decode truncates to the width of the member. |
-| `signed char`, `short`, `int`, `long`, `long long` and the unsigned forms | as the fixed-width type of the same size and sign | `long` is `int32` on Windows and `arm-none-eabi`, and `int64` on Linux x86-64. |
-| `pb::wire_int<T, pb::int_encoding::ZIGZAG>`, `T` a signed integer | `sint32` (1, 2 or 4 bytes), `sint64` (8 bytes) | ZigZag: small for negative values. Decode truncates to the width of the member. `pb::sint32` and `pb::sint64` are the 4- and 8-byte cases. |
-| `pb::fixed32`, `pb::fixed64` | `fixed32`, `fixed64` | |
-| `pb::sfixed32`, `pb::sfixed64` | `sfixed32`, `sfixed64` | |
-| `float`, `double` | `float`, `double` | |
-| `enum`, `enum class` | `enum` | `int32` on the wire. An enum wider than 32 bits does not compile. |
-| `std::string_view` | `string` | Decode gives a view into the input. |
-| `std::span<const std::uint8_t>` | `bytes` | Decode gives a view into the input. |
-| `std::array<std::uint8_t, N>` | `bytes` | Fixed length, see [Bytes](#bytes). |
-| struct | `message` | A nested message. |
-| `std::optional<T>` | `optional T` | Explicit presence. |
-| `std::variant<std::monostate, A, B>` | `oneof` | `std::monostate` means that no alternative is set. |
-| `pb::repeated<T, N>` | `repeated T` | See [Repeated fields](#repeated-fields). |
-| `std::span<const T>` | `repeated T` | Decode puts the items in a `pb::arena`. See [Repeated fields](#repeated-fields). |
-
-Plain `char`, the character types (`wchar_t`, `char8_t`, `char16_t`, `char32_t`), `__int128` and `volatile` members do not compile. Use the fixed-width types of `<cstdint>` when the `.proto` file must be the same for each target: `std::int32_t` is `int` on a PC, but `long` on `arm-none-eabi`.
-
-`pb::sint32` and the other `pb::` integer types are small wrappers. They convert to and from the integer type that they hold:
-
-```cpp
-struct sample {
-    pb::sint32 delta;
-};
-
-sample s{-5};
-std::int32_t value = s.delta; // -5
-```
-
-### Field lists
-
-A field list is a specialization of `pb::fields_of`, with one `pb::field_at` for each field: the type of the member, the field number and the offset of the member. `protoc-gen-micropb` writes it for each generated message. For your own structs, write it after the struct:
-
-```cpp
-struct ping {
-    std::uint32_t seq;
-    std::string_view note;
-};
-
-template <>
-struct pb::fields_of<ping> : pb::field_list<ping,
-    pb::field_at<decltype(ping::seq), 1, offsetof(ping, seq)>,
-    pb::field_at<decltype(ping::note), 2, offsetof(ping, note)>> {};
-```
-
-* The entries can be in any order. The encoder writes the fields in ascending field number.
-* The list is in the scope of `pb`. When your type has a name that `pb` also has, for example `error`, write `::error`.
-* A `std::variant` member has one entry for each alternative after `std::monostate`, with the index of the alternative as a fourth argument: `pb::field_at<decltype(msg::choice), 10, offsetof(msg, choice), 1>`.
-* `offsetof` is a macro. For a type with a comma in its name, such as `box<T, N>`, make an alias first.
-* A `const` member is encode-only. `decltype` keeps the `const`.
-* The specialization must come before the first use of the type with `pb::encode`, `pb::decode` or `pb::encoded_size`.
-* Without a field list, a message type does not compile (`pb: no_field_list`).
-
-> [!IMPORTANT]
-> Field numbers are the contract with the other side of the link. Do not change the number of an existing field.
-
-> [!WARNING]
-> The compiler cannot compare a list that a person wrote with the struct. Always write `decltype(T::member)` and `offsetof(T, member)` with the same member. An entry with a different type or offset compiles, and the codec then reads or writes the wrong memory. The library finds a member that is in the list two times, a `std::variant` without all its alternatives, an offset that is not in the message, and the list of a different type. It does not find a member that is not in the list.
-
-### Presence
-
-| Member | When the encoder writes it |
-| --- | --- |
-| scalar, string, bytes | when the value is not zero or not empty (`-0.0` is not zero) |
-| `std::optional<T>` | when it has a value, also when the value is zero |
-| nested message | always |
-| `std::optional<message>` | when it has a value |
-| `std::variant` | the active alternative only |
-| repeated field | when it has one element or more |
-
-### Repeated fields
-
-Scalar elements are packed. Strings, bytes and messages are one field for each element.
-
-| Container | Storage | Decode |
-| --- | --- | --- |
-| `pb::repeated<T, N>` | in the struct, up to `N` elements | yes |
-| `std::span<const T>` | a view of your data; after decode, a block in a `pb::arena` | yes, with a `pb::arena` |
-| `std::array<T, N>` | in the struct, always `N` elements | no |
-
-`pb::repeated<T, N>` has `push_back` (returns `false` when it is full), `size`, `capacity`, `empty`, `clear`, `operator[]`, `begin` and `end`.
-
-A `std::span<const T>` repeated field has no size limit in the struct. `decode` puts its items in a `pb::arena`, a memory area that you supply, and sets the span to them. This also works in a nested message, in a `std::optional`, in a `oneof` alternative and in the element of a repeated field:
-
-```cpp
-struct samples {
-    std::span<const std::int32_t> values;
-    std::span<const pose> poses;
-};
-
-template <>
-struct pb::fields_of<samples> : pb::field_list<samples,
-    pb::field_at<decltype(samples::values), 1, offsetof(samples, values)>,
-    pb::field_at<decltype(samples::poses), 2, offsetof(samples, poses)>> {};
-
-std::array<std::uint8_t, 1024> storage{};
-pb::arena memory(storage);
-samples received{};
-const auto result = pb::decode(input, received, memory);
-```
-
-* The items of one field are in one contiguous block. Before `decode` takes the block, it counts the elements of the field in the message.
-* `decode` does not free a block. More than one message can use one arena. `memory.clear()` frees all blocks: then each message that `decode` wrote with this arena is not valid.
-* When the arena is too small, `decode` returns `ARENA_FULL`. It never writes outside the arena.
-* `memory.used()` gives the bytes that the blocks use. The use depends on the content of the message. The order of the fields on the wire changes only the alignment padding between the blocks. Measure `used()` with the largest message that you expect, on the target: the pointer size and the alignment of the storage change it. Or add a margin.
-* A nested message that occurs two times in one message (`protoc` does not write this) gets a new block with a copy of the old items. The old block stays used until `clear()`.
-* The element type must be trivially copyable and trivially destructible: the arena never calls a destructor.
-* `std::span<const std::span<const std::uint8_t>>` is `repeated bytes`: the block in the arena holds the views, and the views point into the input.
-
-### Bytes
-
-| Type | Decode |
-| --- | --- |
-| `std::span<const std::uint8_t>` | a view into the input, no copy |
-| `pb::repeated<std::uint8_t, N>` | a copy, up to `N` bytes |
-| `std::array<std::uint8_t, N>` | a copy; fixed length, see below |
-| `std::span<const std::uint8_t, N>` | no (encode only) |
-
-A `std::array<std::uint8_t, N>` is a bytes field with a fixed length, for example a MAC address. The encoder always writes `N` bytes. On decode, shorter input leaves the remaining bytes 0, and longer input is the error `CAPACITY_EXCEEDED`.
-
-## Generate structs from a .proto file
-
-`tools/protoc-gen-micropb.py` is a plugin for `protoc`. It reads a proto3 file and writes a header with the structs and their field lists. It needs only Python 3.8 or newer (tested with Python 3.13 and 3.14), no Python package.
-
-```sh
-protoc --plugin=protoc-gen-micropb=tools/protoc-gen-micropb.py --micropb_out=gen --micropb_opt=options_dir=proto -I proto proto/app.proto
-```
-
-This command writes `gen/app.pb.hpp`. The folder `gen` must exist. On Windows, use `tools\protoc-gen-micropb.bat` as the plugin, because `protoc` cannot start a `.py` file there.
+Proto3 does not put buffer sizes in `.proto` files, so PC tools and firmware can share one `.proto` while firmware bounds its struct sizes in a sidecar `.options` file (NanoPB format).
 
 `proto/app.proto`:
 
@@ -307,24 +94,21 @@ message Sample {
 `proto/app.options`:
 
 ```text
-# <name pattern>  <option>:<value> ...
-Sample.values     max_count:8
-Sample.mac        max_size:6 fixed_length:true
+Sample.values  max_count:8
+Sample.mac     max_size:6 fixed_length:true
 ```
 
-`gen/app.pb.hpp`:
+Generate `gen/app.pb.hpp`:
+
+```sh
+protoc --plugin=protoc-gen-micropb=tools/protoc-gen-micropb.py \
+       --micropb_out=gen --micropb_opt=options_dir=proto \
+       -I proto proto/app.proto
+```
+
+Generated struct in `gen/app.pb.hpp`:
 
 ```cpp
-// Generated by protoc-gen-micropb from app.proto. Do not edit.
-#pragma once
-
-#include <array>
-#include <cstddef>
-#include <cstdint>
-#include <optional>
-
-#include <micropb/types.hpp>
-
 namespace app {
 
 enum class Mode : std::int32_t {
@@ -341,194 +125,295 @@ struct Sample {
 };
 
 } // namespace app
+```
 
-// Field lists.
+Use it:
+
+```cpp
+app::Sample sample{};
+sample.time = 100;
+if (!sample.values.push_back(1.5f))
+    return;
+sample.mac = {0x02, 0x00, 0x5E, 0x10, 0x00, 0x01};
+sample.offset = -12;
+sample.mode = app::Mode::RUN;
+
+std::array<std::uint8_t, 64> out{};
+const auto n = pb::encode(sample, out);
+```
+
+### 2. Commands with `oneof` (`std::variant`)
+
+A proto3 `oneof` maps to `std::variant<std::monostate, ...>`. `std::monostate` means no alternative is set.
+
+```cpp
+struct ping {
+    std::uint32_t seq;
+};
+
+struct set_rate {
+    std::uint16_t hz;
+};
+
+struct command {
+    std::uint32_t id;
+    std::variant<std::monostate, ping, set_rate> payload;
+};
+```
+
+Encode and dispatch:
+
+```cpp
+std::array<std::uint8_t, 32> buf{};
+const auto size = pb::encode(command{.id = 4, .payload = set_rate{.hz = 100}}, buf);
+if (!size)
+    return;
+
+command cmd{};
+if (!pb::decode(std::span<const std::uint8_t>(buf).first(*size), cmd))
+    return;
+
+if (const auto* rate = std::get_if<set_rate>(&cmd.payload)) {
+    // rate->hz == 100
+}
+```
+
+### 3. Variable-length repeated fields with `pb::arena`
+
+When a worst-case `max_count` in every struct would waste RAM, omit `max_count` (or set `type:FT_POINTER`). The field becomes `std::span<const T>`, and `pb::decode` places its elements into one contiguous block in a caller-owned `pb::arena`:
+
+```cpp
+struct batch {
+    std::string_view device;              // zero-copy view into input
+    std::span<const std::int32_t> values; // allocated in arena on decode
+};
+
+void handle_packet(std::span<const std::uint8_t> packet) {
+    std::array<std::uint8_t, 256> scratch{};
+    pb::arena memory(scratch);
+
+    batch msg{};
+    if (pb::decode(packet, msg, memory)) {
+        // msg.device points into `packet`
+        // msg.values points into `memory` (memory.used() bytes consumed)
+    }
+}
+```
+
+If you call `pb::decode(packet, msg)` without an arena on a message that contains a `std::span<const T>` repeated field (directly or nested), compilation fails with `pb: decode_needs_arena`.
+
+### 4. Hand-written structs (`pb::fields_of`)
+
+If you do not use `.proto` code generation, specialize `pb::fields_of<T>` after your struct:
+
+```cpp
+struct ping {
+    std::uint32_t seq;
+    std::string_view note;
+};
 
 template <>
-struct pb::fields_of<::app::Sample> : pb::field_list<::app::Sample,
-    pb::field_at<decltype(::app::Sample::time), 1, offsetof(::app::Sample, time)>,
-    pb::field_at<decltype(::app::Sample::values), 2, offsetof(::app::Sample, values)>,
-    pb::field_at<decltype(::app::Sample::mac), 3, offsetof(::app::Sample, mac)>,
-    pb::field_at<decltype(::app::Sample::offset), 10, offsetof(::app::Sample, offset)>,
-    pb::field_at<decltype(::app::Sample::mode), 11, offsetof(::app::Sample, mode)>> {};
+struct pb::fields_of<ping> : pb::field_list<ping,
+    pb::field_at<decltype(ping::seq), 1, offsetof(ping, seq)>,
+    pb::field_at<decltype(ping::note), 2, offsetof(ping, note)>> {};
 ```
 
-### What the plugin writes
-
-The types are those of [Type mapping](#type-mapping). In addition:
-
-* **Names** stay as they are in the `.proto` file. A C++ keyword gets the suffix `_`: `class` becomes `class_`. The same applies to `pb`, `std` and the macro names `NULL`, `EOF`, `errno`, `stdin`, `stdout`, `stderr`, `assert` and `offsetof`. A name that is a different macro in your project, for example `HIGH`, does not compile.
-* **Package:** `package a.b` becomes `namespace a::b`.
-* **Enum values** lose the prefix `<ENUM NAME>_` when each value has it and the remaining text starts with a letter: `MODE_IDLE` becomes `Mode::IDLE`. The comparison ignores case. For a nested enum, the prefix is the name of the enum without the outer message: `STATE_` for `Device.State`.
-* **Nested types** become top-level types: `Outer.Inner` is `Outer_Inner`.
-* **Order:** the enums come first. Each struct comes after the structs that it contains.
-* **`oneof`** becomes a `std::variant` with the name of the `oneof`.
-* **A message field without `optional`** is a plain member, which the encoder always writes.
-* **`string`** is a `std::string_view`. **`bytes`** without an option is a `std::span<const std::uint8_t>`.
-* **`import`** becomes `#include "<name>.pb.hpp"` when the file uses a type of the imported file. A type of a different package gets its full name, `::a::b::name`.
-
-### The options file
-
-The plugin reads sizes from `<name>.options`, in the format of NanoPB options files. Each line has a name pattern and one or more options. `#` and `//` start a comment.
-
-| Option | For | Result |
-| --- | --- | --- |
-| `max_count:N` | a repeated field | `pb::repeated<T, N>` |
-| `max_count:N fixed_count:true` | a repeated field | `std::array<T, N>` (encode only) |
-| `max_size:N` | a `bytes` field | `pb::repeated<std::uint8_t, N>` |
-| `max_size:N fixed_length:true` | a `bytes` field | `std::array<std::uint8_t, N>` |
-| `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `int32`, `int64`, `uint32`, `uint64` | `std::int8_t` ... `std::uint64_t`, with the sign of the field |
-| `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `sint32`, `sint64` | `pb::wire_int<std::intN_t, pb::int_encoding::ZIGZAG>`; `pb::sint32` for `IS_32`, `pb::sint64` for `IS_64` |
-| `type:FT_POINTER` | a repeated field | `std::span<const T>`, also when a wildcard line sets `max_count` |
-| `type:FT_POINTER` | a `bytes` field | `std::span<const std::uint8_t>`, also when a wildcard line sets `max_size` |
-| `type:FT_STATIC`, `type:FT_DEFAULT` | a repeated, `bytes` or `string` field | the result of the other options |
-| `enum_intsize:IS_8`, `IS_16`, `IS_32` | an enum | `enum class E : std::int8_t`, `std::int16_t` or `std::int32_t` (the default) |
-
-* The pattern is the name of the field: `package.Message.field`, or `Message.field` without the package. For `enum_intsize` it is the name of the enum. `*` and `?` are wildcards: `* max_count:8` sets a default for all fields.
-* `type:FT_POINTER` makes a member that points to your data: the message holds no copy. A message with a `std::span<const T>` repeated field decodes only with a `pb::arena` (`pb: decode_needs_arena`). Other `type` values, for example `FT_CALLBACK`, are an error.
-* A narrow member saves RAM, not bytes on the wire. Decode truncates a value to the width of the member, also an enum value from a newer peer. An enum value that does not fit the type is an error when you generate the header.
-* `int_size` on a wildcard line also narrows each `sint32` and `sint64` field that it matches. Check an existing options file before you generate headers again.
-* When more than one line sets the same option for a field, the last line wins.
-* A repeated field without `max_count` is a `std::span<const T>`. Decode puts its items in a `pb::arena`. `fixed_count` needs `max_count`, and `fixed_length` needs `max_size`: else the plugin stops with an error.
-* The plugin looks for `<name>.options` with the path that `protoc` has for the `.proto` file, from the current folder. Give more folders with `--micropb_opt=options_dir=<folder>`. When it finds no options file, a `bytes` field is a `std::span` and an integer has its full size, without a message.
-* An unknown option and a pattern that matches no field give a warning. An option that does not apply to its field gives a warning when its line has no wildcard. `max_size` on a `string` field is such a case.
-* The file must be UTF-8 text.
-
-The plugin does not read options in the `.proto` file, such as `[(nanopb).max_size = 6]`.
-
-### What the plugin does not accept
-
-The plugin stops with an error for: a file that is not proto3, a `map` field, a message that contains itself, a `oneof` with two members of the same type, `int_size:IS_8` on a repeated unsigned field (a sequence of `std::uint8_t` is `bytes`), and `enum_intsize:IS_64`. It ignores services and `extend` blocks. It ignores `[packed = false]`: the library always packs scalar elements, and each protobuf parser reads the two forms.
-
-## Encode
+For a `std::variant` member, add one `pb::field_at` entry per alternative after `std::monostate` and pass the 1-based alternative index as the fourth template argument:
 
 ```cpp
-template <typename T>
-std::size_t pb::encoded_size(const T& msg);
-
-template <typename T>
-std::expected<std::size_t, pb::error> pb::encode(const T& msg, std::span<std::uint8_t> out);
+template <>
+struct pb::fields_of<command> : pb::field_list<command,
+    pb::field_at<decltype(command::id), 1, offsetof(command, id)>,
+    pb::field_at<decltype(command::payload), 2, offsetof(command, payload), 1>,
+    pb::field_at<decltype(command::payload), 3, offsetof(command, payload), 2>> {};
 ```
-
-`encode` writes one message into `out` and returns the number of bytes. It never writes past `out`. When `out` is too small, it returns `pb::error::BUFFER_TOO_SMALL`, and the contents of `out` are not valid.
-
-`encoded_size` returns the number of bytes that `encode` needs for this message.
-
-## Decode
-
-```cpp
-template <typename T>
-std::expected<std::size_t, pb::error> pb::decode(std::span<const std::uint8_t> in, T& msg, pb::arena& memory);
-
-template <typename T>
-std::expected<std::size_t, pb::error> pb::decode(std::span<const std::uint8_t> in, T& msg);
-```
-
-`decode` reads exactly one message from `in`. On success it returns `in.size()`. A message with a `std::span<const T>` repeated field, also in a nested message, needs the overload with a `pb::arena` (see [Repeated fields](#repeated-fields)). Without the arena, it does not compile (`pb: decode_needs_arena`).
-
-* It resets `msg` first. You can use the same object again for each message. A `pb::repeated` gets the size 0. A `std::span<const T>` becomes empty.
-* A value that `decode` makes for a `std::optional` or for a new `oneof` alternative also starts from the reset state: a field that is not in the input is zero or empty, as in protobuf. A default member initializer in such a value has no effect.
-* It skips a field number that the message does not have, and a known field with a different wire type. Thus the other side can add fields, and old firmware continues to work.
-* A scalar that occurs more than one time: the last value wins. A nested message: the occurrences merge. A `oneof`: the last alternative wins.
-* A repeated scalar field can be packed or not packed, also mixed in one message.
-* A varint that is too wide for the member loses its upper bits. A `bool` is `true` for each value that is not 0.
-* An enum value that the enum does not name is kept as its integer value.
-* On an error, `msg` holds the fields that were read before the error. A `std::span<const T>` repeated field holds the items that were read before the error. The blocks that `decode` took stay used until `clear()`.
-* It does not examine whether a `string` field is correct UTF-8.
 
 > [!WARNING]
-> A `std::string_view` or a `std::span<const std::uint8_t>` in a decoded message points into the input buffer. A `std::span<const T>` repeated field points into the arena. Do not use the message after the input buffer changes or goes away, or after `clear()` of the arena.
+> Always pass the same member to `decltype(T::m)` and `offsetof(T, m)`. C++23 cannot verify that a hand-written type and byte offset refer to the same member. `micropb` catches duplicate offsets, out-of-bounds offsets, wrong message types, and incomplete variants, but not a mismatched type/offset pair or an omitted member. Prefer `protoc-gen-micropb` when a `.proto` file exists.
+
+## Add it to a project
+
+**Requirements:** a C++23 compiler (GCC 12+ for `std::expected`).
+
+With CMake:
+
+```cmake
+add_subdirectory(micropb)
+target_link_libraries(firmware PRIVATE micropb)
+```
+
+* `micropb` is an `INTERFACE` target that adds `src/` to the include path and enables C++23.
+* `MICROPB_TESTS` defaults to `ON` only when `micropb` is the top-level CMake project.
+
+Without CMake, add `src/` to your include path and compile with `-std=c++23`. Include one header:
+
+```cpp
+#include <micropb/micropb.hpp>
+```
+
+Generated `.pb.hpp` headers include `<micropb/types.hpp>` only, so translation units that hold message structs without calling `encode` or `decode` do not pull in the codec.
+
+## API
+
+```cpp
+template <typename T>
+[[nodiscard]] std::size_t pb::encoded_size(const T& msg);
+
+template <typename T>
+[[nodiscard]] std::expected<std::size_t, pb::error> pb::encode(const T& msg, std::span<std::uint8_t> out);
+
+template <typename T>
+[[nodiscard]] std::expected<std::size_t, pb::error> pb::decode(std::span<const std::uint8_t> in, T& msg);
+
+template <typename T>
+[[nodiscard]] std::expected<std::size_t, pb::error> pb::decode(std::span<const std::uint8_t> in, T& msg, pb::arena& memory);
+```
+
+### Encode rules
+
+* `encode` writes one proto3 message into `out` in ascending field-number order and returns the byte count written.
+* It never writes past `out`. If `out` is too short, it returns `pb::error::BUFFER_TOO_SMALL`, and the partial contents of `out` are not valid.
+* `encoded_size` computes the exact byte count using the same code path without writing bytes.
+
+### Decode rules
+
+* `decode` reads one message from `in` and returns `in.size()` on success.
+* It resets `msg` before reading, so you can reuse one struct across messages (`pb::repeated` resets its size to 0; `std::span<const T>` becomes empty).
+* New `std::optional` values and switched `std::variant` alternatives also start from the proto3 zero/empty state; C++ default member initializers inside them do not persist.
+* Unknown field numbers and known fields with unexpected wire types are skipped, preserving forward compatibility.
+* Duplicate scalar fields keep the last value; duplicate nested messages merge; duplicate `oneof` fields keep the last alternative; repeated scalar fields accept packed, unpacked, or mixed encodings.
+* Varints wider than a narrow integer member truncate to the member width, matching the Google C++ runtime. Any non-zero varint decodes as `true` for `bool`. Unnamed enum values keep their integer value.
+* Strings are not checked for valid UTF-8.
+* On error, `msg` retains fields decoded before the failure, and arena blocks allocated during that call remain used until `memory.clear()`.
+
+> [!WARNING]
+> Decoded `std::string_view` and `std::span<const std::uint8_t>` fields point into `in`. Decoded `std::span<const T>` repeated fields point into `memory`. Keep `in` and `memory` alive and unchanged for as long as you read `msg`.
+
+## Type mapping and rules
+
+### Proto3 to C++23 mapping
+
+| C++ type | proto3 type | Notes |
+| --- | --- | --- |
+| `bool` | `bool` | |
+| `std::int32_t`, `std::int64_t` | `int32`, `int64` | Negative values encode as 10-byte varints. |
+| `std::uint32_t`, `std::uint64_t` | `uint32`, `uint64` | |
+| `std::int8_t`, `std::int16_t` | `int32` | Narrow storage in RAM; decode truncates to member width. |
+| `std::uint8_t`, `std::uint16_t` | `uint32` | Narrow storage in RAM; decode truncates to member width. |
+| Standard integer types (`short`, `int`, `long`, `long long`, signed/unsigned) | `int32`/`int64`/`uint32`/`uint64` by size and sign | Prefer `<cstdint>` types across targets (`long` is 32-bit on Windows/Arm and 64-bit on Linux x86-64). |
+| `pb::sint32`, `pb::sint64`, `pb::wire_int<T, pb::int_encoding::ZIGZAG>` | `sint32` (1/2/4-byte signed `T`), `sint64` (8-byte signed `T`) | ZigZag varint; compact for negative numbers. Converts implicitly to and from `T`. |
+| `pb::fixed32`, `pb::fixed64`, `pb::sfixed32`, `pb::sfixed64` | `fixed32`, `fixed64`, `sfixed32`, `sfixed64` | Fixed 4- or 8-byte little-endian wire encoding. |
+| `float`, `double` | `float`, `double` | |
+| `enum`, `enum class` (up to 32 bits) | `enum` | `int32` on the wire. |
+| `std::string_view` | `string` | Zero-copy view into input on decode. |
+| `std::span<const std::uint8_t>` | `bytes` | Zero-copy view into input on decode. |
+| `pb::repeated<std::uint8_t, N>` | `bytes` | Copies up to `N` bytes into the struct. |
+| `std::array<std::uint8_t, N>` | `bytes` | Fixed length: encodes all `N` bytes; shorter input zero-pads; longer input fails with `CAPACITY_EXCEEDED`. |
+| `std::span<const std::uint8_t, N>` | `bytes` | Encode-only fixed-extent view. |
+| Aggregate `struct` | `message` | Nested message. |
+| `std::optional<T>` | `optional T` | Explicit presence. |
+| `std::variant<std::monostate, A, B, ...>` | `oneof` | Each alternative must have a distinct type. |
+| `pb::repeated<T, N>` | `repeated T` | Fixed capacity `N` inside the struct. |
+| `std::span<const T>` | `repeated T` | Variable length; decodes into `pb::arena`. |
+| `std::array<T, N>` (`T` not `uint8_t`) | `repeated T` | Encode-only fixed array of `N` elements. |
+
+Plain `char`, `wchar_t`, `char8_t`, `char16_t`, `char32_t`, `__int128`, pointers, and `volatile` types do not compile (`pb: unmapped_type`). `const` members compile for `encode` and `encoded_size`, and fail at compile time in `decode` (`pb: decode_const_member`).
+
+### Presence on encode
+
+| Member | Written on the wire when |
+| --- | --- |
+| Scalar, `string`, `bytes` (`span` or `pb::repeated`) | Value is non-zero or non-empty (`-0.0` is non-zero) |
+| `std::array<std::uint8_t, N>` (`FIXED_BYTES`) | `N > 0` (writes all `N` bytes) |
+| Nested `struct` | Always |
+| `std::optional<T>` | Engaged (including zero or empty values) |
+| `std::variant` | An alternative other than `std::monostate` is active |
+| Repeated field | Element count is at least 1 (scalars are always packed) |
+
+### `pb::arena` details
+
+* Before allocating, `decode` scans the remaining message bytes to count all elements of that `std::span<const T>` field, then allocates one aligned contiguous block.
+* Multiple `decode` calls can share one `pb::arena`. `memory.clear()` resets usage to 0 and invalidates previously decoded spans.
+* If space is insufficient, `decode` returns `pb::error::ARENA_FULL` without writing out of bounds.
+* If a non-canonical sender splits one nested submessage across multiple wire records and appends repeated elements in both, `decode` allocates a larger block and copies prior elements; the earlier block stays used until `clear()`.
+* Element types in `std::span<const T>` must be trivially copyable and trivially destructible (`pb: span_element_trivial`).
+
+## Generate headers from `.proto`
+
+`tools/protoc-gen-micropb.py` requires Python 3.8+ and `protoc` (no `protobuf` Python package). On Windows, pass `tools\protoc-gen-micropb.bat` to `--plugin`.
+
+```sh
+protoc --plugin=protoc-gen-micropb=tools/protoc-gen-micropb.py \
+       --micropb_out=gen --micropb_opt=options_dir=proto \
+       -I proto proto/app.proto
+```
+
+### Naming and layout rules
+
+* `package a.b;` maps to `namespace a::b`.
+* Nested definitions flatten with underscores: `Outer.Inner` becomes `Outer_Inner`.
+* C++ keywords, `pb`, `std`, and common C macros (`NULL`, `EOF`, `errno`, `stdin`, `stdout`, `stderr`, `assert`, `offsetof`) receive a trailing `_`.
+* Enumerator prefixes matching `<ENUM_NAME>_` (case-insensitive) are stripped when every value in the enum has the prefix and the remainder starts with a letter (`MODE_IDLE` -> `Mode::IDLE`).
+* Structs are emitted in dependency order. Unused `import` statements emit no `#include`.
+
+### `.options` reference
+
+The plugin searches for `<stem>.options` relative to the current directory first, then in each `--micropb_opt=options_dir=<dir>`. Wildcards `*` and `?` are supported (`* max_count:8`); later matching lines override earlier ones.
+
+| Option | Target | Generated C++ type |
+| --- | --- | --- |
+| `max_count:N` | `repeated` | `pb::repeated<T, N>` |
+| `max_count:N fixed_count:true` | `repeated` | `std::array<T, N>` (encode-only) |
+| `max_size:N` | `bytes` | `pb::repeated<std::uint8_t, N>` |
+| `max_size:N fixed_length:true` | `bytes` | `std::array<std::uint8_t, N>` |
+| `type:FT_POINTER` | `repeated` or `bytes` | `std::span<const T>` or `std::span<const std::uint8_t>` (overrides wildcard `max_count`/`max_size`) |
+| `type:FT_STATIC`, `type:FT_DEFAULT` | `repeated`, `bytes`, `string` | Uses the other options on the field |
+| `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `int32`, `int64`, `uint32`, `uint64`, `sint32`, `sint64` | Narrow/wide `<cstdint>` integer or `pb::wire_int<std::intN_t, pb::int_encoding::ZIGZAG>` |
+| `enum_intsize:IS_8`, `IS_16`, `IS_32` | `enum` | `enum class E : std::intN_t` (fails generation if a `.proto` enumerator does not fit) |
+
+Inline `.proto` annotations such as `[(nanopb).max_size = 6]` are not read. Unknown options and unmatched patterns print warnings to `stderr`. The plugin rejects proto2/editions files, `map` fields, recursive messages, duplicate C++ types inside one `oneof`, `int_size:IS_8` on repeated unsigned integers, and `enum_intsize:IS_64`. Services, `extend` blocks, and `[packed = false]` are ignored.
 
 ## Errors
 
-`pb::error` is an `enum class`. `encode` and `decode` return it in a `std::expected`.
-
-| Error | From | Meaning |
+| `pb::error` | Returned by | Cause |
 | --- | --- | --- |
-| `BUFFER_TOO_SMALL` | encode | The output span is too short. |
-| `TRUNCATED` | decode | The input ends in a field, or a length is larger than the remaining input. |
-| `INVALID_VARINT` | decode | A varint is longer than 10 bytes or has more than 64 bits. |
-| `INVALID_WIRE_TYPE` | decode | A key has the wire type 3, 4, 6 or 7. Groups are not supported. |
-| `INVALID_TAG` | decode | A key has the field number 0, or a field number above 2^29 - 1. |
-| `CAPACITY_EXCEEDED` | decode | A field has more elements or bytes than its container holds. The decoder examines the capacity before it reads the next element. |
-| `ARENA_FULL` | decode | The `pb::arena` has no space for the items of a `std::span<const T>` repeated field. |
+| `BUFFER_TOO_SMALL` | `encode` | Output span cannot hold the encoded message. |
+| `TRUNCATED` | `decode` | Input ends mid-field, or a length prefix exceeds remaining bytes. |
+| `INVALID_VARINT` | `decode` | Varint exceeds 10 bytes or 64 bits. |
+| `INVALID_WIRE_TYPE` | `decode` | Wire type is 3, 4, 6, or 7. |
+| `INVALID_TAG` | `decode` | Field number is 0 or exceeds 2^29 - 1. |
+| `CAPACITY_EXCEEDED` | `decode` | Input has more elements or bytes than `pb::repeated` or `std::array` holds. |
+| `ARENA_FULL` | `decode` | `pb::arena` lacks space for a `std::span<const T>` repeated field. |
 
 ## Compile-time checks
 
-A message that the codec cannot handle correctly does not compile. Each error is a `static_assert` with a message that starts with `pb: <rule>:`.
+Invalid schemas fail compilation with `static_assert` diagnostics prefixed by `pb: <rule>:`.
 
-**Field numbers**
-
-| Rule | Cause |
+| Category | Rules |
 | --- | --- |
-| `duplicate_tag` | Two fields have the same field number. |
-| `tag_zero` | A field number is 0. |
-| `tag_too_large` | A field number is above 2^29 - 1. |
-| `tag_reserved` | A field number is from 19000 to 19999, which protobuf reserves. |
+| Field numbers | `tag_zero` (0), `tag_too_large` (> 2^29 - 1), `tag_reserved` (19000–19999), `duplicate_tag` |
+| Message & member types | `not_aggregate`, `member_offset_too_large` (> 65535), `unmapped_type`, `zigzag_unsigned`, `enum_too_wide` (> 32 bits), `recursive_message`, `span_element_trivial` |
+| Invalid nesting | `monostate_member`, `variant_no_monostate`, `variant_duplicate_alternative`, `variant_repeated_alternative`, `variant_optional_alternative`, `variant_variant_alternative`, `optional_repeated`, `optional_optional`, `optional_variant`, `repeated_repeated`, `repeated_optional`, `repeated_variant` |
+| Field lists | `no_field_list`, `field_list_type`, `field_list_offset`, `field_list_alternative`, `field_list_overlap` |
+| Decode-only constraints | `decode_encode_only` (`std::array` repeated), `decode_fixed_span` (static-extent `std::span`), `decode_needs_arena`, `decode_const_member` |
 
-**Message types**
+## Framing and PC tools
 
-| Rule | Cause |
-| --- | --- |
-| `not_aggregate` | A message is not a class aggregate. |
-| `member_offset_too_large` | A member is at an offset above 65535 bytes. |
-| `unmapped_type` | A member type has no proto3 mapping, for example `char`, `volatile int` or a pointer. |
-| `zigzag_unsigned` | A `pb::wire_int<T, pb::int_encoding::ZIGZAG>` has an unsigned `T`. |
-| `enum_too_wide` | An enum is wider than 32 bits. |
-| `recursive_message` | A message contains itself, directly or through other messages, for example in a `std::span<const T>`. `decode` would have no limit for the stack. |
-| `span_element_trivial` | The element of a `std::span<const T>` repeated field is not trivially copyable or not trivially destructible, for example a message with a destructor. |
+Protobuf messages are not self-delimiting on a byte stream. Frame each packet on serial or radio links, for example with a varint/fixed length prefix or COBS plus a CRC, then pass the framed payload span to `pb::decode`.
 
-**Combinations that proto3 does not have**
-
-| Rule | Cause |
-| --- | --- |
-| `variant_no_monostate` | The first alternative of a `std::variant` is not `std::monostate`. |
-| `monostate_member` | `std::monostate` is used in a different place. |
-| `variant_duplicate_alternative` | Two alternatives of a `std::variant` have the same type. |
-| `variant_repeated_alternative`, `variant_optional_alternative`, `variant_variant_alternative` | An alternative is a repeated field, a `std::optional` or a `std::variant`. |
-| `optional_repeated`, `optional_optional`, `optional_variant` | The value of a `std::optional` is a repeated field, a `std::optional` or a `std::variant`. |
-| `repeated_repeated`, `repeated_optional`, `repeated_variant` | The element of a repeated field is a repeated field, a `std::optional` or a `std::variant`. |
-
-**Field lists**
-
-| Rule | Cause |
-| --- | --- |
-| `no_field_list` | The message type has no `pb::fields_of`. |
-| `field_list_type` | `pb::fields_of<T>` derives from the `pb::field_list` of a different type. |
-| `field_list_offset` | The offset of a `pb::field_at` is not in the message. Use `offsetof`. |
-| `field_list_alternative` | A `std::variant` member does not have one entry for each alternative with its index, or a different member has an index. |
-| `field_list_overlap` | Two entries name the same member. |
-
-**Decode only**
-
-| Rule | Cause |
-| --- | --- |
-| `decode_encode_only` | A repeated field is in a `std::array`. |
-| `decode_fixed_span` | A bytes or repeated field is in a `std::span` with a static extent. |
-| `decode_needs_arena` | `decode` without a `pb::arena` for a message with a `std::span<const T>` repeated field, also in a nested message. |
-| `decode_const_member` | A message has a `const` member, a sequence of `const` elements, or a `const` alternative in a `std::variant`. Such a message compiles for `encode`. |
-
-## Talk to a PC tool
-
-`micropb` writes and reads one message. It does not find the start and the end of a message in a stream of bytes. Your code must frame the messages, for example with a length before each message, or with COBS and a checksum.
-
-The PC tool uses Google protobuf (Python, C#, C++ or a different language) with the same `.proto` file. With generated structs, use the `.proto` file that the plugin read. With structs that you wrote, write the `.proto` file by hand with the field numbers of `pb::fields_of`.
+On the PC side, compile the same `.proto` file with standard `protoc` (`--python_out`, `--csharp_out`, `--cpp_out`) and exchange raw protobuf payloads directly.
 
 ## Code size
 
-The interpreter has a fixed size. Each message type adds only tables and the small accessor functions of its `std::optional` and `std::variant` members.
+`cmake --build .build --target size_report` compiles one translation unit (`-Os`, GCC 16.2, x86-64) that encodes and decodes an envelope `oneof` containing 16 or 32 distinct 8-field message types:
 
-`cmake --build .build --target size_report` builds one object file that encodes and decodes one envelope message with 16 and with 32 message types as `oneof` alternatives. Each message type has 8 fields of mixed types. The numbers include the code, the constants and the tables (GCC 16.2, `-Os`, x86-64):
+| Configuration | MSYS2 UCRT64 (bytes) | Linux x86-64 with `.eh_frame` (bytes) |
+| --- | ---: | ---: |
+| 16 message types | 9,920 | 10,669 |
+| 32 message types | 14,256 | 15,036 |
+| Each additional 8-field type | 271 | 272 |
 
-| Message types | Bytes |
-| ---: | ---: |
-| 16 | 9920 |
-| 32 | 14256 |
-| each more type | 271 |
-
-The first design of this library made one template copy of the codec for each message type: 35490 bytes for 32 message types, about 940 bytes for each more type. The price of the interpreter is speed, which is not important for a serial link.
-
-The numbers are from a PC (MSYS2 UCRT64; on Linux x86-64 with `.eh_frame`: 10669 and 15036 bytes, 272 bytes for each more type). No measurement on Arm is available.
+For comparison, instantiating a separate template codec per message type required 35,490 bytes at 32 message types (~940 bytes per additional type). Arm hardware size measurements are not yet recorded.
 
 ## Build and test
 
@@ -538,85 +423,46 @@ cmake --build .build
 ctest --test-dir .build --output-on-failure
 ```
 
-On Windows with MSYS2 UCRT64, add `-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe`, and put `C:\msys64\ucrt64\bin` in `PATH`: the test programs need the libstdc++ DLL from that folder.
-
-The tests use `-std=c++23 -fno-exceptions -fno-rtti -Wall -Wextra -Werror`.
-
-| Tests | What they examine |
-| --- | --- |
-| `test_wire`, `test_types`, `test_schema` | wire primitives, containers and type rules (`static_assert`) |
-| `test_codec` | the descriptor tables, and one message with each kind of member |
-| `test_encode`, `test_decode` | `encode` and `decode` against the reference vectors |
-| `test_wire_compat` | round trips, each prefix and each single changed byte of each vector |
-| `test_generated` | the headers that the plugin wrote, against bytes from `protoc` and against `messages.hpp` |
-| `test_field_list` | a field list that a person wrote |
-| `test_scalars` | the standard integer types and narrow ZigZag members |
-| `no_startup_code` | the tables need no code before `main()` (`nm`) |
-| `compile_fail.*` | each rule of [Compile-time checks](#compile-time-checks): the file must not compile, and the output must name the rule |
-| `generator` | the plugin: each rule, each option, each error (Python `unittest` through `protoc`) |
-
-### Arm tests
-
-When CMake finds `arm-none-eabi-g++` (in `PATH` and, on Windows, in `C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/*/bin`), it adds tests for each such compiler, named `arm_<compiler version>.<test>`:
-
-* the unit tests are compiled with `-std=c++23 -Os -mcpu=cortex-m4 -mthumb` and the flags above; nothing is linked or run;
-* `no_startup_code` with `arm-none-eabi-nm`;
-* `consumer` configures and builds `tests/consumer`, a small project that links the `micropb` target.
-
-`-DMICROPB_ARM_COMPILERS="<g++>;<g++>"` sets the compilers. `-DMICROPB_ARM_CPU=<cpu>` sets `-mcpu`.
-
-### Sanitizers
-
-The codec reads and writes members through byte offsets, so its tests cannot run in constant evaluation. `-DMICROPB_SANITIZE=ON` builds the tests with AddressSanitizer and UndefinedBehaviorSanitizer. On MinGW it uses `-fsanitize=undefined -fsanitize-undefined-trap-on-error`, because MinGW has no sanitizer run-time library.
-
-### Generated files
-
-The test `generator` runs only when CMake finds Python and `protoc`. It starts the plugin with `python -S`, without the installed packages. The tests find `protoc` in the environment variable `PROTOC`, in `PATH`, or in the Python package `grpcio-tools`. To use a specific Python, configure with `-DPython3_EXECUTABLE=<path>`.
-
-`tests/vectors/vectors.pb.hpp` and `tests/generator/*.pb.hpp` are generated and checked in, so `test_generated` does not need `protoc`. The test `generator` fails when one of them is not current. To write them again:
-
-```sh
-MICROPB_UPDATE_GENERATED=1 python tests/generator/test_plugin.py CheckedInTest
-```
-
-`tests/vectors/` holds `vectors.proto` and one `<message>.<case>.txtpb` file for each test case. `vectors.hpp` has the bytes that `protoc --encode` writes for them. `messages.hpp` has the C++ structs for `vectors.proto`. To write `vectors.hpp` again:
-
-```sh
-cmake -DPROTOC=C:/msys64/ucrt64/bin/protoc.exe -P tests/vectors/generate.cmake
-```
-
-The output has no timestamp and no absolute path. The script writes temporary files only to `.build/vectors/`.
+* **Windows (MSYS2 UCRT64):** pass `-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe` and put `C:\msys64\ucrt64\bin` first in `PATH`.
+* **Sanitizers:** configure with `-DMICROPB_SANITIZE=ON` to run tests under AddressSanitizer and UndefinedBehaviorSanitizer (`-fsanitize-undefined-trap-on-error` on MinGW).
+* **Arm cross-compile checks:** when `arm-none-eabi-g++` is in `PATH` (or installed under `C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/*/bin` on Windows, or passed via `-DMICROPB_ARM_COMPILERS`), CTest compiles all unit tests for `-mcpu=cortex-m4 -mthumb` (`-DMICROPB_ARM_CPU` overrides the CPU), verifies `no_startup_code` with `arm-none-eabi-nm`, and builds `tests/consumer`.
+* **Regenerate checked-in `.pb.hpp` test headers:**
+  ```sh
+  MICROPB_UPDATE_GENERATED=1 python3 tests/generator/test_plugin.py CheckedInTest
+  ```
+* **Regenerate `protoc` reference byte vectors (`tests/vectors/vectors.hpp`):**
+  ```sh
+  cmake -DPROTOC=protoc -P tests/vectors/generate.cmake
+  ```
 
 ## Repository layout
 
 ```text
 src/micropb/
-    micropb.hpp  include this header
-    types.hpp    pb::error, pb::repeated, pb::arena, pb::sint32 ..., pb::fields_of
-    wire.hpp     reader and writer for varints, fixed-width values and keys
-    schema.hpp   type rules, compile-time checks, field lists
-    codec.hpp    descriptor tables, interpreter, encoded_size, encode, decode
+    micropb.hpp   public umbrella header
+    types.hpp     pb::error, pb::repeated, pb::arena, pb::wire_int, pb::fields_of
+    wire.hpp      varint, fixed-width, and key reader/writer primitives
+    schema.hpp    proto3 type mapping and consteval schema validation
+    codec.hpp     ROM descriptors, non-template interpreter, encode/decode/encoded_size
 tools/
-    protoc-gen-micropb.py   protoc plugin: .proto file -> header with structs and field lists
-    protoc-gen-micropb.bat  starts the plugin on Windows
+    protoc-gen-micropb.py   zero-dependency Python 3 protoc plugin
+    protoc-gen-micropb.bat  Windows wrapper for protoc
 tests/
-    test_*.cpp       the tests
-    generator/       tests and test schemas of the protoc plugin
-    compile_fail/    one file for each compile-time rule
-    consumer/        a project that uses the micropb target, for the Arm tests
-    vectors/         reference vectors from protoc
-    size/            the source of the size report
-docs/superpowers/    design documents and implementation plans
+    test_*.cpp      unit, wire-compatibility, and fuzz-prefix/mutation tests
+    compile_fail/   one compile-fail target per pb: <rule>: diagnostic
+    generator/      plugin unit tests and checked-in generated headers
+    vectors/        .proto, .txtpb inputs, and protoc reference bytes
+    consumer/       standalone CMake consumer test for Arm toolchains
+    size/           16/32-message code-size benchmark
+docs/superpowers/   design specifications and implementation plans
 ```
 
 ## Status and limits
 
-* **Compilers:** GCC 16.2 on Linux, and on Windows from MSYS2 UCRT64. The Arm GNU Toolchain 13.3 and 14.2, and `arm-none-eabi` GCC 16.2 from MSYS2: compile only (`-mcpu=cortex-m4`), not run on a device and not measured. Clang is not tested: it does not know the attribute `gnu::noclone` of the codec and gives a warning. The MinGW variant of `MICROPB_SANITIZE` is not verified.
-* **`protoc` plugin:** tested with `protoc` 35.1 on Linux and 36.2 on Windows, with Python 3.13 and 3.14. On Windows, `tools/protoc-gen-micropb.bat` starts the first `python` in `PATH`.
-* **Not supported:** `map`, proto2, groups, `Any` and the other well-known types, JSON, streaming encode or decode. Unknown fields are skipped and not kept.
-* **Not `constexpr`:** `encode`, `decode` and `encoded_size` run only at run time.
-* **Message size:** each member must be at an offset of 65535 bytes or less in its struct.
-* **Recursion:** a message type cannot contain itself.
+* **Tested toolchains:** GCC 16.2 on Linux and Windows (MSYS2 UCRT64); compile-tested with Arm GNU Toolchain 13.3, 14.2, and 16.2 (`-mcpu=cortex-m4 -mthumb`, not yet executed on hardware); `protoc` 35.1 and 36.2 with Python 3.13 and 3.14. Clang currently warns on `[[gnu::noclone]]` in `codec.hpp`.
+* **Out of scope:** proto2, editions, `map` fields, groups, well-known types (`Any`, `Timestamp`), JSON, unknown-field preservation, and streaming I/O.
+* **Runtime-only codec:** `encode`, `decode`, and `encoded_size` read members via byte offsets and cannot run in `constexpr` evaluation.
+* **Limits:** member offsets must be 65535 bytes or less; recursive message definitions are rejected so stack depth stays bounded.
 
 ## License
 
