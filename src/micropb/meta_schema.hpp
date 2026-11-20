@@ -562,7 +562,7 @@ template <typename T>
 	{
 		constexpr field_kind kind = kind_of<T>();
 		if constexpr ( kind == field_kind::REPEATED )
-			return is_std_span<T> || needs_arena<element_t<T>>();
+			return ( is_std_span<T> && !is_fixed_span<T> ) || needs_arena<element_t<T>>();
 		else if constexpr ( kind == field_kind::OPTIONAL )
 			return needs_arena<typename T::value_type>();
 		else if constexpr ( kind == field_kind::ONEOF )
@@ -668,7 +668,7 @@ consteval void check_decodable()
 			               "to decode" );
 			static_assert( !is_fixed_span<T>,
 			               "pb: decode_fixed_span: a std::span with a static extent is encode-only, "
-			               "use std::span<const std::uint8_t> or std::array to decode" );
+			               "use std::span<const T> or pb::repeated to decode" );
 			check_decodable<element_t<T>>();
 		}
 		else if constexpr ( kind == field_kind::BYTES )
