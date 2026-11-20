@@ -157,7 +157,14 @@ bool test_sequence_accessor()
 		return false;
 
 	*b.stored_count = 3;
-	return buffer.size() == 3 && view_desc.element_size == 4 && buffer_desc.storage == d::sequence_storage::ACCESSOR;
+	if ( buffer.size() != 3 || view_desc.element_size != 4 || buffer_desc.storage != d::sequence_storage::ACCESSOR )
+		return false;
+
+	// Only a `std::span<const T>` has a binder: `decode` sets it to a block in the arena.
+	std::array<std::int32_t, 2> block{ 5, 6 };
+	view_desc.bind( &view, block.data(), 2 );
+	return view.data() == block.data() && view.size() == 2 && view_desc.element_align == alignof( std::int32_t ) &&
+	       buffer_desc.bind == nullptr && d::value_descriptor<pb::repeated<float, 4>>::value.sequence->bind == nullptr;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

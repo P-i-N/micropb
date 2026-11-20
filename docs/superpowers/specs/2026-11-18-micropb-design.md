@@ -209,3 +209,13 @@ Each stage is a separate, reviewable change.
 * Internal names and the structure of the field table.
 * How `wire.hpp` represents the reader and writer cursors.
 * The CMake target layout, within the files above.
+
+## Changes: arena spans
+
+`2026-11-20-arena-spans-design.md` changes the public API, the type mapping and the decode semantics of this document:
+
+* `decode( in, msg, arena& memory )` decodes a `std::span<const T>` repeated field: the items of each field are in one block of the `pb::arena`. `decode( in, msg )` is only for a message without such a field, also not in a nested message (rule `decode_needs_arena`).
+* New error `ARENA_FULL`: the arena has no space for the items of a field.
+* `std::span<const T>` as a repeated field decodes, with an arena. `std::array<T, N>` stays encode-only (`decode_encode_only`). A `std::span` with a static extent stays encode-only (`decode_fixed_span`), now also for a repeated field.
+* After `decode`, `msg` points into `in` and into the arena. Both must stay valid while `msg` is in use.
+* A nested message that occurs more than once still merges: its span field gets a new block with the old items and the new items. The old block stays used until `clear()`.

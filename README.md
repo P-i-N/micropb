@@ -37,7 +37,7 @@ const auto size = pb::encode(ping{7}, buffer); // 08 07
 
 * **Three functions:** `pb::encode`, `pb::decode` and `pb::encoded_size`.
 * **Small code:** one interpreter encodes and decodes all message types. Each more message type adds a constant table, not a copy of the codec.
-* **No heap, no exceptions, no RTTI.** Errors are `std::expected` values. All storage is in your structs or in buffers that you supply.
+* **No heap, no exceptions, no RTTI.** Errors are `std::expected` values. All storage is in your structs or in buffers that you supply, for example a `pb::arena` for the items of repeated fields.
 * **Zero-copy decode** of strings and bytes: a `std::string_view` or a `std::span` points into the input buffer.
 * **Same bytes as `protoc`.** The tests compare the output with reference vectors from the Google C++ runtime.
 * **Mistakes are compile errors.** A duplicate field number or a type without a proto3 mapping does not compile.
@@ -151,6 +151,7 @@ A message is a class aggregate: only public data members, no base class, no cons
 | `std::optional<T>` | `optional T` | Explicit presence. |
 | `std::variant<std::monostate, A, B>` | `oneof` | `std::monostate` means that no alternative is set. |
 | `pb::repeated<T, N>` | `repeated T` | See [Repeated fields](#repeated-fields). |
+| `std::span<const T>` | `repeated T` | Decode puts the items in a `pb::arena`. See [Repeated fields](#repeated-fields). |
 
 Plain `char`, the character types (`wchar_t`, `char8_t`, `char16_t`, `char32_t`), `__int128` and `volatile` members do not compile. Use the fixed-width types of `<cstdint>` when the `.proto` file must be the same for each target: `std::int32_t` is `int` on a PC, but `long` on `arm-none-eabi`.
 
@@ -210,9 +211,9 @@ Scalar elements are packed. Strings, bytes and messages are one field for each e
 | Container | Storage | Decode |
 | --- | --- | --- |
 | `pb::repeated<T, N>` | in the struct, up to `N` elements | yes |
+| `std::span<const T>` | a view of your data; after decode, a block in a `pb::arena` | yes, with a `pb::arena` |
 | `pb::span_buffer<T>` | a span that you supply | yes |
 | `std::array<T, N>` | in the struct, always `N` elements | no |
-| `std::span<const T>` | a view of your data | no |
 
 `pb::repeated<T, N>` has `push_back` (returns `false` when it is full), `size`, `capacity`, `empty`, `clear`, `operator[]`, `begin` and `end`.
 
@@ -229,6 +230,28 @@ const auto result = pb::decode(input, received);
 ```
 
 A `pb::span_buffer` cannot be in a `std::optional`, in a `std::variant`, or in the element of a repeated field: use `pb::repeated` there.
+
+A `std::span<const T>` repeated field has no size limit in the struct. `decode` puts its items in a `pb::arena`, a memory area that you supply, and sets the span to them. This also works in a nested message, in a `std::optional`, in a `oneof` alternative and in the element of a repeated field:
+
+```cpp
+struct samples {
+    std::span<const std::int32_t> values;
+    std::span<const pose> poses;
+};
+
+std::array<std::uint8_t, 1024> storage{};
+pb::arena memory(storage);
+samples received{};
+const auto result = pb::decode(input, received, memory);
+```
+
+* The items of one field are in one contiguous block. Before `decode` takes the block, it counts the elements of the field in the message.
+* `decode` does not free a block. More than one message can use one arena. `memory.clear()` frees all blocks: then each message that `decode` wrote with this arena is not valid.
+* When the arena is too small, `decode` returns `ARENA_FULL`. It never writes outside the arena.
+* `memory.used()` gives the bytes that the blocks use. The use depends on the content of the message. The order of the fields on the wire changes only the alignment padding between the blocks. Measure `used()` with the largest message that you expect, and add a margin.
+* A nested message that occurs two times in one message (`protoc` does not write this) gets a new block with a copy of the old items. The old block stays used until `clear()`.
+* The element type must be trivially copyable and trivially destructible: the arena never calls a destructor.
+* `std::span<const std::span<const std::uint8_t>>` is `repeated bytes`: the block in the arena holds the views, and the views point into the input.
 
 ### Bytes
 
@@ -347,13 +370,13 @@ The plugin reads sizes from `<name>.options`, in the format of NanoPB options fi
 | `max_size:N fixed_length:true` | a `bytes` field | `std::array<std::uint8_t, N>` |
 | `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `int32`, `int64`, `uint32`, `uint64` | `std::int8_t` ... `std::uint64_t`, with the sign of the field |
 | `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `sint32`, `sint64` | `pb::wire_int<std::intN_t, pb::int_encoding::ZIGZAG>`; `pb::sint32` for `IS_32`, `pb::sint64` for `IS_64` |
-| `type:FT_POINTER` | a repeated field | `std::span<const T>` (encode only), no `max_count` |
+| `type:FT_POINTER` | a repeated field | `std::span<const T>`, no `max_count` |
 | `type:FT_POINTER` | a `bytes` field | `std::span<const std::uint8_t>`, also when a wildcard line sets `max_size` |
 | `type:FT_STATIC`, `type:FT_DEFAULT` | a repeated, `bytes` or `string` field | the result of the other options |
 | `enum_intsize:IS_8`, `IS_16`, `IS_32` | an enum | `enum class E : std::int8_t`, `std::int16_t` or `std::int32_t` (the default) |
 
 * The pattern is the name of the field: `package.Message.field`, or `Message.field` without the package. For `enum_intsize` it is the name of the enum. `*` and `?` are wildcards: `* max_count:8` sets a default for all fields.
-* `type:FT_POINTER` makes a member that points to your data: the message holds no copy. Use it for a message that the device only encodes. A message with a `std::span<const T>` repeated field does not compile for `decode` (`pb: decode_encode_only`). Other `type` values, for example `FT_CALLBACK`, are an error.
+* `type:FT_POINTER` makes a member that points to your data: the message holds no copy. A message with a `std::span<const T>` repeated field decodes only with a `pb::arena` (`pb: decode_needs_arena`). Other `type` values, for example `FT_CALLBACK`, are an error.
 * A narrow member saves RAM, not bytes on the wire. Decode truncates a value to the width of the member, also an enum value from a newer peer. An enum value that does not fit the type is an error when you generate the header.
 * `int_size` on a wildcard line also narrows each `sint32` and `sint64` field that it matches. Check an existing options file before you generate headers again.
 * When more than one line sets the same option for a field, the last line wins.
@@ -421,10 +444,13 @@ std::expected<std::size_t, pb::error> pb::encode(const T& msg, std::span<std::ui
 
 ```cpp
 template <typename T>
+std::expected<std::size_t, pb::error> pb::decode(std::span<const std::uint8_t> in, T& msg, pb::arena& memory);
+
+template <typename T>
 std::expected<std::size_t, pb::error> pb::decode(std::span<const std::uint8_t> in, T& msg);
 ```
 
-`decode` reads exactly one message from `in`. On success it returns `in.size()`.
+`decode` reads exactly one message from `in`. On success it returns `in.size()`. A message with a `std::span<const T>` repeated field, also in a nested message, needs the overload with a `pb::arena` (see [Repeated fields](#repeated-fields)). Without the arena, it does not compile (`pb: decode_needs_arena`).
 
 * It resets `msg` first. You can use the same object again for each message. A `pb::repeated` and a `pb::span_buffer` keep their storage and get the size 0.
 * It skips a field number that the message does not have, and a known field with a different wire type. Thus the other side can add fields, and old firmware continues to work.
@@ -432,11 +458,11 @@ std::expected<std::size_t, pb::error> pb::decode(std::span<const std::uint8_t> i
 * A repeated scalar field can be packed or not packed, also mixed in one message.
 * A varint that is too wide for the member loses its upper bits. A `bool` is `true` for each value that is not 0.
 * An enum value that the enum does not name is kept as its integer value.
-* On an error, `msg` holds the fields that were read before the error.
+* On an error, `msg` holds the fields that were read before the error. A `std::span<const T>` repeated field holds the items that were read before the error. The blocks that `decode` took stay used until `clear()`.
 * It does not examine whether a `string` field is correct UTF-8.
 
 > [!WARNING]
-> A `std::string_view` or a `std::span<const std::uint8_t>` in a decoded message points into the input buffer. Do not use it after the buffer changes or goes away.
+> A `std::string_view` or a `std::span<const std::uint8_t>` in a decoded message points into the input buffer. A `std::span<const T>` repeated field points into the arena. Do not use the message after the input buffer changes or goes away, or after `clear()` of the arena.
 
 ## Errors
 
@@ -450,6 +476,7 @@ std::expected<std::size_t, pb::error> pb::decode(std::span<const std::uint8_t> i
 | `INVALID_WIRE_TYPE` | decode | A key has the wire type 3, 4, 6 or 7. Groups are not supported. |
 | `INVALID_TAG` | decode | A key has the field number 0, or a field number above 2^29 - 1. |
 | `CAPACITY_EXCEEDED` | decode | A field has more elements or bytes than its container holds. The decoder examines the capacity before it reads the next element. |
+| `ARENA_FULL` | decode | The `pb::arena` has no space for the items of a `std::span<const T>` repeated field. |
 
 ## Compile-time checks
 
@@ -480,6 +507,7 @@ A message that the codec cannot handle correctly does not compile. Each error is
 | `zigzag_unsigned` | A `pb::wire_int<T, pb::int_encoding::ZIGZAG>` has an unsigned `T`. |
 | `enum_too_wide` | An enum is wider than 32 bits. |
 | `recursive_message` | A message contains itself, directly or through other messages, for example in a `std::span<const T>`. `decode` would have no limit for the stack. |
+| `span_element_trivial` | The element of a `std::span<const T>` repeated field is not trivially copyable or not trivially destructible, for example a message with a destructor. |
 
 **Combinations that proto3 does not have**
 
@@ -507,8 +535,9 @@ A message that the codec cannot handle correctly does not compile. Each error is
 
 | Rule | Cause |
 | --- | --- |
-| `decode_encode_only` | A repeated field is in a `std::array` or a `std::span<const T>`. |
-| `decode_fixed_span` | A bytes field is in a `std::span` with a static extent. |
+| `decode_encode_only` | A repeated field is in a `std::array`. |
+| `decode_fixed_span` | A bytes or repeated field is in a `std::span` with a static extent. |
+| `decode_needs_arena` | `decode` without a `pb::arena` for a message with a `std::span<const T>` repeated field, also in a nested message. |
 | `decode_const_member` | A message has a `const` member. A `const` member compiles for `encode`. |
 
 ## Talk to a PC tool
@@ -525,8 +554,8 @@ The interpreter has a fixed size. Each message type adds only tables and the sma
 
 | Message types | Bytes |
 | ---: | ---: |
-| 16 | 9400 |
-| 32 | 13736 |
+| 16 | 10520 |
+| 32 | 14856 |
 | each more type | 271 |
 
 The first design of this library made one template copy of the codec for each message type: 35490 bytes for 32 message types, about 940 bytes for each more type. The price of the interpreter is speed, which is not important for a serial link.
@@ -597,7 +626,7 @@ The output has no timestamp and no absolute path. The script writes temporary fi
 ```text
 src/micropb/
     micropb.hpp      include this header
-    types.hpp        pb::error, pb::repeated, pb::span_buffer, pb::sint32 ..., pb::tag, pb::oneof_tags
+    types.hpp        pb::error, pb::repeated, pb::span_buffer, pb::arena, pb::sint32 ..., pb::tag, pb::oneof_tags
     wire.hpp         reader and writer for varints, fixed-width values and keys
     meta_schema.hpp  type rules, compile-time checks, field lists from reflection
     codec.hpp        descriptor tables, interpreter, encoded_size, encode, decode

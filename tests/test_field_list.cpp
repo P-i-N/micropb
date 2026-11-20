@@ -55,6 +55,13 @@ struct constants
 	const std::string_view name;
 };
 
+/// Repeated fields as spans: `decode` puts their items in a `pb::arena`.
+struct spans
+{
+	std::span<const inner> items;
+	std::span<const float> values;
+};
+
 /// A message that contains itself. The codec rejects it (`recursive_message`).
 struct tree
 {
@@ -139,6 +146,13 @@ struct pb::fields_of<manual::constants>
 {};
 
 template <>
+struct pb::fields_of<manual::spans>
+  : pb::field_list<manual::spans,
+                   pb::field_at<decltype( manual::spans::items ), 1, offsetof( manual::spans, items )>,
+                   pb::field_at<decltype( manual::spans::values ), 2, offsetof( manual::spans, values )>>
+{};
+
+template <>
 struct pb::fields_of<manual::tree>
   : pb::field_list<manual::tree,
                    pb::field_at<decltype( manual::tree::id ), 1, offsetof( manual::tree, id )>,
@@ -199,6 +213,9 @@ static_assert( !d::is_recursive<manual::forest>() );
 static_assert( d::is_recursive<manual::opt_node>() && d::is_recursive<manual::opt_link>() );
 static_assert( d::is_recursive<manual::var_node>() && d::is_recursive<manual::var_link>() );
 
+static_assert( d::needs_arena<manual::spans>() && !d::needs_arena<manual::message>() &&
+               !d::needs_arena<manual::inner>() && !d::needs_arena<manual::empty>() );
+
 #if defined( __cpp_impl_reflection )
 // The list that reflection makes from the struct is the same type as the list above.
 static_assert( std::is_same_v<d::reflected_fields<manual::inner>, d::field_list_of<manual::inner>> );
@@ -206,6 +223,7 @@ static_assert( std::is_same_v<d::reflected_fields<manual::message>, d::field_lis
 static_assert( std::is_same_v<d::reflected_fields<manual::empty>, d::field_list_of<manual::empty>> );
 static_assert( std::is_same_v<d::reflected_fields<manual::fixed>, d::field_list_of<manual::fixed>> );
 static_assert( std::is_same_v<d::reflected_fields<manual::constants>, d::field_list_of<manual::constants>> );
+static_assert( std::is_same_v<d::reflected_fields<manual::spans>, d::field_list_of<manual::spans>> );
 #endif
 
 template <typename T, std::size_t N>
@@ -255,6 +273,28 @@ bool test_decode_message_alternative()
 	return size && first && first->x == 3 && first->label == "b";
 }
 
+/// `encode`, `decode` with an arena, and `encode` again give the same bytes.
+bool test_decode_spans()
+{
+	const std::array<manual::inner, 2> items{ manual::inner{ 1, "a" }, { 2, {} } };
+	const std::array<float, 3> values{ 1.0f, -2.5f, 0.0f };
+	std::array<std::uint8_t, 64> wire{};
+	const auto size = pb::encode( manual::spans{ items, values }, std::span<std::uint8_t>( wire ) );
+	if ( !size )
+		return false;
+
+	std::array<std::uint8_t, 256> storage{};
+	pb::arena memory( storage );
+	manual::spans message{};
+	const auto decoded = pb::decode( std::span<const std::uint8_t>( wire ).first( *size ), message, memory );
+	std::array<std::uint8_t, 64> again{};
+	const auto resized = pb::encode( message, std::span<std::uint8_t>( again ) );
+	return decoded && *decoded == *size && message.items.size() == 2 && message.items[0].x == 1 &&
+	       message.items[0].label == "a" && message.items[1].x == 2 && message.items[1].label.empty() &&
+	       message.values.size() == 3 && message.values[0] == 1.0f && message.values[1] == -2.5f &&
+	       message.values[2] == 0.0f && resized && *resized == *size && again == wire;
+}
+
 bool test_encode_only()
 {
 	const manual::fixed fixed{ { 1.0f, 2.0f }, { 3, {} } };
@@ -273,7 +313,7 @@ bool test_const_members()
 
 int main()
 {
-	const bool ok =
-	  test_encode() && test_decode() && test_decode_message_alternative() && test_encode_only() && test_const_members();
+	const bool ok = test_encode() && test_decode() && test_decode_message_alternative() && test_decode_spans() &&
+	                test_encode_only() && test_const_members();
 	return ok ? 0 : 1;
 }

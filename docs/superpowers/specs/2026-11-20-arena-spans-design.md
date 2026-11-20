@@ -203,3 +203,14 @@ The structs of `tests/size/size_report.cpp` keep `pb::repeated`, so the numbers 
 * The names of the internal functions and the place of the count function in `codec.hpp`.
 * Whether `std::array<T, N>` with a scalar or message element stays encode-only or also decodes. Not asked for; the default is no change.
 * The order of the commits: a `refac` commit for the arena type alone is possible before the functional commit.
+
+## Changes during the implementation
+
+* **Size report** (GCC 16.2, `-Os`, x86-64, the structs with `pb::repeated`): 16 types 9400 -> 10520 bytes, 32 types 13736 -> 14856 bytes, one more type 271 -> 271 bytes. The count, the new block and the copy cost 1120 bytes; the code is in each program that decodes, also without a span field. The target for 32 types (15000 bytes) has 144 bytes left.
+* **Size with spans:** the same structs with `std::span<const T>` for each `pb::repeated<T, N>` whose `T` is not `std::uint8_t`, decoded with an arena: 16 types 10564 bytes, 32 types 14404 bytes, one more type 240 bytes. The arena storage is not in these numbers.
+* **The check for the record:** for each record of a span field, `decode` counts the elements of the record and compares the count with the free items of the block. Only when they do not fit, it counts the field to the end of the message.
+* **Block header:** the capacity is in the last bytes of a header of `max( sizeof( std::size_t ), alignof( T ) )` bytes, rounded up to the alignment. For an element of 1 byte, the header is 8 bytes on x86-64 and 4 bytes on Arm.
+* **New rule `span_element_trivial`:** the `static_assert` in the descriptor that the element is trivially copyable and trivially destructible has a rule name and a test in `tests/compile_fail/`. A message type with a destructor is an aggregate, so a mapped type can fail this rule. The descriptor is also used by `encode`, so the rule applies also to `encode`.
+* **`decode_fixed_span`** now also rejects a repeated field in a `std::span` with a static extent. Before, `decode_encode_only` rejected it.
+* **A varint without an end in a packed record:** a span field gives `TRUNCATED` (the block is full before the read). A `pb::repeated` field gives the error of the reader, for example `INVALID_VARINT` for more than 10 bytes.
+* `pb::span_buffer` and its rules stay until the next task of the plan.

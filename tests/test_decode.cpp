@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -156,6 +157,87 @@ struct nested_sink
 	inner head;
 	sink body;
 };
+
+/// Repeated fields as spans: `decode` puts their items in a `pb::arena`.
+struct arena_lists
+{
+	std::span<const std::int32_t> ints;
+	std::span<const std::string_view> names;
+	std::span<const float> floats;
+};
+
+struct arena_items
+{
+	std::span<const arena_lists> items;
+};
+
+struct arena_holder
+{
+	arena_lists child;
+};
+
+struct arena_choices
+{
+	std::optional<arena_lists> maybe;
+	std::variant<std::monostate, arena_lists, std::uint32_t> choice;
+};
+
+struct arena_aligned
+{
+	std::span<const std::int8_t> small;
+	std::span<const double> wide;
+};
+
+struct byte_lists
+{
+	std::span<const std::span<const std::uint8_t>> blobs;
+};
+
+static_assert( !detail::needs_arena<ints_only>() && !detail::needs_arena<lists>() && !detail::needs_arena<text>() &&
+               !detail::needs_arena<int_buffer>() && !detail::needs_arena<envelope_owned>() );
+static_assert( detail::needs_arena<arena_lists>() && detail::needs_arena<arena_items>() &&
+               detail::needs_arena<arena_holder>() && detail::needs_arena<arena_choices>() &&
+               detail::needs_arena<byte_lists>() );
+
+inline constexpr std::size_t canary_size = 16;
+inline constexpr std::uint8_t canary = 0xA5;
+
+/// Storage of a `pb::arena` of `size` bytes, `offset` bytes after an address that is aligned for each type. The
+/// 16 canary bytes (0xA5) after the arena storage must not change.
+struct guarded
+{
+	explicit guarded( std::size_t size, std::size_t offset = 0 ) : _first( offset ), _size( size )
+	{
+		std::fill_n( _bytes.begin() + offset + size, canary_size, canary );
+	}
+
+	[[nodiscard]] pb::arena memory() { return pb::arena( std::span( _bytes ).subspan( _first, _size ) ); }
+
+	[[nodiscard]] bool intact() const
+	{
+		const auto* first = _bytes.data() + _first + _size;
+		return std::all_of( first, first + canary_size, []( std::uint8_t b ) { return b == canary; } );
+	}
+
+	/// `true` when `data` points into the arena storage.
+	[[nodiscard]] bool holds( const void* data ) const
+	{
+		const auto address = reinterpret_cast<std::uintptr_t>( data );
+		const auto first = reinterpret_cast<std::uintptr_t>( _bytes.data() + _first );
+		return address >= first && address < first + _size;
+	}
+
+private:
+	alignas( std::max_align_t ) std::array<std::uint8_t, 1024> _bytes{};
+	std::size_t _first;
+	std::size_t _size;
+};
+
+template <typename T, std::size_t N>
+bool holds_items( std::span<const T> items, const std::array<T, N>& expected )
+{
+	return std::equal( items.begin(), items.end(), expected.begin(), expected.end() );
+}
 
 /// Bytes of one varint field.
 struct varint_field
@@ -657,6 +739,262 @@ bool test_fixed_bytes_last_wins()
 	return decode( bytes_of( in ), message ) && message.mac == expected;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+/// `ints: [1, 2] names: "a" floats: [1]`
+constexpr auto arena_wire =
+  std::to_array<std::uint8_t>( { 0x0a, 0x02, 0x01, 0x02, 0x12, 0x01, 'a', 0x1a, 0x04, 0x00, 0x00, 0x80, 0x3f } );
+
+/// An arena of exactly `used()` bytes decodes the message. One byte less is `ARENA_FULL`.
+bool test_arena_exact()
+{
+	guarded measure_storage( 512 );
+	pb::arena measure = measure_storage.memory();
+	arena_lists a{};
+	if ( !decode( bytes_of( arena_wire ), a, measure ) )
+		return false;
+
+	const std::size_t used = measure.used();
+	guarded exact_storage( used );
+	pb::arena exact = exact_storage.memory();
+	arena_lists b{};
+	const auto fits = decode( bytes_of( arena_wire ), b, exact );
+
+	guarded small_storage( used - 1 );
+	pb::arena small = small_storage.memory();
+	arena_lists c{};
+	const auto full = decode( bytes_of( arena_wire ), c, small );
+	return fits && *fits == arena_wire.size() && exact.used() == used &&
+	       holds_items( b.ints, std::to_array<std::int32_t>( { 1, 2 } ) ) &&
+	       holds_items( b.names, std::to_array<std::string_view>( { "a" } ) ) &&
+	       holds_items( b.floats, std::to_array<float>( { 1.0f } ) ) && !full && full.error() == error::ARENA_FULL &&
+	       measure_storage.intact() && exact_storage.intact() && small_storage.intact();
+}
+
+/// The records of two span fields mixed, and packed and unpacked records of one field mixed. Each field gets
+/// one block: the arena use is that of the same message with one record for each field.
+bool test_arena_mixed_records()
+{
+	// ints: [1, 2] names: "a" ints: 3 names: "" ints: [4] names: "bc" ints: 5
+	constexpr auto in = std::to_array<std::uint8_t>( { 0x0a, 0x02, 0x01, 0x02, 0x12, 0x01, 'a', 0x08, 0x03, 0x12,
+	                                                   0x00, 0x0a, 0x01, 0x04, 0x12, 0x02, 'b', 'c',  0x08, 0x05 } );
+	// ints: [1, 2, 3, 4, 5] names: "a" names: "" names: "bc"
+	constexpr auto sorted = std::to_array<std::uint8_t>(
+	  { 0x0a, 0x05, 0x01, 0x02, 0x03, 0x04, 0x05, 0x12, 0x01, 'a', 0x12, 0x00, 0x12, 0x02, 'b', 'c' } );
+
+	guarded storage( 512 );
+	pb::arena memory = storage.memory();
+	arena_lists message{};
+	const auto result = decode( bytes_of( in ), message, memory );
+
+	guarded sorted_storage( 512 );
+	pb::arena sorted_memory = sorted_storage.memory();
+	arena_lists one_record{};
+	const auto again = decode( bytes_of( sorted ), one_record, sorted_memory );
+	return result && *result == in.size() &&
+	       holds_items( message.ints, std::to_array<std::int32_t>( { 1, 2, 3, 4, 5 } ) ) &&
+	       holds_items( message.names, std::to_array<std::string_view>( { "a", "", "bc" } ) ) && message.floats.empty() &&
+	       again && memory.used() == sorted_memory.used() && storage.intact() && sorted_storage.intact();
+}
+
+/// A span of messages whose elements have span fields.
+bool test_arena_nested_repeated()
+{
+	// items { ints: [1, 2] names: "a" } items { ints: [3] } items { }
+	constexpr auto in = std::to_array<std::uint8_t>(
+	  { 0x0a, 0x07, 0x0a, 0x02, 0x01, 0x02, 0x12, 0x01, 'a', 0x0a, 0x03, 0x0a, 0x01, 0x03, 0x0a, 0x00 } );
+
+	guarded storage( 512 );
+	pb::arena memory = storage.memory();
+	arena_items message{};
+	const auto result = decode( bytes_of( in ), message, memory );
+	if ( !result || message.items.size() != 3 )
+		return false;
+
+	std::array<std::uint8_t, in.size()> out{};
+	const auto encoded = encode( message, std::span<std::uint8_t>( out ) );
+	const arena_lists& first = message.items[0];
+	return holds_items( first.ints, std::to_array<std::int32_t>( { 1, 2 } ) ) &&
+	       holds_items( first.names, std::to_array<std::string_view>( { "a" } ) ) &&
+	       holds_items( message.items[1].ints, std::to_array<std::int32_t>( { 3 } ) ) && message.items[1].names.empty() &&
+	       message.items[2].ints.empty() && storage.holds( first.ints.data() ) && encoded && *encoded == in.size() &&
+	       out == in && storage.intact();
+}
+
+/// A nested message that occurs two times: its span field has the items of both, in order.
+bool test_arena_merge()
+{
+	// child { ints: [1, 2] } child { ints: [3] names: "x" }
+	constexpr auto in = std::to_array<std::uint8_t>(
+	  { 0x0a, 0x04, 0x0a, 0x02, 0x01, 0x02, 0x0a, 0x06, 0x0a, 0x01, 0x03, 0x12, 0x01, 'x' } );
+
+	guarded storage( 512 );
+	pb::arena memory = storage.memory();
+	arena_holder message{};
+	const auto result = decode( bytes_of( in ), message, memory );
+	return result && holds_items( message.child.ints, std::to_array<std::int32_t>( { 1, 2, 3 } ) ) &&
+	       holds_items( message.child.names, std::to_array<std::string_view>( { "x" } ) ) && storage.intact();
+}
+
+/// Span fields in the message of a `std::optional` and of a oneof alternative.
+bool test_arena_oneof_and_optional()
+{
+	// maybe { ints: [7] } choice { ints: [8, 9] names: "c" }
+	constexpr auto in = std::to_array<std::uint8_t>(
+	  { 0x0a, 0x03, 0x0a, 0x01, 0x07, 0x12, 0x07, 0x0a, 0x02, 0x08, 0x09, 0x12, 0x01, 'c' } );
+
+	guarded storage( 512 );
+	pb::arena memory = storage.memory();
+	arena_choices message{};
+	const auto result = decode( bytes_of( in ), message, memory );
+	const auto* chosen = std::get_if<arena_lists>( &message.choice );
+	return result && message.maybe && holds_items( message.maybe->ints, std::to_array<std::int32_t>( { 7 } ) ) &&
+	       chosen && holds_items( chosen->ints, std::to_array<std::int32_t>( { 8, 9 } ) ) &&
+	       holds_items( chosen->names, std::to_array<std::string_view>( { "c" } ) ) && storage.intact();
+}
+
+/// Elements with different alignment in one arena, whose storage is at an odd address.
+bool test_arena_alignment()
+{
+	// small: [1, 2, 3] wide: [1.5, -2]
+	constexpr auto in =
+	  std::to_array<std::uint8_t>( { 0x0a, 0x03, 0x01, 0x02, 0x03, 0x12, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00,
+		                               0x00, 0xf8, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0 } );
+
+	guarded storage( 512, 1 );
+	pb::arena memory = storage.memory();
+	arena_aligned message{};
+	const auto result = decode( bytes_of( in ), message, memory );
+	const auto wide = reinterpret_cast<std::uintptr_t>( message.wide.data() );
+	return result && holds_items( message.small, std::to_array<std::int8_t>( { 1, 2, 3 } ) ) &&
+	       holds_items( message.wide, std::to_array<double>( { 1.5, -2.0 } ) ) && wide % alignof( double ) == 0 &&
+	       storage.holds( message.small.data() ) && storage.holds( message.wide.data() ) && storage.intact();
+}
+
+/// Packed records that are not valid: the count is too small for the reads. The block stays full, `decode`
+/// writes no item after its end.
+bool test_arena_bad_packed()
+{
+	// A block: the capacity, then the items.
+	constexpr auto no_end = std::to_array<std::uint8_t>( { 0x0a, 0x03, 0x01, 0x02, 0x80 } );
+	guarded varint_storage( sizeof( std::size_t ) + 2 * sizeof( std::int32_t ) );
+	pb::arena varint_memory = varint_storage.memory();
+	arena_lists varints{};
+	const auto a = decode( bytes_of( no_end ), varints, varint_memory );
+
+	constexpr auto six = std::to_array<std::uint8_t>( { 0x1a, 0x06, 0x00, 0x00, 0x80, 0x3f, 0x00, 0x00 } );
+	guarded fixed_storage( sizeof( std::size_t ) + sizeof( float ) );
+	pb::arena fixed_memory = fixed_storage.memory();
+	arena_lists fixed{};
+	const auto b = decode( bytes_of( six ), fixed, fixed_memory );
+
+	return !a && a.error() == error::TRUNCATED && holds_items( varints.ints, std::to_array<std::int32_t>( { 1, 2 } ) ) &&
+	       varint_storage.intact() && !b && b.error() == error::TRUNCATED &&
+	       holds_items( fixed.floats, std::to_array<float>( { 1.0f } ) ) && fixed_storage.intact();
+}
+
+/// A packed record whose length is larger than the remaining input is `TRUNCATED`. `decode` takes no block for it.
+bool test_arena_huge_length()
+{
+	constexpr auto in = std::to_array<std::uint8_t>( { 0x0a, 0xff, 0xff, 0xff, 0x0f, 0x01, 0x02, 0x03 } );
+	guarded storage( 512 );
+	pb::arena memory = storage.memory();
+	arena_lists message{};
+	const auto result = decode( bytes_of( in ), message, memory );
+	return !result && result.error() == error::TRUNCATED && memory.used() == 0 && message.ints.empty() &&
+	       storage.intact();
+}
+
+/// An error in the third element of a span field: the span has the two items before it, in the arena.
+bool test_arena_error_mid_field()
+{
+	constexpr auto in = std::to_array<std::uint8_t>( { 0x08, 0x01, 0x08, 0x02, 0x08, 0x80 } );
+	guarded storage( 512 );
+	pb::arena memory = storage.memory();
+	arena_lists message{};
+	const auto result = decode( bytes_of( in ), message, memory );
+	return !result && result.error() == error::TRUNCATED &&
+	       holds_items( message.ints, std::to_array<std::int32_t>( { 1, 2 } ) ) && storage.holds( message.ints.data() ) &&
+	       storage.intact();
+}
+
+/// A second message in the same arena does not change the first.
+bool test_arena_two_messages()
+{
+	// ints: [1, 2]
+	constexpr auto first = std::to_array<std::uint8_t>( { 0x0a, 0x02, 0x01, 0x02 } );
+	// ints: [3, 4] names: "z"
+	constexpr auto second = std::to_array<std::uint8_t>( { 0x0a, 0x02, 0x03, 0x04, 0x12, 0x01, 'z' } );
+
+	guarded storage( 512 );
+	pb::arena memory = storage.memory();
+	arena_lists a{};
+	arena_lists b{};
+	const auto ra = decode( bytes_of( first ), a, memory );
+	const std::size_t used = memory.used();
+	const auto rb = decode( bytes_of( second ), b, memory );
+	return ra && rb && memory.used() > used && holds_items( a.ints, std::to_array<std::int32_t>( { 1, 2 } ) ) &&
+	       holds_items( b.ints, std::to_array<std::int32_t>( { 3, 4 } ) ) &&
+	       holds_items( b.names, std::to_array<std::string_view>( { "z" } ) ) && storage.intact();
+}
+
+/// The order of the fields on the wire changes only the padding between the blocks.
+bool test_arena_order()
+{
+	// ints: [1, 2, 3] names: "a" names: "b" floats: [1]
+	constexpr auto in_order = std::to_array<std::uint8_t>(
+	  { 0x0a, 0x03, 0x01, 0x02, 0x03, 0x12, 0x01, 'a', 0x12, 0x01, 'b', 0x1a, 0x04, 0x00, 0x00, 0x80, 0x3f } );
+	// floats: [1] names: "a" ints: [1, 2, 3] names: "b"
+	constexpr auto reversed = std::to_array<std::uint8_t>(
+	  { 0x1a, 0x04, 0x00, 0x00, 0x80, 0x3f, 0x12, 0x01, 'a', 0x0a, 0x03, 0x01, 0x02, 0x03, 0x12, 0x01, 'b' } );
+	constexpr std::size_t blocks = 3;
+
+	guarded storage_a( 512 );
+	pb::arena memory_a = storage_a.memory();
+	arena_lists a{};
+	guarded storage_b( 512 );
+	pb::arena memory_b = storage_b.memory();
+	arena_lists b{};
+	const auto ra = decode( bytes_of( in_order ), a, memory_a );
+	const auto rb = decode( bytes_of( reversed ), b, memory_b );
+	const std::size_t difference =
+	  memory_a.used() > memory_b.used() ? memory_a.used() - memory_b.used() : memory_b.used() - memory_a.used();
+	return ra && rb && difference <= blocks * ( alignof( std::max_align_t ) - 1 ) &&
+	       holds_items( b.ints, std::to_array<std::int32_t>( { 1, 2, 3 } ) ) &&
+	       holds_items( b.names, std::to_array<std::string_view>( { "a", "b" } ) ) &&
+	       holds_items( b.floats, std::to_array<float>( { 1.0f } ) ) && storage_a.intact() && storage_b.intact();
+}
+
+/// A record with the wrong wire type for a span field is skipped and not counted.
+bool test_arena_wrong_wire_type()
+{
+	// ints: 5, field 1 as fixed32, ints: 6
+	constexpr auto in = std::to_array<std::uint8_t>( { 0x08, 0x05, 0x0d, 0x01, 0x02, 0x03, 0x04, 0x08, 0x06 } );
+	// ints: 5 ints: 6
+	constexpr auto without = std::to_array<std::uint8_t>( { 0x08, 0x05, 0x08, 0x06 } );
+
+	guarded storage( 512 );
+	pb::arena memory = storage.memory();
+	arena_lists message{};
+	const auto result = decode( bytes_of( in ), message, memory );
+
+	guarded without_storage( 512 );
+	pb::arena without_memory = without_storage.memory();
+	arena_lists expected{};
+	const auto again = decode( bytes_of( without ), expected, without_memory );
+	return result && again && holds_items( message.ints, std::to_array<std::int32_t>( { 5, 6 } ) ) &&
+	       memory.used() == without_memory.used() && storage.intact() && without_storage.intact();
+}
+
+/// A message with only `pb::repeated` fields decodes without an arena.
+bool test_no_arena_needed()
+{
+	constexpr auto in = std::to_array<std::uint8_t>( { 0x0a, 0x02, 0x01, 0x02 } );
+	ints_only message{};
+	const auto result = decode( bytes_of( in ), message );
+	return result && message.ints.size() == 2 && message.ints[1] == 2;
+}
+
 } // namespace
 
 int main()
@@ -674,6 +1012,10 @@ int main()
 	  test_oneof_last_wins() && test_oneof_merge() && test_oneof_replace() && test_oneof_wrong_wire_type() &&
 	  test_decode_lists_full() && test_decode_envelope_long() && test_reuse_repeated_message() && test_reuse_oneof() &&
 	  test_span_buffer_no_storage() && test_decode_empty_message() && test_error_order() &&
-	  test_reuse_resets_each_kind() && test_partial_result() && test_fixed_bytes_last_wins();
+	  test_reuse_resets_each_kind() && test_partial_result() && test_fixed_bytes_last_wins() && test_arena_exact() &&
+	  test_arena_mixed_records() && test_arena_nested_repeated() && test_arena_merge() &&
+	  test_arena_oneof_and_optional() && test_arena_alignment() && test_arena_bad_packed() && test_arena_huge_length() &&
+	  test_arena_error_mid_field() && test_arena_two_messages() && test_arena_order() && test_arena_wrong_wire_type() &&
+	  test_no_arena_needed();
 	return ok ? 0 : 1;
 }
