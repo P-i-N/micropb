@@ -848,6 +848,30 @@ bool test_arena_alignment()
 	       storage.holds( message.small.data() ) && storage.holds( message.wide.data() ) && storage.intact();
 }
 
+/// `repeated bytes`: the block holds the views, and each view points into the input.
+bool test_arena_byte_lists()
+{
+	// blobs: "abc" blobs: "" blobs: ""
+	constexpr auto in = std::to_array<std::uint8_t>( { 0x0a, 0x03, 'a', 'b', 'c', 0x0a, 0x00, 0x0a, 0x02, 0x01, 0x02 } );
+
+	guarded storage( 256 );
+	pb::arena memory = storage.memory();
+	byte_lists message{};
+	const auto result = decode( bytes_of( in ), message, memory );
+	if ( !result || message.blobs.size() != 3 )
+		return false;
+
+	const auto* first = in.data();
+	const auto* last = in.data() + in.size();
+	const auto in_input = [&]( std::span<const std::uint8_t> blob ) {
+		return blob.data() >= first && blob.data() <= last;
+	};
+	const auto& blobs = message.blobs;
+	return holds_items( blobs[0], std::to_array<std::uint8_t>( { 'a', 'b', 'c' } ) ) && blobs[1].empty() &&
+	       holds_items( blobs[2], std::to_array<std::uint8_t>( { 0x01, 0x02 } ) ) && blobs[0].data() == in.data() + 2 &&
+	       blobs[2].data() == in.data() + 9 && in_input( blobs[1] ) && storage.holds( blobs.data() ) && storage.intact();
+}
+
 /// Packed records that are not valid: the count is too small for the reads. The block stays full, `decode`
 /// writes no item after its end.
 bool test_arena_bad_packed()
@@ -1043,9 +1067,9 @@ bool test_arena( std::uint8_t fill )
 	arena_fill = fill;
 	return test_arena_exact() && test_arena_mixed_records() && test_arena_nested_repeated() && test_arena_merge() &&
 	       test_arena_oneof_and_optional() && test_arena_alignment() && test_arena_bad_packed() &&
-	       test_arena_huge_length() && test_arena_error_mid_field() && test_arena_two_messages() && test_arena_order() &&
-	       test_arena_wrong_wire_type() && test_arena_new_value_reset() && test_arena_new_items() && test_arena_reset() &&
-	       test_arena_no_storage();
+	       test_arena_byte_lists() && test_arena_huge_length() && test_arena_error_mid_field() &&
+	       test_arena_two_messages() && test_arena_order() && test_arena_wrong_wire_type() &&
+	       test_arena_new_value_reset() && test_arena_new_items() && test_arena_reset() && test_arena_no_storage();
 }
 
 /// A message with only `pb::repeated` fields decodes without an arena.
