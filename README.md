@@ -479,6 +479,7 @@ A message that the codec cannot handle correctly does not compile. Each error is
 | `unmapped_type` | A member type has no proto3 mapping, for example `char`, `volatile int` or a pointer. |
 | `zigzag_unsigned` | A `pb::wire_int<T, pb::int_encoding::ZIGZAG>` has an unsigned `T`. |
 | `enum_too_wide` | An enum is wider than 32 bits. |
+| `recursive_message` | A message contains itself, directly or through other messages, for example in a `std::span<const T>`. `decode` would have no limit for the stack. |
 
 **Combinations that proto3 does not have**
 

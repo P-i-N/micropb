@@ -275,7 +275,7 @@ if(MICROPB_TESTS)
                 tag_on_variant oneof_tags_on_non_variant decode_encode_only
                 not_aggregate base_class inaccessible_member enum_too_wide
                 bit_field member_offset_too_large decode_const_member decode_fixed_span
-                field_list_type field_list_offset field_list_alternative)
+                field_list_type field_list_offset field_list_alternative recursive_message)
             micropb_add_compile_fail_test(${rule})
         endforeach()
     endif()

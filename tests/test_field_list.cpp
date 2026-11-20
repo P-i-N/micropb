@@ -55,6 +55,13 @@ struct constants
 	const std::string_view name;
 };
 
+/// A message that contains itself. The codec rejects it (`recursive_message`).
+struct tree
+{
+	std::int32_t id;
+	std::span<const tree> children;
+};
+
 } // namespace manual
 
 // The lists are in the order of the members, not in the order of the numbers.
@@ -99,6 +106,13 @@ struct pb::fields_of<manual::constants>
                    pb::field_at<decltype( manual::constants::name ), 6, offsetof( manual::constants, name )>>
 {};
 
+template <>
+struct pb::fields_of<manual::tree>
+  : pb::field_list<manual::tree,
+                   pb::field_at<decltype( manual::tree::id ), 1, offsetof( manual::tree, id )>,
+                   pb::field_at<decltype( manual::tree::children ), 2, offsetof( manual::tree, children )>>
+{};
+
 namespace {
 
 namespace d = pb::detail;
@@ -115,6 +129,11 @@ static_assert( table.fields[5].offset == offsetof( manual::message, choice ) && 
                table.fields[6].alternative == 2 &&
                table.fields[6].type == &d::value_descriptor<decltype( manual::message::choice )>::value );
 static_assert( d::message_descriptor<manual::empty>::value.count == 0 );
+
+static_assert( !d::is_recursive<manual::inner>() && !d::is_recursive<manual::message>() &&
+               !d::is_recursive<manual::empty>() && !d::is_recursive<manual::fixed>() &&
+               !d::is_recursive<manual::constants>() );
+static_assert( d::is_recursive<manual::tree>() );
 
 #if defined( __cpp_impl_reflection )
 // The list that reflection makes from the struct is the same type as the list above.
