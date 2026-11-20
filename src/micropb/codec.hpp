@@ -884,7 +884,11 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 [[nodiscard]] inline bool reserve(
   const reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory )
 {
+	// Only a span that `decode` did not bind can have more items than its block.
 	const sequence_view items = decode_view( sequence, value );
+	if ( items.count > items.capacity )
+		return false;
+
 	reader record = in;
 	if ( count_record( record, key.type, sequence ) <= items.capacity - items.count )
 		return true;
@@ -899,7 +903,7 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 inline void decode_element( reader& in, wire_type wire, const sequence_desc& sequence, void* value, arena* memory )
 {
 	const sequence_view items = decode_view( sequence, value );
-	if ( items.count == items.capacity )
+	if ( items.count >= items.capacity )
 		return in.fail( sequence.bind != nullptr ? error::TRUNCATED : error::CAPACITY_EXCEEDED );
 
 	void* item = member_at( items.data, items.count * sequence.element_size );
@@ -956,8 +960,15 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 	}
 	if ( type.kind == field_kind::OPTIONAL )
 	{
+		// A new value starts from the reset state, as each member of `msg` does.
 		const optional_desc& optional = *type.optional;
-		return decode_value( in, wire, *optional.value, optional.access( value, optional_op::ENGAGE ), memory );
+		void* held = optional.access( value, optional_op::GET );
+		if ( held == nullptr )
+		{
+			held = optional.access( value, optional_op::ENGAGE );
+			reset_value( *optional.value, held );
+		}
+		return decode_value( in, wire, *optional.value, held, memory );
 	}
 
 	// All other kinds are length-delimited. The bytes are a view into the input.
@@ -1058,15 +1069,25 @@ inline void decode_message( reader& in, const message_desc& message, void* objec
 			continue;
 		}
 
-		// A different active alternative gives way to a value-initialized one.
-		// The same alternative stays, so a message merges. The codec skips a
-		// field with a wrong wire type and keeps the variant.
+		// A different active alternative gives way to a new one in the reset
+		// state, as each member of `msg` has. The same alternative stays, so a
+		// message merges. The codec skips a field with a wrong wire type and
+		// keeps the variant.
 		const variant_desc& variant = *field->type->variant;
 		const value_desc& alternative = *variant.alternatives[field->alternative];
 		if ( key.type != wire_of( alternative ) )
+		{
 			in.skip( key.type );
-		else
-			decode_value( in, key.type, alternative, variant.access( member, field->alternative, true ), memory );
+			continue;
+		}
+
+		void* active = variant.access( member, field->alternative, false );
+		if ( active == nullptr )
+		{
+			active = variant.access( member, field->alternative, true );
+			reset_value( alternative, active );
+		}
+		decode_value( in, key.type, alternative, active, memory );
 	}
 }
 

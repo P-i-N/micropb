@@ -239,6 +239,33 @@ bool holds_items( std::span<const T> items, const std::array<T, N>& expected )
 	return std::equal( items.begin(), items.end(), expected.begin(), expected.end() );
 }
 
+/// Items of the caller, with a value before them that looks like a block capacity.
+struct caller_items
+{
+	std::size_t fake_capacity;
+	std::array<std::int32_t, 2> items;
+	std::array<std::int32_t, 4> after;
+};
+
+caller_items caller{ 100, { 10, 11 }, {} };
+
+/// Default member initializers: `decode` resets a value that it makes, so they have no effect.
+struct defaulted
+{
+	std::span<const std::int32_t> v{ caller.items };
+	std::int32_t x = 7;
+};
+
+struct defaulted_optional
+{
+	std::optional<defaulted> o;
+};
+
+struct defaulted_choice
+{
+	std::variant<std::monostate, defaulted, std::uint32_t> c;
+};
+
 /// Bytes of one varint field.
 struct varint_field
 {
@@ -986,6 +1013,29 @@ bool test_arena_wrong_wire_type()
 	       memory.used() == without_memory.used() && storage.intact() && without_storage.intact();
 }
 
+/// A value that `decode` makes for a `std::optional` or a oneof alternative starts from its reset state: a span
+/// with a default member initializer gets only the items of the wire, in the arena, and the caller items do not
+/// change. A scalar with a default member initializer is 0 when the field is absent.
+bool test_arena_new_value_reset()
+{
+	// o { v: [1, 2, 3] }, and c { v: [1, 2, 3] }
+	constexpr auto in = std::to_array<std::uint8_t>( { 0x0a, 0x05, 0x0a, 0x03, 0x01, 0x02, 0x03 } );
+	guarded storage( 512 );
+	pb::arena memory = storage.memory();
+	defaulted_optional a{};
+	const auto ra = decode( bytes_of( in ), a, memory );
+	defaulted_choice b{};
+	const auto rb = decode( bytes_of( in ), b, memory );
+	const auto* chosen = std::get_if<defaulted>( &b.c );
+
+	const bool caller_unchanged = caller.fake_capacity == 100 && caller.items == std::array<std::int32_t, 2>{ 10, 11 } &&
+	                              caller.after == std::array<std::int32_t, 4>{};
+	return ra && a.o && holds_items( a.o->v, std::to_array<std::int32_t>( { 1, 2, 3 } ) ) &&
+	       storage.holds( a.o->v.data() ) && a.o->x == 0 && rb && chosen &&
+	       holds_items( chosen->v, std::to_array<std::int32_t>( { 1, 2, 3 } ) ) && storage.holds( chosen->v.data() ) &&
+	       chosen->x == 0 && caller_unchanged && storage.intact();
+}
+
 /// A message with only `pb::repeated` fields decodes without an arena.
 bool test_no_arena_needed()
 {
@@ -1016,6 +1066,6 @@ int main()
 	  test_arena_mixed_records() && test_arena_nested_repeated() && test_arena_merge() &&
 	  test_arena_oneof_and_optional() && test_arena_alignment() && test_arena_bad_packed() && test_arena_huge_length() &&
 	  test_arena_error_mid_field() && test_arena_two_messages() && test_arena_order() && test_arena_wrong_wire_type() &&
-	  test_no_arena_needed();
+	  test_no_arena_needed() && test_arena_new_value_reset();
 	return ok ? 0 : 1;
 }

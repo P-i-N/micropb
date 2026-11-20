@@ -218,4 +218,5 @@ Each stage is a separate, reviewable change.
 * New error `ARENA_FULL`: the arena has no space for the items of a field.
 * `std::span<const T>` as a repeated field decodes, with an arena. `std::array<T, N>` stays encode-only (`decode_encode_only`). A `std::span` with a static extent stays encode-only (`decode_fixed_span`), now also for a repeated field.
 * After `decode`, `msg` points into `in` and into the arena. Both must stay valid while `msg` is in use.
+* A value that `decode` makes for a `std::optional` or a new `oneof` alternative starts from the reset state, not from its value-initialized state: a default member initializer in it has no effect.
 * A nested message that occurs more than once still merges: its span field gets a new block with the old items and the new items. The old block stays used until `clear()`.

@@ -453,6 +453,7 @@ std::expected<std::size_t, pb::error> pb::decode(std::span<const std::uint8_t> i
 `decode` reads exactly one message from `in`. On success it returns `in.size()`. A message with a `std::span<const T>` repeated field, also in a nested message, needs the overload with a `pb::arena` (see [Repeated fields](#repeated-fields)). Without the arena, it does not compile (`pb: decode_needs_arena`).
 
 * It resets `msg` first. You can use the same object again for each message. A `pb::repeated` and a `pb::span_buffer` keep their storage and get the size 0.
+* A value that `decode` makes for a `std::optional` or for a new `oneof` alternative also starts from the reset state: a field that is not in the input is zero or empty, as in protobuf. A default member initializer in such a value has no effect.
 * It skips a field number that the message does not have, and a known field with a different wire type. Thus the other side can add fields, and old firmware continues to work.
 * A scalar that occurs more than one time: the last value wins. A nested message: the occurrences merge. A `oneof`: the last alternative wins.
 * A repeated scalar field can be packed or not packed, also mixed in one message.
