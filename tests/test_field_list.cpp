@@ -30,6 +30,12 @@ struct message
 struct empty
 {};
 
+struct shared_offset
+{
+	[[no_unique_address]] empty e;
+	std::variant<std::monostate, std::int32_t, float> choice;
+};
+
 /// Encode only: a `std::array` of a type that is not a byte, and a `const` member.
 struct fixed
 {
@@ -131,6 +137,15 @@ struct pb::fields_of<manual::empty> : pb::field_list<manual::empty>
 {};
 
 template <>
+struct pb::fields_of<manual::shared_offset>
+  : pb::field_list<
+      manual::shared_offset,
+      pb::field_at<decltype( manual::shared_offset::e ), 1, offsetof( manual::shared_offset, e )>,
+      pb::field_at<decltype( manual::shared_offset::choice ), 2, offsetof( manual::shared_offset, choice ), 1>,
+      pb::field_at<decltype( manual::shared_offset::choice ), 3, offsetof( manual::shared_offset, choice ), 2>>
+{};
+
+template <>
 struct pb::fields_of<manual::fixed>
   : pb::field_list<manual::fixed,
                    pb::field_at<decltype( manual::fixed::gains ), 1, offsetof( manual::fixed, gains )>,
@@ -219,6 +234,7 @@ static_assert( table.fields[5].offset == offsetof( manual::message, choice ) && 
                table.fields[6].alternative == 2 &&
                table.fields[6].type == &d::value_descriptor<decltype( manual::message::choice )>::value );
 static_assert( d::message_descriptor<manual::empty>::value.count == 0 );
+static_assert( d::message_descriptor<manual::shared_offset>::value.count == 3 );
 
 static_assert( !d::is_recursive<manual::inner>() && !d::is_recursive<manual::message>() &&
                !d::is_recursive<manual::empty>() && !d::is_recursive<manual::fixed>() &&

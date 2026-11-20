@@ -291,6 +291,9 @@ template <typename M>
 		return alternative == 0;
 }
 
+template <typename T>
+inline constexpr char type_mark = 0;
+
 /// The bytes of one entry of a field list, for the rules that compare entries.
 struct entry_shape
 {
@@ -299,7 +302,9 @@ struct entry_shape
 	std::size_t alternative;
 	/// The number of alternatives of a `std::variant` member, else 0.
 	std::size_t alternatives;
-	/// `true` for an empty struct. An empty struct can share its address with a different member.
+	/// Identity of the member type without `const`.
+	const char* type;
+	/// `true` for an empty struct. An empty struct can share its address with a member of a different type.
 	bool empty;
 };
 
@@ -313,6 +318,12 @@ struct entry_shape
 		{
 			const entry_shape& a = entries[i];
 			const entry_shape& b = entries[j];
+			if ( a.empty && b.empty )
+			{
+				if ( a.offset == b.offset && a.type == b.type )
+					return true;
+				continue;
+			}
 			if ( a.empty || b.empty )
 				continue;
 
@@ -333,7 +344,9 @@ struct entry_shape
 		if ( entry.alternatives == 0 )
 			continue;
 
-		const auto same_member = [&]( const entry_shape& other ) { return other.offset == entry.offset; };
+		const auto same_member = [&]( const entry_shape& other ) {
+			return other.offset == entry.offset && other.alternative != 0;
+		};
 		const auto count = static_cast<std::size_t>( std::count_if( entries.begin(), entries.end(), same_member ) );
 		if ( count != entry.alternatives - 1 )
 			return false;
@@ -413,8 +426,12 @@ struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>>
 		               "pb: field_list_alternative: a std::variant member needs one pb::field_at for each "
 		               "alternative with its index, each other member has no index" );
 
-		constexpr std::array<entry_shape, count> shapes{ entry_shape{
-			Offset, sizeof( M ), Alternative, alternative_count<std::remove_const_t<M>>, std::is_empty_v<M> }... };
+		constexpr std::array<entry_shape, count> shapes{ entry_shape{ Offset,
+			                                                            sizeof( M ),
+			                                                            Alternative,
+			                                                            alternative_count<std::remove_const_t<M>>,
+			                                                            &type_mark<std::remove_const_t<M>>,
+			                                                            std::is_empty_v<M> }... };
 		static_assert( !entries_overlap( shapes ),
 		               "pb: field_list_overlap: two pb::field_at of a field list name the same member" );
 		static_assert( alternatives_complete( shapes ),
