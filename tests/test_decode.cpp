@@ -193,6 +193,19 @@ struct byte_lists
 	std::span<const std::span<const std::uint8_t>> blobs;
 };
 
+/// Members with bytes that are not all valid: a `bool`, the flag of a `std::optional`, the index of a `std::variant`.
+struct fragile
+{
+	std::optional<std::int32_t> o;
+	std::variant<std::monostate, std::uint32_t, float> c;
+	bool flag;
+};
+
+struct fragile_items
+{
+	std::span<const fragile> items;
+};
+
 static_assert( !detail::needs_arena<ints_only>() && !detail::needs_arena<lists>() && !detail::needs_arena<text>() &&
                !detail::needs_arena<int_buffer>() && !detail::needs_arena<envelope_owned>() );
 static_assert( detail::needs_arena<arena_lists>() && detail::needs_arena<arena_items>() &&
@@ -202,12 +215,17 @@ static_assert( detail::needs_arena<arena_lists>() && detail::needs_arena<arena_i
 inline constexpr std::size_t canary_size = 16;
 inline constexpr std::uint8_t canary = 0xA5;
 
+/// The bytes in the arena storage before `decode`. The arena tests run with 0x00 and with 0xA5: `decode` must
+/// not read an item that it did not make.
+std::uint8_t arena_fill = 0x00;
+
 /// Storage of a `pb::arena` of `size` bytes, `offset` bytes after an address that is aligned for each type. The
-/// 16 canary bytes (0xA5) after the arena storage must not change.
+/// storage holds `arena_fill`. The 16 canary bytes (0xA5) after the arena storage must not change.
 struct guarded
 {
 	explicit guarded( std::size_t size, std::size_t offset = 0 ) : _first( offset ), _size( size )
 	{
+		std::fill_n( _bytes.begin() + offset, size, arena_fill );
 		std::fill_n( _bytes.begin() + offset + size, canary_size, canary );
 	}
 
@@ -1036,6 +1054,36 @@ bool test_arena_new_value_reset()
 	       chosen->x == 0 && caller_unchanged && storage.intact();
 }
 
+/// A new item in the arena is a constructed object before `decode` resets it and reads into it.
+bool test_arena_new_items()
+{
+	// items { } items { o: 5 } items { c: 7 flag: true }
+	constexpr auto in =
+	  std::to_array<std::uint8_t>( { 0x0a, 0x00, 0x0a, 0x02, 0x08, 0x05, 0x0a, 0x04, 0x10, 0x07, 0x20, 0x01 } );
+	guarded storage( 512 );
+	pb::arena memory = storage.memory();
+	fragile_items message{};
+	const auto result = decode( bytes_of( in ), message, memory );
+	if ( !result || message.items.size() != 3 )
+		return false;
+
+	const fragile& empty = message.items[0];
+	const fragile& with_o = message.items[1];
+	const auto* chosen = std::get_if<std::uint32_t>( &message.items[2].c );
+	return !empty.o && empty.c.index() == 0 && !empty.flag && with_o.o == 5 && with_o.c.index() == 0 && !with_o.flag &&
+	       !message.items[2].o && chosen && *chosen == 7 && message.items[2].flag && storage.intact();
+}
+
+/// The arena tests, with the arena storage filled with `fill` before each `decode`.
+bool test_arena( std::uint8_t fill )
+{
+	arena_fill = fill;
+	return test_arena_exact() && test_arena_mixed_records() && test_arena_nested_repeated() && test_arena_merge() &&
+	       test_arena_oneof_and_optional() && test_arena_alignment() && test_arena_bad_packed() &&
+	       test_arena_huge_length() && test_arena_error_mid_field() && test_arena_two_messages() && test_arena_order() &&
+	       test_arena_wrong_wire_type() && test_arena_new_value_reset() && test_arena_new_items();
+}
+
 /// A message with only `pb::repeated` fields decodes without an arena.
 bool test_no_arena_needed()
 {
@@ -1062,10 +1110,7 @@ int main()
 	  test_oneof_last_wins() && test_oneof_merge() && test_oneof_replace() && test_oneof_wrong_wire_type() &&
 	  test_decode_lists_full() && test_decode_envelope_long() && test_reuse_repeated_message() && test_reuse_oneof() &&
 	  test_span_buffer_no_storage() && test_decode_empty_message() && test_error_order() &&
-	  test_reuse_resets_each_kind() && test_partial_result() && test_fixed_bytes_last_wins() && test_arena_exact() &&
-	  test_arena_mixed_records() && test_arena_nested_repeated() && test_arena_merge() &&
-	  test_arena_oneof_and_optional() && test_arena_alignment() && test_arena_bad_packed() && test_arena_huge_length() &&
-	  test_arena_error_mid_field() && test_arena_two_messages() && test_arena_order() && test_arena_wrong_wire_type() &&
-	  test_no_arena_needed() && test_arena_new_value_reset();
+	  test_reuse_resets_each_kind() && test_partial_result() && test_fixed_bytes_last_wins() && test_arena( 0x00 ) &&
+	  test_arena( 0xA5 ) && test_no_arena_needed();
 	return ok ? 0 : 1;
 }

@@ -164,7 +164,9 @@ bool test_sequence_accessor()
 	std::array<std::int32_t, 2> block{ 5, 6 };
 	view_desc.bind( &view, block.data(), 2 );
 	return view.data() == block.data() && view.size() == 2 && view_desc.element_align == alignof( std::int32_t ) &&
-	       buffer_desc.bind == nullptr && d::value_descriptor<pb::repeated<float, 4>>::value.sequence->bind == nullptr;
+	       view_desc.construct == &d::construct_item<std::int32_t> && buffer_desc.bind == nullptr &&
+	       buffer_desc.construct == nullptr &&
+	       d::value_descriptor<pb::repeated<float, 4>>::value.sequence->bind == nullptr;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

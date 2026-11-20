@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <expected>
+#include <new>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -123,6 +124,9 @@ using sequence_accessor = sequence_view ( * )( void* sequence );
 /// Sets the sequence to `count` items at `data`.
 using sequence_binder = void ( * )( void* sequence, void* data, std::size_t count );
 
+/// Makes a value-initialized element at `item`.
+using item_constructor = void ( * )( void* item );
+
 enum class sequence_storage : std::uint8_t
 {
 	/// `pb::repeated`: the items are at offset 0, the count is at `count_offset`.
@@ -139,6 +143,8 @@ struct sequence_desc
 	sequence_accessor access;
 	/// `std::span<const T>`: `decode` sets it to a block in the arena. Null for the other types.
 	sequence_binder bind;
+	/// `std::span<const T>`: makes each new item in the arena. Null for the other types.
+	item_constructor construct;
 	std::uint32_t element_size;
 	std::uint32_t capacity;
 	std::uint16_t count_offset;
@@ -234,6 +240,15 @@ void bind_span( void* sequence, void* data, std::size_t count )
 	*static_cast<S*>( sequence ) = S( static_cast<const element_t<S>*>( data ), count );
 }
 
+/// Constructor of the element of `std::span<const T>`. A new block in the arena has
+/// no objects, and `reset_value` reads a `std::optional` or `std::variant` before
+/// it writes.
+template <typename E>
+void construct_item( void* item )
+{
+	::new ( item ) E();
+}
+
 /// Accessor of `std::optional`. The codec cannot make a value with a `const`
 /// member again in its place. Such a value type is encode-only
 /// (`check_decodable`), and `ENGAGE` does nothing for it.
@@ -298,25 +313,31 @@ template <typename S>
 		static_assert( sequence_access::items_offset<S> == 0 );
 		static_assert( sequence_access::count_offset<S> <= max_offset,
 		               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
-		return { item,     nullptr,
-		         nullptr,  item_size,
-		         capacity, static_cast<std::uint16_t>( sequence_access::count_offset<S> ),
-		         align,    sequence_storage::REPEATED };
+		return { item,
+		         nullptr,
+		         nullptr,
+		         nullptr,
+		         item_size,
+		         capacity,
+		         static_cast<std::uint16_t>( sequence_access::count_offset<S> ),
+		         align,
+		         sequence_storage::REPEATED };
 	}
 	else if constexpr ( is_std_array<S> )
 	{
-		return { item, nullptr, nullptr, item_size, capacity, 0, align, sequence_storage::ARRAY };
+		return { item, nullptr, nullptr, nullptr, item_size, capacity, 0, align, sequence_storage::ARRAY };
 	}
 	else if constexpr ( is_std_span<S> && !is_fixed_span<S> )
 	{
 		static_assert( std::is_trivially_copyable_v<element> && std::is_trivially_destructible_v<element>,
 		               "pb: span_element_trivial: the element of a std::span<const T> repeated field must be "
 		               "trivially copyable and trivially destructible" );
-		return { item, access_sequence<S>, bind_span<S>, item_size, 0, 0, align, sequence_storage::ACCESSOR };
+		return { item,  access_sequence<S>,        bind_span<S>, construct_item<element>, item_size, 0, 0,
+		         align, sequence_storage::ACCESSOR };
 	}
 	else
 	{
-		return { item, access_sequence<S>, nullptr, item_size, 0, 0, align, sequence_storage::ACCESSOR };
+		return { item, access_sequence<S>, nullptr, nullptr, item_size, 0, 0, align, sequence_storage::ACCESSOR };
 	}
 }
 
@@ -871,6 +892,7 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 
 	unsigned char* data = block + header;
 	std::memcpy( data - sizeof capacity, &capacity, sizeof capacity );
+	// `memcpy` makes the objects in the block: each element type is implicit-lifetime.
 	if ( items.count != 0 )
 		std::memcpy( data, items.data, items.count * sequence.element_size );
 	sequence.bind( value, data, items.count );
@@ -907,6 +929,8 @@ inline void decode_element( reader& in, wire_type wire, const sequence_desc& seq
 		return in.fail( sequence.bind != nullptr ? error::TRUNCATED : error::CAPACITY_EXCEEDED );
 
 	void* item = member_at( items.data, items.count * sequence.element_size );
+	if ( sequence.construct != nullptr )
+		sequence.construct( item );
 	reset_value( *sequence.element, item );
 	decode_value( in, wire, *sequence.element, item, memory );
 	if ( in.failed() )

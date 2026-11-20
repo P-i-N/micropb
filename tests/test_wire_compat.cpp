@@ -47,10 +47,11 @@ struct span_lists
 inline constexpr std::size_t canary_size = 16;
 inline constexpr std::uint8_t canary = 0xA5;
 
-/// Storage of a `pb::arena`. The 16 canary bytes (0xA5) after it must not change.
+/// Storage of a `pb::arena`, filled with 0xA5: `decode` must not read an item that it did not make. The 16
+/// canary bytes (0xA5) after it must not change.
 struct guarded
 {
-	guarded() { std::fill_n( _bytes.begin() + arena_size, canary_size, canary ); }
+	guarded() { _bytes.fill( canary ); }
 
 	[[nodiscard]] pb::arena memory() { return pb::arena( std::span( _bytes ).first( arena_size ) ); }
 
