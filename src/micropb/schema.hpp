@@ -84,6 +84,7 @@ struct sequence_traits<std::array<T, N>>
 {
 	static constexpr bool is_sequence = true;
 	static constexpr std::size_t capacity = N;
+	static constexpr bool is_const_element = std::is_const_v<T>;
 	using element = std::remove_const_t<T>;
 };
 
@@ -92,6 +93,7 @@ struct sequence_traits<std::span<T, E>>
 {
 	static constexpr bool is_sequence = std::is_const_v<T>;
 	static constexpr std::size_t capacity = 0;
+	static constexpr bool is_const_element = false;
 	using element = std::remove_const_t<T>;
 };
 
@@ -100,6 +102,7 @@ struct sequence_traits<repeated<T, N>>
 {
 	static constexpr bool is_sequence = true;
 	static constexpr std::size_t capacity = N;
+	static constexpr bool is_const_element = std::is_const_v<T>;
 	using element = std::remove_const_t<T>;
 };
 
@@ -573,7 +576,8 @@ consteval void check_member_type()
 template <typename T>
 consteval void check_decodable()
 {
-	if constexpr ( !std::is_same_v<T, std::monostate> )
+	static_assert( !std::is_const_v<T>, "pb: decode_const_member: decode cannot write to a const member" );
+	if constexpr ( !std::is_const_v<T> && !std::is_same_v<T, std::monostate> )
 	{
 		constexpr field_kind kind = kind_of<T>();
 
@@ -585,6 +589,8 @@ consteval void check_decodable()
 			static_assert( !is_fixed_span<T>,
 			               "pb: decode_fixed_span: a std::span with a static extent is encode-only, "
 			               "use std::span<const T> or pb::repeated to decode" );
+			static_assert( !sequence_traits<T>::is_const_element,
+			               "pb: decode_const_member: decode cannot write to a const member" );
 			check_decodable<element_t<T>>();
 		}
 		else if constexpr ( kind == field_kind::BYTES )
@@ -592,6 +598,13 @@ consteval void check_decodable()
 			static_assert( !is_std_span<T> || std::is_same_v<T, std::span<const std::uint8_t>>,
 			               "pb: decode_fixed_span: a std::span with a static extent is encode-only, "
 			               "use std::span<const std::uint8_t> or std::array to decode" );
+			static_assert( !sequence_traits<T>::is_const_element,
+			               "pb: decode_const_member: decode cannot write to a const member" );
+		}
+		else if constexpr ( kind == field_kind::FIXED_BYTES )
+		{
+			static_assert( !sequence_traits<T>::is_const_element,
+			               "pb: decode_const_member: decode cannot write to a const member" );
 		}
 		else if constexpr ( kind == field_kind::OPTIONAL )
 		{

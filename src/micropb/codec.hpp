@@ -266,13 +266,13 @@ template <typename O>
 template <std::size_t I, typename V>
 [[nodiscard]] void* alternative_at( V& value, bool select )
 {
-	// An alternative with a `const` member is encode-only: no `emplace`.
+	// An alternative that is `const` or has a `const` member is encode-only: no `emplace`.
 	if ( select && value.index() != I )
 	{
-		if constexpr ( requires { value.template emplace<I>(); } )
+		if constexpr ( !std::is_const_v<std::variant_alternative_t<I, V>> && requires { value.template emplace<I>(); } )
 			value.template emplace<I>();
 	}
-	return std::get_if<I>( &value );
+	return const_cast<void*>( static_cast<const void*>( std::get_if<I>( &value ) ) );
 }
 
 template <typename V, std::size_t... I>
