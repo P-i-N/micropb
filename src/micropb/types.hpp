@@ -22,8 +22,10 @@ enum class error
 	INVALID_WIRE_TYPE,
 	/// decode: a key has field number 0 or a field number above 2^29 - 1.
 	INVALID_TAG,
-	/// decode: a field has more elements or bytes than its container holds.
+	/// decode: a field has more elements or bytes than its `pb::repeated` or `std::array` holds.
 	CAPACITY_EXCEEDED,
+	/// decode: the arena has no space for the items of a repeated field.
+	ARENA_FULL,
 };
 
 /// Wire types of proto3 that this library supports. It does not support the group types (3, 4).
@@ -178,6 +180,40 @@ private:
 
 	std::span<T> _storage;
 	std::size_t _count = 0;
+};
+
+/// Memory for the items of repeated fields that `decode` makes. The caller owns
+/// the storage. The arena gives out aligned blocks from the start of the storage
+/// and never frees one block: `clear()` frees all. Does not allocate.
+struct arena
+{
+	constexpr explicit arena( std::span<std::uint8_t> storage ) : _storage( storage ) {}
+
+	/// Bytes that the blocks use, with the padding for alignment.
+	[[nodiscard]] constexpr std::size_t used() const { return _used; }
+	[[nodiscard]] constexpr std::size_t capacity() const { return _storage.size(); }
+
+	/// Frees all blocks. Each message that `decode` wrote with this arena is then not valid.
+	constexpr void clear() { _used = 0; }
+
+	/// A block of `size` bytes at a multiple of `alignment`, or null when the
+	/// storage is too small. `alignment` is a power of 2.
+	[[nodiscard]] void* allocate( std::size_t size, std::size_t alignment )
+	{
+		const auto address = reinterpret_cast<std::uintptr_t>( _storage.data() ) + _used;
+		const std::size_t padding = ( ( address + alignment - 1 ) & ~( alignment - 1 ) ) - address;
+		const std::size_t remaining = _storage.size() - _used;
+		if ( padding > remaining || size > remaining - padding )
+			return nullptr;
+
+		std::uint8_t* block = _storage.data() + _used + padding;
+		_used += padding + size;
+		return block;
+	}
+
+private:
+	std::span<std::uint8_t> _storage;
+	std::size_t _used = 0;
 };
 
 } // namespace pb
