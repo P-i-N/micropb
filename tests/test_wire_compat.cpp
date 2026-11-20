@@ -44,6 +44,36 @@ struct span_lists
 	std::span<const sint64> zz;
 };
 
+} // namespace
+
+template <>
+struct pb::fields_of<pose_owned>
+  : pb::field_list<pose_owned,
+                   pb::field_at<decltype( pose_owned::pos ), 1, offsetof( pose_owned, pos )>,
+                   pb::field_at<decltype( pose_owned::rot ), 2, offsetof( pose_owned, rot )>>
+{};
+
+template <>
+struct pb::fields_of<envelope_owned>
+  : pb::field_list<envelope_owned,
+                   pb::field_at<decltype( envelope_owned::id ), 1, offsetof( envelope_owned, id )>,
+                   pb::field_at<decltype( envelope_owned::payload ), 2, offsetof( envelope_owned, payload ), 1>,
+                   pb::field_at<decltype( envelope_owned::payload ), 3, offsetof( envelope_owned, payload ), 2>,
+                   pb::field_at<decltype( envelope_owned::payload ), 4, offsetof( envelope_owned, payload ), 3>>
+{};
+
+template <>
+struct pb::fields_of<span_lists>
+  : pb::field_list<span_lists,
+                   pb::field_at<decltype( span_lists::ints ), 1, offsetof( span_lists, ints )>,
+                   pb::field_at<decltype( span_lists::floats ), 2, offsetof( span_lists, floats )>,
+                   pb::field_at<decltype( span_lists::names ), 3, offsetof( span_lists, names )>,
+                   pb::field_at<decltype( span_lists::items ), 4, offsetof( span_lists, items )>,
+                   pb::field_at<decltype( span_lists::zz ), 5, offsetof( span_lists, zz )>>
+{};
+
+namespace {
+
 inline constexpr std::size_t canary_size = 16;
 inline constexpr std::uint8_t canary = 0xA5;
 

@@ -1,10 +1,15 @@
+#include <cstddef>
 #include <cstdint>
 
-#include <micropb/schema.hpp>
+#include <micropb/codec.hpp>
 
 struct msg
 {
-	[[= pb::tag{ 19000 }]] std::int32_t a;
+	std::int32_t a;
 };
 
-static_assert( pb::build_tag_table<msg>().size() == 1 );
+template <>
+struct pb::fields_of<msg> : pb::field_list<msg, pb::field_at<decltype( msg::a ), 19000, offsetof( msg, a )>>
+{};
+
+static_assert( pb::detail::message_descriptor<msg>::value.count == 1 );

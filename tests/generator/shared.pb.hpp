@@ -20,7 +20,7 @@ struct Point {
 
 } // namespace shared::types
 
-// Field lists: with these, the messages also work on a compiler without reflection.
+// Field lists.
 
 template <>
 struct pb::fields_of<::shared::types::Point> : pb::field_list<::shared::types::Point,

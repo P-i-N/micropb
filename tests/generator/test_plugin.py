@@ -148,7 +148,7 @@ class CoreTest(unittest.TestCase):
 
             } // namespace app::link
 
-            // Field lists: with these, the messages also work on a compiler without reflection.
+            // Field lists.
 
             template <>
             struct pb::fields_of<::app::link::Inner> : pb::field_list<::app::link::Inner,

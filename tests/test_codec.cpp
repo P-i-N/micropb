@@ -27,7 +27,7 @@ struct nothing
 struct holder
 {
 	std::uint32_t id;
-	[[= pb::tag{ 5 }]] plain child;
+	plain child;
 	std::optional<float> maybe;
 	pb::repeated<float, 4> floats;
 	pb::repeated<std::uint8_t, 16> blob;
@@ -46,6 +46,36 @@ enum class level : std::int32_t
 {
 	ZERO
 };
+
+} // namespace
+
+template <>
+struct pb::fields_of<plain> : pb::field_list<plain,
+                                             pb::field_at<decltype( plain::a ), 1, offsetof( plain, a )>,
+                                             pb::field_at<decltype( plain::b ), 2, offsetof( plain, b )>,
+                                             pb::field_at<decltype( plain::c ), 3, offsetof( plain, c )>>
+{};
+
+template <>
+struct pb::fields_of<nothing> : pb::field_list<nothing>
+{};
+
+template <>
+struct pb::fields_of<holder> : pb::field_list<holder,
+                                              pb::field_at<decltype( holder::id ), 1, offsetof( holder, id )>,
+                                              pb::field_at<decltype( holder::child ), 5, offsetof( holder, child )>,
+                                              pb::field_at<decltype( holder::maybe ), 6, offsetof( holder, maybe )>,
+                                              pb::field_at<decltype( holder::floats ), 7, offsetof( holder, floats )>,
+                                              pb::field_at<decltype( holder::blob ), 8, offsetof( holder, blob )>,
+                                              pb::field_at<decltype( holder::mac ), 9, offsetof( holder, mac )>,
+                                              pb::field_at<decltype( holder::view ), 10, offsetof( holder, view )>,
+                                              pb::field_at<decltype( holder::name ), 11, offsetof( holder, name )>,
+                                              pb::field_at<decltype( holder::none ), 12, offsetof( holder, none )>,
+                                              pb::field_at<decltype( holder::choice ), 13, offsetof( holder, choice ), 1>,
+                                              pb::field_at<decltype( holder::choice ), 14, offsetof( holder, choice ), 2>>
+{};
+
+namespace {
 
 constexpr const d::message_desc& p = d::message_descriptor<plain>::value;
 constexpr const d::message_desc& h = d::message_descriptor<holder>::value;
@@ -257,8 +287,8 @@ struct all
 	pb::repeated<double, 2> ds;
 	pb::repeated<inner, 3> items;
 	pb::repeated<std::string_view, 3> names;
-	[[= pb::oneof_tags<60, 61, 62>{}]] choice payload;
-	[[= pb::tag{ 100 }]] std::int16_t tail;
+	choice payload;
+	std::int16_t tail;
 };
 
 /// The same message, with the storage types that only `encode` accepts in the
@@ -296,9 +326,110 @@ struct all_views
 	std::array<double, 2> ds;
 	pb::repeated<inner, 3> items;
 	pb::repeated<std::string_view, 3> names;
-	[[= pb::oneof_tags<60, 61, 62>{}]] choice payload;
-	[[= pb::tag{ 100 }]] std::int16_t tail;
+	choice payload;
+	std::int16_t tail;
 };
+
+} // namespace
+
+template <>
+struct pb::fields_of<inner> : pb::field_list<inner,
+                                             pb::field_at<decltype( inner::x ), 1, offsetof( inner, x )>,
+                                             pb::field_at<decltype( inner::label ), 2, offsetof( inner, label )>,
+                                             pb::field_at<decltype( inner::z ), 3, offsetof( inner, z )>>
+{};
+
+template <>
+struct pb::fields_of<pose> : pb::field_list<pose,
+                                            pb::field_at<decltype( pose::pos ), 1, offsetof( pose, pos )>,
+                                            pb::field_at<decltype( pose::rot ), 2, offsetof( pose, rot )>>
+{};
+
+template <>
+struct pb::fields_of<ping> : pb::field_list<ping, pb::field_at<decltype( ping::seq ), 1, offsetof( ping, seq )>>
+{};
+
+template <>
+struct pb::fields_of<all>
+  : pb::field_list<all,
+                   pb::field_at<decltype( all::flag ), 1, offsetof( all, flag )>,
+                   pb::field_at<decltype( all::i8 ), 2, offsetof( all, i8 )>,
+                   pb::field_at<decltype( all::i16 ), 3, offsetof( all, i16 )>,
+                   pb::field_at<decltype( all::i32 ), 4, offsetof( all, i32 )>,
+                   pb::field_at<decltype( all::i64 ), 5, offsetof( all, i64 )>,
+                   pb::field_at<decltype( all::u8 ), 6, offsetof( all, u8 )>,
+                   pb::field_at<decltype( all::u16 ), 7, offsetof( all, u16 )>,
+                   pb::field_at<decltype( all::u32 ), 8, offsetof( all, u32 )>,
+                   pb::field_at<decltype( all::u64 ), 9, offsetof( all, u64 )>,
+                   pb::field_at<decltype( all::s32 ), 10, offsetof( all, s32 )>,
+                   pb::field_at<decltype( all::s64 ), 11, offsetof( all, s64 )>,
+                   pb::field_at<decltype( all::fx32 ), 12, offsetof( all, fx32 )>,
+                   pb::field_at<decltype( all::fx64 ), 13, offsetof( all, fx64 )>,
+                   pb::field_at<decltype( all::sfx32 ), 14, offsetof( all, sfx32 )>,
+                   pb::field_at<decltype( all::sfx64 ), 15, offsetof( all, sfx64 )>,
+                   pb::field_at<decltype( all::f ), 16, offsetof( all, f )>,
+                   pb::field_at<decltype( all::d ), 17, offsetof( all, d )>,
+                   pb::field_at<decltype( all::m ), 18, offsetof( all, m )>,
+                   pb::field_at<decltype( all::g ), 19, offsetof( all, g )>,
+                   pb::field_at<decltype( all::name ), 20, offsetof( all, name )>,
+                   pb::field_at<decltype( all::view ), 21, offsetof( all, view )>,
+                   pb::field_at<decltype( all::mac ), 22, offsetof( all, mac )>,
+                   pb::field_at<decltype( all::blob ), 23, offsetof( all, blob )>,
+                   pb::field_at<decltype( all::child ), 24, offsetof( all, child )>,
+                   pb::field_at<decltype( all::maybe ), 25, offsetof( all, maybe )>,
+                   pb::field_at<decltype( all::maybe_child ), 26, offsetof( all, maybe_child )>,
+                   pb::field_at<decltype( all::ints ), 27, offsetof( all, ints )>,
+                   pb::field_at<decltype( all::zz ), 28, offsetof( all, zz )>,
+                   pb::field_at<decltype( all::ds ), 29, offsetof( all, ds )>,
+                   pb::field_at<decltype( all::items ), 30, offsetof( all, items )>,
+                   pb::field_at<decltype( all::names ), 31, offsetof( all, names )>,
+                   pb::field_at<decltype( all::payload ), 60, offsetof( all, payload ), 1>,
+                   pb::field_at<decltype( all::payload ), 61, offsetof( all, payload ), 2>,
+                   pb::field_at<decltype( all::payload ), 62, offsetof( all, payload ), 3>,
+                   pb::field_at<decltype( all::tail ), 100, offsetof( all, tail )>>
+{};
+
+template <>
+struct pb::fields_of<all_views>
+  : pb::field_list<all_views,
+                   pb::field_at<decltype( all_views::flag ), 1, offsetof( all_views, flag )>,
+                   pb::field_at<decltype( all_views::i8 ), 2, offsetof( all_views, i8 )>,
+                   pb::field_at<decltype( all_views::i16 ), 3, offsetof( all_views, i16 )>,
+                   pb::field_at<decltype( all_views::i32 ), 4, offsetof( all_views, i32 )>,
+                   pb::field_at<decltype( all_views::i64 ), 5, offsetof( all_views, i64 )>,
+                   pb::field_at<decltype( all_views::u8 ), 6, offsetof( all_views, u8 )>,
+                   pb::field_at<decltype( all_views::u16 ), 7, offsetof( all_views, u16 )>,
+                   pb::field_at<decltype( all_views::u32 ), 8, offsetof( all_views, u32 )>,
+                   pb::field_at<decltype( all_views::u64 ), 9, offsetof( all_views, u64 )>,
+                   pb::field_at<decltype( all_views::s32 ), 10, offsetof( all_views, s32 )>,
+                   pb::field_at<decltype( all_views::s64 ), 11, offsetof( all_views, s64 )>,
+                   pb::field_at<decltype( all_views::fx32 ), 12, offsetof( all_views, fx32 )>,
+                   pb::field_at<decltype( all_views::fx64 ), 13, offsetof( all_views, fx64 )>,
+                   pb::field_at<decltype( all_views::sfx32 ), 14, offsetof( all_views, sfx32 )>,
+                   pb::field_at<decltype( all_views::sfx64 ), 15, offsetof( all_views, sfx64 )>,
+                   pb::field_at<decltype( all_views::f ), 16, offsetof( all_views, f )>,
+                   pb::field_at<decltype( all_views::d ), 17, offsetof( all_views, d )>,
+                   pb::field_at<decltype( all_views::m ), 18, offsetof( all_views, m )>,
+                   pb::field_at<decltype( all_views::g ), 19, offsetof( all_views, g )>,
+                   pb::field_at<decltype( all_views::name ), 20, offsetof( all_views, name )>,
+                   pb::field_at<decltype( all_views::view ), 21, offsetof( all_views, view )>,
+                   pb::field_at<decltype( all_views::mac ), 22, offsetof( all_views, mac )>,
+                   pb::field_at<decltype( all_views::blob ), 23, offsetof( all_views, blob )>,
+                   pb::field_at<decltype( all_views::child ), 24, offsetof( all_views, child )>,
+                   pb::field_at<decltype( all_views::maybe ), 25, offsetof( all_views, maybe )>,
+                   pb::field_at<decltype( all_views::maybe_child ), 26, offsetof( all_views, maybe_child )>,
+                   pb::field_at<decltype( all_views::ints ), 27, offsetof( all_views, ints )>,
+                   pb::field_at<decltype( all_views::zz ), 28, offsetof( all_views, zz )>,
+                   pb::field_at<decltype( all_views::ds ), 29, offsetof( all_views, ds )>,
+                   pb::field_at<decltype( all_views::items ), 30, offsetof( all_views, items )>,
+                   pb::field_at<decltype( all_views::names ), 31, offsetof( all_views, names )>,
+                   pb::field_at<decltype( all_views::payload ), 60, offsetof( all_views, payload ), 1>,
+                   pb::field_at<decltype( all_views::payload ), 61, offsetof( all_views, payload ), 2>,
+                   pb::field_at<decltype( all_views::payload ), 62, offsetof( all_views, payload ), 3>,
+                   pb::field_at<decltype( all_views::tail ), 100, offsetof( all_views, tail )>>
+{};
+
+namespace {
 
 constexpr std::array<std::uint8_t, 3> raw{ 9, 8, 7 };
 constexpr std::array<std::int32_t, 3> int_values{ 1, -1, 100000 };

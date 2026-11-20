@@ -9,14 +9,6 @@
 
 #include <micropb/micropb.hpp>
 
-// With reflection, the annotations give the field numbers and the library makes the field list.
-// Without reflection, the `pb::fields_of` specializations below give the same list.
-#if defined( __cpp_impl_reflection )
-#define TEST_ANNOTATION( ... ) [[= __VA_ARGS__]]
-#else
-#define TEST_ANNOTATION( ... )
-#endif
-
 namespace manual {
 
 struct inner
@@ -29,9 +21,9 @@ struct message
 {
 	std::uint32_t id;
 	pb::repeated<float, 3> values;
-	TEST_ANNOTATION( pb::tag{ 5 } ) std::optional<inner> child;
-	TEST_ANNOTATION( pb::oneof_tags<10, 11>{} ) std::variant<std::monostate, inner, std::uint32_t> choice;
-	TEST_ANNOTATION( pb::tag{ 3 } ) std::array<std::uint8_t, 4> key;
+	std::optional<inner> child;
+	std::variant<std::monostate, inner, std::uint32_t> choice;
+	std::array<std::uint8_t, 4> key;
 	pb::sint32 delta;
 };
 
@@ -238,16 +230,6 @@ static_assert( d::is_recursive<manual::var_node>() && d::is_recursive<manual::va
 
 static_assert( d::needs_arena<manual::spans>() && !d::needs_arena<manual::message>() &&
                !d::needs_arena<manual::inner>() && !d::needs_arena<manual::empty>() );
-
-#if defined( __cpp_impl_reflection )
-// The list that reflection makes from the struct is the same type as the list above.
-static_assert( std::is_same_v<d::reflected_fields<manual::inner>, d::field_list_of<manual::inner>> );
-static_assert( std::is_same_v<d::reflected_fields<manual::message>, d::field_list_of<manual::message>> );
-static_assert( std::is_same_v<d::reflected_fields<manual::empty>, d::field_list_of<manual::empty>> );
-static_assert( std::is_same_v<d::reflected_fields<manual::fixed>, d::field_list_of<manual::fixed>> );
-static_assert( std::is_same_v<d::reflected_fields<manual::constants>, d::field_list_of<manual::constants>> );
-static_assert( std::is_same_v<d::reflected_fields<manual::spans>, d::field_list_of<manual::spans>> );
-#endif
 
 template <typename T, std::size_t N>
 bool encodes_to( const T& message, const std::array<std::uint8_t, N>& wire )

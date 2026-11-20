@@ -11,24 +11,12 @@
 #include <utility>
 #include <variant>
 
-#if defined( __cpp_impl_reflection )
-#include <meta>
-#endif
-
 #include <micropb/types.hpp>
 #include <micropb/wire.hpp>
-
-// This header has two parts.
-// Part 1 has the rules for member types, field numbers and field lists. It
-// does not use reflection.
-// Part 2 makes the field list of a struct with reflection. A compiler without
-// reflection does not get this part: there, each message type needs a
-// `pb::fields_of` specialization.
 
 namespace pb {
 
 ////////////////////////////////////////////////////////////////////////////////
-// Part 1: rules
 
 /// Category of a member type. It sets how the codec writes and reads the member.
 enum class field_kind : std::uint8_t
@@ -409,9 +397,11 @@ struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>>
 		return numbers;
 	}
 
-	/// Applies the rules for the entries, the field numbers, the member types and recursion.
+	/// Applies the rules for the message type, the entries, the field numbers, the member types and recursion.
 	static consteval void check()
 	{
+		static_assert( std::is_class_v<T> && std::is_aggregate_v<T>,
+		               "pb: not_aggregate: a message must be a class aggregate" );
 		static_assert( ( ( Offset <= max_offset ) && ... ),
 		               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
 		static_assert( ( ( Offset + sizeof( M ) <= sizeof( T ) ) && ... ),
@@ -630,218 +620,14 @@ consteval void check_no_arena()
 
 } // namespace detail
 
-#if defined( __cpp_impl_reflection )
-
 ////////////////////////////////////////////////////////////////////////////////
-// Part 2: field lists from reflection
-
-/// `field_info::alternative` of a field that is not a `std::variant` alternative.
-inline constexpr std::size_t no_alternative = std::size_t( -1 );
-
-/// One entry of the tag table: a plain member, or one alternative of a `std::variant` member.
-struct field_info
-{
-	std::meta::info member;
-	std::uint32_t number;
-	/// Index into the `std::variant`, or `no_alternative`.
-	std::size_t alternative;
-};
-
-namespace detail {
-
-/// `true` when `type` is a specialization of the class template `templ`.
-[[nodiscard]] consteval bool is_instance( std::meta::info type, std::meta::info templ )
-{
-	type = std::meta::dealias( type );
-	return std::meta::has_template_arguments( type ) && std::meta::template_of( type ) == templ;
-}
-
-template <typename T>
-[[nodiscard]] consteval std::span<const std::meta::info> members()
-{
-	return std::define_static_array( std::meta::nonstatic_data_members_of( ^^T, std::meta::access_context::current() ) );
-}
-
-/// Field number from the `pb::tag` annotation of `member`.
-[[nodiscard]] consteval std::optional<std::uint32_t> tag_annotation( std::meta::info member )
-{
-	for ( std::meta::info annotation : std::meta::annotations_of( member ) )
-	{
-		if ( std::meta::remove_cvref( std::meta::type_of( annotation ) ) == ^^tag )
-			return std::meta::extract<tag>( annotation ).value;
-	}
-	return std::nullopt;
-}
-
-/// Type of the `pb::oneof_tags` annotation of `member`.
-[[nodiscard]] consteval std::optional<std::meta::info> oneof_tags_annotation( std::meta::info member )
-{
-	for ( std::meta::info annotation : std::meta::annotations_of( member ) )
-	{
-		const std::meta::info type = std::meta::remove_cvref( std::meta::type_of( annotation ) );
-		if ( is_instance( type, ^^oneof_tags ) )
-			return type;
-	}
-	return std::nullopt;
-}
-
-template <typename T>
-[[nodiscard]] consteval bool has_bit_field()
-{
-	for ( std::meta::info member : std::meta::nonstatic_data_members_of( ^^T, std::meta::access_context::unchecked() ) )
-	{
-		if ( std::meta::is_bit_field( member ) )
-			return true;
-	}
-	return false;
-}
-
-/// Rejects message types of which reflection does not show all data members,
-/// and members that the codec cannot address.
-template <typename T>
-consteval void check_message_type()
-{
-	static_assert( std::is_class_v<T> && std::is_aggregate_v<T>,
-	               "pb: not_aggregate: a message must be a class aggregate" );
-	static_assert( std::meta::bases_of( ^^T, std::meta::access_context::unchecked() ).empty(),
-	               "pb: base_class: a message cannot have a base class, because the codec does not see its members" );
-	static_assert(
-	  std::meta::nonstatic_data_members_of( ^^T, std::meta::access_context::unchecked() ).size() == members<T>().size(),
-	  "pb: inaccessible_member: all data members of a message must be public" );
-	static_assert( !has_bit_field<T>(), "pb: bit_field: a message member cannot be a bit-field" );
-}
-
-template <typename T>
-[[nodiscard]] consteval std::size_t field_count()
-{
-	std::size_t count = 0;
-	for ( std::meta::info member : members<T>() )
-	{
-		const std::meta::info type = std::meta::dealias( std::meta::type_of( member ) );
-		if ( is_instance( type, ^^std::variant ) )
-			count += std::meta::template_arguments_of( type ).size() - 1;
-		else
-			++count;
-	}
-	return count;
-}
-
-/// Tag table in declaration order. Applies the rules for `pb::tag` and `pb::oneof_tags`, and the rules for the
-/// member types.
-template <typename T>
-[[nodiscard]] consteval std::array<field_info, field_count<T>()> collect_fields()
-{
-	std::array<field_info, field_count<T>()> fields{};
-	std::size_t index = 0;
-	std::uint32_t next = 1;
-
-	template for ( constexpr std::meta::info member : members<T>() )
-	{
-		using type = std::remove_const_t<typename[:std::meta::type_of( member ):]>;
-		check_member_type<type>();
-
-		constexpr std::optional<std::uint32_t> number = tag_annotation( member );
-		constexpr std::optional<std::meta::info> listed = oneof_tags_annotation( member );
-
-		if constexpr ( kind_of<type>() != field_kind::ONEOF )
-		{
-			static_assert( !listed, "pb: oneof_tags_on_non_variant: use pb::tag on a member that is not a std::variant" );
-			if ( number )
-				next = *number;
-			fields[index++] = { member, next++, no_alternative };
-		}
-		else
-		{
-			static_assert( !number, "pb: tag_on_variant: use pb::oneof_tags on a std::variant member" );
-			constexpr std::size_t count = std::variant_size_v<type> - 1;
-			if constexpr ( listed )
-			{
-				static_assert( std::meta::template_arguments_of( *listed ).size() == count,
-				               "pb: oneof_tags_count: pb::oneof_tags must list one tag for each alternative after "
-				               "std::monostate" );
-			}
-
-			for ( std::size_t i = 0; i < count; ++i )
-			{
-				if constexpr ( listed )
-					next = std::meta::extract<std::uint32_t>( std::meta::template_arguments_of( *listed )[i] );
-				fields[index++] = { member, next++, i + 1 };
-			}
-		}
-	}
-	return fields;
-}
-
-template <typename T>
-[[nodiscard]] consteval std::array<field_info, field_count<T>()> sorted_fields()
-{
-	auto fields = collect_fields<T>();
-	std::sort(
-	  fields.begin(), fields.end(), []( const field_info& a, const field_info& b ) { return a.number < b.number; } );
-	return fields;
-}
-
-/// The `pb::field_list` of the struct `T`: one `pb::field_at` for each entry
-/// of the tag table, in declaration order.
-template <typename T>
-[[nodiscard]] consteval std::meta::info make_field_list()
-{
-	std::array<std::meta::info, field_count<T>() + 1> arguments{ ^^T };
-	std::size_t index = 1;
-	for ( const field_info& field : collect_fields<T>() )
-	{
-		const auto offset = static_cast<std::size_t>( std::meta::offset_of( field.member ).bytes );
-		const std::size_t alternative = field.alternative == no_alternative ? 0 : field.alternative;
-		arguments[index++] = std::meta::substitute( ^^field_at,
-		                                            {
-		                                              std::meta::type_of( field.member ),
-		                                              std::meta::reflect_constant( field.number ),
-		                                              std::meta::reflect_constant( offset ),
-		                                              std::meta::reflect_constant( alternative ) } );
-	}
-	return std::meta::substitute( ^^field_list, arguments );
-}
-
-/// The field list of the struct `T`. Applies the rules for the message type first, so that their error comes
-/// before an error of reflection.
-template <typename T>
-[[nodiscard]] consteval std::meta::info reflect_field_list()
-{
-	check_message_type<T>();
-	return make_field_list<T>();
-}
-
-template <typename T>
-using reflected_fields = typename[:reflect_field_list<T>():];
-
-} // namespace detail
-
-/// Fields of the struct `T`, in ascending field number, with the reflection of
-/// each member. The schema generator uses this table. It reads the members and
-/// annotations of `T`, not a `pb::fields_of` specialization. An invalid message
-/// type, tag or member type is a compile error, by the same rules as in the codec.
-template <typename T>
-[[nodiscard]] consteval std::span<const field_info> build_tag_table()
-{
-	detail::list_traits<detail::reflected_fields<T>>::check();
-	return std::define_static_array( detail::sorted_fields<T>() );
-}
-
-/// A struct without a `pb::fields_of` specialization gets its field list from reflection.
-template <typename T>
-struct fields_of : detail::reflected_fields<T>
-{};
-
-#else
 
 template <typename T>
 struct fields_of
 {
 	static_assert( sizeof( T ) == 0,
-	               "pb: no_field_list: this message type has no pb::fields_of. Generate it with protoc-gen-micropb, "
-	               "write it by hand, or use a compiler with reflection" );
+	               "pb: no_field_list: this message type has no pb::fields_of. Generate it with protoc-gen-micropb "
+	               "or write it by hand" );
 };
-
-#endif
 
 } // namespace pb

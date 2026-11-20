@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <cstdint>
 #include <span>
 
@@ -12,6 +13,14 @@ struct msg
 {
 	inner child;
 };
+
+template <>
+struct pb::fields_of<inner> : pb::field_list<inner, pb::field_at<decltype( inner::ints ), 1, offsetof( inner, ints )>>
+{};
+
+template <>
+struct pb::fields_of<msg> : pb::field_list<msg, pb::field_at<decltype( msg::child ), 1, offsetof( msg, child )>>
+{};
 
 msg value{};
 const auto result = pb::decode( {}, value );

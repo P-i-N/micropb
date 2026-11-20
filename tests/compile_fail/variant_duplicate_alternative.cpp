@@ -1,11 +1,18 @@
+#include <cstddef>
 #include <cstdint>
 #include <variant>
 
-#include <micropb/schema.hpp>
+#include <micropb/codec.hpp>
 
 struct msg
 {
 	std::variant<std::monostate, std::int32_t, std::int32_t> v;
 };
 
-static_assert( pb::build_tag_table<msg>().size() == 2 );
+template <>
+struct pb::fields_of<msg> : pb::field_list<msg,
+                                           pb::field_at<decltype( msg::v ), 1, offsetof( msg, v ), 1>,
+                                           pb::field_at<decltype( msg::v ), 2, offsetof( msg, v ), 2>>
+{};
+
+static_assert( pb::detail::message_descriptor<msg>::value.count == 2 );

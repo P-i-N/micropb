@@ -19,7 +19,7 @@ struct reader {
 
 } // namespace detail
 
-// Field lists: with these, the messages also work on a compiler without reflection.
+// Field lists.
 
 template <>
 struct pb::fields_of<::detail::tag> : pb::field_list<::detail::tag,
