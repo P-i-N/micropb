@@ -540,8 +540,10 @@ class Header:
 
             stack.append(message)
             for field in message.desc.field:
-                if field.type == Field.TYPE_MESSAGE and self.types[field.type_name].file.name == self.file.name:
-                    visit(self.types[field.type_name])
+                if field.type == Field.TYPE_MESSAGE:
+                    target = self.types[field.type_name]
+                    if target.file.name == self.file.name and not target.desc.options.map_entry:
+                        visit(target)
             stack.pop()
             order.append(message)
 
@@ -554,7 +556,8 @@ class Header:
         if self.file.syntax != "proto3":
             raise self.error("only proto3 files are supported")
 
-        types = [each for each in self.types.values() if each.file.name == self.file.name]
+        types = [each for each in self.types.values()
+                 if each.file.name == self.file.name and (each.is_enum or not each.desc.options.map_entry)]
         names = [each.name for each in types]
         for name in names:
             if names.count(name) > 1:
