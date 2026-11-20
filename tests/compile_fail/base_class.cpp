@@ -1,6 +1,6 @@
 #include <cstdint>
 
-#include <micropb/meta_schema.hpp>
+#include <micropb/schema.hpp>
 
 struct base
 {

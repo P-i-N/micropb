@@ -2,7 +2,7 @@
 #include <optional>
 #include <variant>
 
-#include <micropb/meta_schema.hpp>
+#include <micropb/schema.hpp>
 
 struct msg
 {
