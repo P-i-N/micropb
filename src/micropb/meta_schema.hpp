@@ -625,6 +625,11 @@ consteval void check_member_type()
 		               "pb: repeated_optional: the element of a repeated field cannot be a std::optional" );
 		static_assert( element_kind != field_kind::ONEOF,
 		               "pb: repeated_variant: the element of a repeated field cannot be a std::variant" );
+		// The arena never calls a destructor, and a new block gets the old items with `memcpy`.
+		if constexpr ( is_std_span<M> && !is_fixed_span<M> )
+			static_assert( std::is_trivially_copyable_v<element> && std::is_trivially_destructible_v<element>,
+			               "pb: span_element_trivial: the element of a std::span<const T> repeated field must be "
+			               "trivially copyable and trivially destructible" );
 	}
 }
 

@@ -329,9 +329,6 @@ template <typename S>
 	}
 	else if constexpr ( is_std_span<S> && !is_fixed_span<S> )
 	{
-		static_assert( std::is_trivially_copyable_v<element> && std::is_trivially_destructible_v<element>,
-		               "pb: span_element_trivial: the element of a std::span<const T> repeated field must be "
-		               "trivially copyable and trivially destructible" );
 		return { item,  access_sequence<S>,        bind_span<S>, construct_item<element>, item_size, 0, 0,
 		         align, sequence_storage::ACCESSOR };
 	}
