@@ -555,8 +555,8 @@ The interpreter has a fixed size. Each message type adds only tables and the sma
 
 | Message types | Bytes |
 | ---: | ---: |
-| 16 | 10520 |
-| 32 | 14856 |
+| 16 | 9920 |
+| 32 | 14256 |
 | each more type | 271 |
 
 The first design of this library made one template copy of the codec for each message type: 35490 bytes for 32 message types, about 940 bytes for each more type. The price of the interpreter is speed, which is not important for a serial link.

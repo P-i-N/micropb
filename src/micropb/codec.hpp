@@ -127,6 +127,10 @@ using sequence_binder = void ( * )( void* sequence, void* data, std::size_t coun
 /// Makes a value-initialized element at `item`.
 using item_constructor = void ( * )( void* item );
 
+/// Makes space in the arena block of a span for the elements of a record (`reserve`).
+using sequence_reserver =
+  bool ( * )( const reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory );
+
 enum class sequence_storage : std::uint8_t
 {
 	/// `pb::repeated`: the items are at offset 0, the count is at `count_offset`.
@@ -145,6 +149,9 @@ struct sequence_desc
 	sequence_binder bind;
 	/// `std::span<const T>`: makes each new item in the arena. Null for the other types.
 	item_constructor construct;
+	/// `std::span<const T>`: `reserve`. Null for the other types: then a program
+	/// without a span field does not contain the count.
+	sequence_reserver reserve;
 	std::uint32_t element_size;
 	std::uint32_t capacity;
 	std::uint16_t count_offset;
@@ -299,6 +306,9 @@ template <typename V>
 
 ////////////////////////////////////////////////////////////////////////////////
 
+[[nodiscard]] inline bool reserve(
+  const reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory );
+
 template <typename S>
 [[nodiscard]] consteval sequence_desc describe_sequence()
 {
@@ -313,28 +323,24 @@ template <typename S>
 		static_assert( sequence_access::items_offset<S> == 0 );
 		static_assert( sequence_access::count_offset<S> <= max_offset,
 		               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
-		return { item,
-		         nullptr,
-		         nullptr,
-		         nullptr,
-		         item_size,
-		         capacity,
-		         static_cast<std::uint16_t>( sequence_access::count_offset<S> ),
-		         align,
-		         sequence_storage::REPEATED };
+		return { item,     nullptr,
+		         nullptr,  nullptr,
+		         nullptr,  item_size,
+		         capacity, static_cast<std::uint16_t>( sequence_access::count_offset<S> ),
+		         align,    sequence_storage::REPEATED };
 	}
 	else if constexpr ( is_std_array<S> )
 	{
-		return { item, nullptr, nullptr, nullptr, item_size, capacity, 0, align, sequence_storage::ARRAY };
+		return { item, nullptr, nullptr, nullptr, nullptr, item_size, capacity, 0, align, sequence_storage::ARRAY };
 	}
 	else if constexpr ( is_std_span<S> && !is_fixed_span<S> )
 	{
-		return { item,  access_sequence<S>,        bind_span<S>, construct_item<element>, item_size, 0, 0,
+		return { item,  access_sequence<S>,        bind_span<S>, construct_item<element>, reserve, item_size, 0, 0,
 		         align, sequence_storage::ACCESSOR };
 	}
 	else
 	{
-		return { item, access_sequence<S>, nullptr, nullptr, item_size, 0, 0, align, sequence_storage::ACCESSOR };
+		return { item, access_sequence<S>, nullptr, nullptr, nullptr, item_size, 0, 0, align, sequence_storage::ACCESSOR };
 	}
 }
 
@@ -943,7 +949,7 @@ inline void decode_element( reader& in, wire_type wire, const sequence_desc& seq
 /// record or a single value, also mixed in one message.
 inline void decode_repeated( reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory )
 {
-	if ( sequence.bind != nullptr && !reserve( in, key, sequence, value, memory ) )
+	if ( sequence.reserve != nullptr && !sequence.reserve( in, key, sequence, value, memory ) )
 		return in.fail( error::ARENA_FULL );
 
 	const value_desc& element = *sequence.element;
