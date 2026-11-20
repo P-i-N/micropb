@@ -92,7 +92,7 @@ Style (similar to the STL):
 *   Indentation: keep indentation low. Do not use the arrow anti-pattern. Use early `return` and `continue`. Put empty lines between logical blocks.
 
 Python (`tools/protoc-gen-micropb.py`):
-*   One short file. Use only Python 3 and the `protobuf` package. Do not use syntax that needs Python 3.12 or newer.
+*   One short file. Use only Python 3 and its standard library. Do not use syntax that needs Python 3.12 or newer.
 *   An input that would lose a field or a size is an error that names the field. An option that does not apply is a warning.
 
 Comments:
@@ -197,7 +197,7 @@ Jujutsu:
 
 Working:
 *   Read the applicable code and docs first. README.md gives the build commands, the test commands, and the layout. Do not guess them.
-*   On Windows, the build uses GCC 16 from MSYS2 UCRT64 (`C:\msys64\ucrt64\bin` first in `PATH`). With that folder first, `python` is the MSYS2 Python, which has no `protobuf` package. For the plugin and its tests, use the Python that has the package.
+*   On Windows, the build uses GCC 16 from MSYS2 UCRT64 (`C:\msys64\ucrt64\bin` first in `PATH`). With that folder first, `python` is the MSYS2 Python; the plugin and its tests also run with it.
 *   Support claims with evidence: cite `path:line`, quote the build/test output, and show the test failure before the fix and the pass after it.
 *   For a wire-format claim, compare with `protoc` (`protoc --encode` or `--decode`). Do not compute protobuf bytes by hand and give them as fact.
 *   Keep diffs small and focused. Divide a large change into commits that a person can review. State what each commit contains.

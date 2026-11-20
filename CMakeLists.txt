@@ -250,7 +250,7 @@ if(MICROPB_TESTS)
         endif()
     endforeach()
 
-    # The tests of tools/protoc-gen-micropb.py need Python, the Python package protobuf and protoc.
+    # The tests of tools/protoc-gen-micropb.py need Python and protoc.
     # Without them, CTest does not have the test `generator`. The other tests do not need these tools.
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
@@ -260,7 +260,7 @@ if(MICROPB_TESTS)
         if(micropb_plugin_tools EQUAL 0)
             add_test(NAME generator COMMAND ${Python3_EXECUTABLE} ${micropb_plugin_tests})
         else()
-            message(STATUS "micropb: no protoc or no Python package protobuf, the test `generator` is off")
+            message(STATUS "micropb: no protoc, the test `generator` is off")
         endif()
     endif()
 

@@ -2,7 +2,7 @@
 """Tests of tools/protoc-gen-micropb.py. Each test runs the plugin through protoc.
 
     python tests/generator/test_plugin.py                 run the tests
-    python tests/generator/test_plugin.py --check-tools   return 0 when protoc and protobuf are available
+    python tests/generator/test_plugin.py --check-tools   return 0 when protoc is available
 
 protoc comes from the environment variable PROTOC, from PATH, or from the Python module grpc_tools.
 MICROPB_UPDATE_GENERATED=1 writes the checked-in headers again.
@@ -37,7 +37,7 @@ def protoc_command():
 
 
 def tools_available():
-    return protoc_command() is not None and importlib.util.find_spec("google.protobuf") is not None
+    return protoc_command() is not None
 
 
 class Result(NamedTuple):
@@ -47,13 +47,14 @@ class Result(NamedTuple):
 
 
 def make_starter(folder):
-    """protoc needs an executable file. This one starts the plugin with the Python of the tests."""
+    """protoc needs an executable file. This one starts the plugin with the Python of the tests. `-S` removes the
+    installed packages, so the plugin can use only the standard library."""
     if os.name == "nt":
         starter = Path(folder) / "protoc-gen-micropb.bat"
-        starter.write_text(f'@"{sys.executable}" "{PLUGIN}" %*\n')
+        starter.write_text(f'@"{sys.executable}" -S "{PLUGIN}" %*\n')
     else:
         starter = Path(folder) / "protoc-gen-micropb"
-        starter.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{PLUGIN}" "$@"\n')
+        starter.write_text(f'#!/bin/sh\nexec "{sys.executable}" -S "{PLUGIN}" "$@"\n')
         starter.chmod(starter.stat().st_mode | stat.S_IXUSR)
     return starter
 
@@ -204,6 +205,11 @@ class CoreTest(unittest.TestCase):
     def test_enum_keeps_names_when_the_rest_is_not_an_identifier(self):
         text = header("enum size { SIZE_8 = 0; SIZE_16 = 1; }")
         self.assertIn("    SIZE_8 = 0,\n    SIZE_16 = 1,\n", text)
+
+    def test_limits_of_numbers(self):
+        text = header("enum e { E_MIN = 0; E_LOW = -2147483648; E_HIGH = 2147483647; } message m { e a = 536870911; }")
+        self.assertIn("    MIN = 0,\n    LOW = -2147483648,\n    HIGH = 2147483647,\n", text)
+        self.assertEqual(field_list(text, "m"), ["a = 536870911"])
 
     def test_output_is_next_to_the_proto_path(self):
         result = run({"sub/dir/b.proto": 'syntax = "proto3"; message m {}'})
@@ -819,5 +825,5 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["--check-tools"]:
         sys.exit(0 if tools_available() else 1)
     if not tools_available():
-        sys.exit("test_plugin.py: protoc or the Python package protobuf is not available")
+        sys.exit("test_plugin.py: protoc is not available")
     unittest.main()

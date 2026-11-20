@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""protoc plugin: writes C++26 structs for micropb from a proto3 file.
+"""protoc plugin: writes C++ structs for micropb from a proto3 file.
 
     protoc --plugin=protoc-gen-micropb=tools/protoc-gen-micropb.py --micropb_out=gen app.proto
 
@@ -20,7 +20,7 @@ The plugin looks for app.options with the path that protoc has for app.proto: fi
 current folder, then from each folder of the parameter --micropb_opt=options_dir=<folder>. With
 `-I proto proto/app.proto`, give `--micropb_opt=options_dir=proto`.
 
-It needs Python 3 and the Python package protobuf.
+It needs only Python 3.
 """
 
 import fnmatch
@@ -28,12 +28,142 @@ import os
 import re
 import sys
 
-from google.protobuf.compiler import plugin_pb2
-from google.protobuf.descriptor_pb2 import FieldDescriptorProto as Field
-
 
 class Error(Exception):
     """A problem in the input. protoc prints the text and stops."""
+
+
+################################################################################
+# The request and the response of protoc, in the protobuf wire format. The plugin reads only the fields that
+# it uses and skips the other fields. The field numbers are from descriptor.proto and plugin.proto, which
+# protobuf does not change.
+
+
+class Field:
+    """The constants of FieldDescriptorProto."""
+
+    (TYPE_DOUBLE, TYPE_FLOAT, TYPE_INT64, TYPE_UINT64, TYPE_INT32, TYPE_FIXED64, TYPE_FIXED32, TYPE_BOOL,
+     TYPE_STRING, TYPE_GROUP, TYPE_MESSAGE, TYPE_BYTES, TYPE_UINT32, TYPE_ENUM, TYPE_SFIXED32, TYPE_SFIXED64,
+     TYPE_SINT32, TYPE_SINT64) = range(1, 19)
+    LABEL_REPEATED = 3
+
+
+# For each message: field number -> (attribute, kind, repeated). A kind is "string", "int" (int32), "bool"
+# or the schema of a message.
+ONEOF_DESC = {1: ("name", "string", False)}
+ENUM_VALUE_DESC = {1: ("name", "string", False), 2: ("number", "int", False)}
+ENUM_DESC = {1: ("name", "string", False), 2: ("value", ENUM_VALUE_DESC, True)}
+MESSAGE_OPTIONS = {7: ("map_entry", "bool", False)}
+FIELD_DESC = {1: ("name", "string", False), 3: ("number", "int", False), 4: ("label", "int", False),
+              5: ("type", "int", False), 6: ("type_name", "string", False), 9: ("oneof_index", "int", False),
+              17: ("proto3_optional", "bool", False)}
+MESSAGE_DESC = {1: ("name", "string", False), 2: ("field", FIELD_DESC, True), 4: ("enum_type", ENUM_DESC, True),
+                7: ("options", MESSAGE_OPTIONS, False), 8: ("oneof_decl", ONEOF_DESC, True)}
+MESSAGE_DESC[3] = ("nested_type", MESSAGE_DESC, True)
+FILE_DESC = {1: ("name", "string", False), 2: ("package", "string", False), 4: ("message_type", MESSAGE_DESC, True),
+             5: ("enum_type", ENUM_DESC, True), 12: ("syntax", "string", False)}
+REQUEST = {1: ("file_to_generate", "string", True), 2: ("parameter", "string", False),
+           15: ("proto_file", FILE_DESC, True)}
+
+FEATURE_PROTO3_OPTIONAL = 1
+
+
+class Message:
+    """A decoded message: one attribute for each field of its schema. `present` has the names of the fields that
+    are not repeated and are in the input."""
+
+    def __init__(self, schema):
+        self.present = set()
+        for name, kind, repeated in schema.values():
+            if repeated:
+                setattr(self, name, [])
+            else:
+                setattr(self, name, {"string": "", "int": 0, "bool": False}[kind] if isinstance(kind, str) else
+                        Message(kind))
+
+
+def invalid_request():
+    return Error("the request from protoc is not valid protobuf")
+
+
+def read_varint(data, pos):
+    """The varint at `pos` in `data` and the position after it."""
+    value = 0
+    for shift in range(0, 70, 7):
+        if pos >= len(data):
+            raise invalid_request()
+        value |= (data[pos] & 0x7F) << shift
+        pos += 1
+        if data[pos - 1] < 0x80:
+            return value & 0xFFFFFFFFFFFFFFFF, pos
+    raise invalid_request()
+
+
+def decode(data, schema):
+    """The message in `data` with the fields of `schema`."""
+    message = Message(schema)
+    pos = 0
+    while pos < len(data):
+        key, pos = read_varint(data, pos)
+        number, wire_type = key >> 3, key & 7
+        if wire_type == 0:
+            value, pos = read_varint(data, pos)
+        elif wire_type == 1 or wire_type == 5:
+            value, pos = None, pos + (8 if wire_type == 1 else 4)
+        elif wire_type == 2:
+            size, pos = read_varint(data, pos)
+            value, pos = data[pos:pos + size], pos + size
+        else:
+            raise invalid_request()
+        if pos > len(data):
+            raise invalid_request()
+        if number not in schema:
+            continue
+
+        name, kind, repeated = schema[number]
+        if wire_type != (0 if kind in ("int", "bool") else 2):
+            raise invalid_request()
+        if kind == "int":
+            value = value - (1 << 64) if value >> 63 else value  # a negative int32 is a 10-byte varint
+        elif kind == "bool":
+            value = value != 0
+        elif kind == "string":
+            try:
+                value = value.decode("utf-8")
+            except UnicodeDecodeError:
+                raise invalid_request() from None
+        else:
+            value = decode(value, kind)
+
+        if repeated:
+            getattr(message, name).append(value)
+        else:
+            setattr(message, name, value)
+            message.present.add(name)
+    return message
+
+
+def varint(value):
+    out = bytearray()
+    while value >= 0x80:
+        out.append(value & 0x7F | 0x80)
+        value >>= 7
+    out.append(value)
+    return bytes(out)
+
+
+def length_delimited(number, data):
+    return varint(number << 3 | 2) + varint(len(data)) + data
+
+
+def encode_response(error, files):
+    """The CodeGeneratorResponse with `error` (or None) and `files`, each a pair of name and content."""
+    out = length_delimited(1, error.encode("utf-8")) if error is not None else b""
+    out += varint(2 << 3) + varint(FEATURE_PROTO3_OPTIONAL)
+    for name, content in files:
+        out += length_delimited(15, length_delimited(1, name.encode("utf-8")) +
+                                length_delimited(15, content.encode("utf-8")))
+    return out
 
 
 SCALARS = {
@@ -344,7 +474,7 @@ class Header:
         desc = message.desc
 
         def oneof_of(field):  # the index of the oneof of `field`. `optional` is a oneof only for protoc.
-            return field.oneof_index if field.HasField("oneof_index") and not field.proto3_optional else None
+            return field.oneof_index if "oneof_index" in field.present and not field.proto3_optional else None
 
         member_names = {ident(field.name) for field in desc.field if oneof_of(field) is None}
         member_names |= {ident(desc.oneof_decl[oneof_of(field)].name) for field in desc.field
@@ -459,10 +589,8 @@ class Header:
 
 
 def generate(request):
-    """The response for `request` and the warnings. An error gives a response without files."""
-    response = plugin_pb2.CodeGeneratorResponse()
-    response.supported_features = plugin_pb2.CodeGeneratorResponse.FEATURE_PROTO3_OPTIONAL
-    warnings = []
+    """The encoded response for `request` and the warnings. An error gives a response without files."""
+    headers, warnings = [], []
     try:
         folders = []
         for parameter in filter(None, request.parameter.split(",")):
@@ -479,19 +607,22 @@ def generate(request):
                 text = Header(files[name], types, options).text()
             finally:
                 warnings += options.warnings
-            response.file.add(name=stem(name) + ".pb.hpp", content=text)
+            headers.append((stem(name) + ".pb.hpp", text))
     except Error as error:
-        response.ClearField("file")
-        response.error = str(error)
-    return response, warnings
+        return encode_response(str(error), []), warnings
+    return encode_response(None, headers), warnings
 
 
 def main():
-    request = plugin_pb2.CodeGeneratorRequest.FromString(sys.stdin.buffer.read())
-    response, warnings = generate(request)
+    try:
+        request = decode(sys.stdin.buffer.read(), REQUEST)
+    except Error as error:
+        response, warnings = encode_response(str(error), []), []
+    else:
+        response, warnings = generate(request)
     for warning in warnings:
         print(warning, file=sys.stderr)
-    sys.stdout.buffer.write(response.SerializeToString())
+    sys.stdout.buffer.write(response)
 
 
 if __name__ == "__main__":

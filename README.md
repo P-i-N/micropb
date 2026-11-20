@@ -244,7 +244,7 @@ A `std::array<std::uint8_t, N>` is a bytes field with a fixed length, for exampl
 
 ## Generate structs from a .proto file
 
-`tools/protoc-gen-micropb.py` is a plugin for `protoc`. It reads a proto3 file and writes a header with the structs and their field lists. It needs Python 3.8 or newer and the Python package `protobuf` (tested only with Python 3.14).
+`tools/protoc-gen-micropb.py` is a plugin for `protoc`. It reads a proto3 file and writes a header with the structs and their field lists. It needs only Python 3.8 or newer (tested with Python 3.13 and 3.14), no Python package.
 
 ```sh
 protoc --plugin=protoc-gen-micropb=tools/protoc-gen-micropb.py --micropb_out=gen --micropb_opt=options_dir=proto -I proto proto/app.proto
@@ -571,7 +571,7 @@ The codec reads and writes members through byte offsets, so its tests cannot run
 
 ### Generated files
 
-The test `generator` runs only when CMake finds `protoc` and a Python with the package `protobuf`. The tests find `protoc` in the environment variable `PROTOC`, in `PATH`, or in the Python package `grpcio-tools`. To use a specific Python, configure with `-DPython3_EXECUTABLE=<path>`.
+The test `generator` runs only when CMake finds Python and `protoc`. It starts the plugin with `python -S`, without the installed packages. The tests find `protoc` in the environment variable `PROTOC`, in `PATH`, or in the Python package `grpcio-tools`. To use a specific Python, configure with `-DPython3_EXECUTABLE=<path>`.
 
 `tests/vectors/vectors.pb.hpp` and `tests/generator/*.pb.hpp` are generated and checked in, so `test_generated` does not need `protoc`. The test `generator` fails when one of them is not current. To write them again:
 
@@ -612,7 +612,7 @@ docs/superpowers/    design documents and implementation plans
 ## Status and limits
 
 * **Compilers:** GCC 16.2 on Linux, and on Windows from MSYS2 UCRT64, with and without reflection. The Arm GNU Toolchain 13.3 and 14.2, and `arm-none-eabi` GCC 16.2 from MSYS2: compile only (`-mcpu=cortex-m4`), not run on a device and not measured. Clang is not tested: it does not know the attribute `gnu::noclone` of the codec and gives a warning. The MinGW variant of `MICROPB_SANITIZE` is not verified.
-* **`protoc` plugin:** tested on Linux with `protoc` 35.1 and `protobuf` 7.36, and on Windows with `protoc` 36.2 and `protobuf` 6.31.1. On Windows, `tools/protoc-gen-micropb.bat` starts the first `python` in `PATH`, and that Python must have the `protobuf` package. When `C:\msys64\ucrt64\bin` is first in `PATH`, this is the MSYS2 Python, which has no `protobuf` package.
+* **`protoc` plugin:** tested on Windows with `protoc` 36.2, Python 3.13 and the MSYS2 Python 3.14. On Windows, `tools/protoc-gen-micropb.bat` starts the first `python` in `PATH`. The version without the `protobuf` package is not tested on Linux.
 * **Planned:** a generator that writes the `.proto` file from the C++ structs.
 * **Not supported:** `map`, proto2, groups, `Any` and the other well-known types, JSON, streaming encode or decode. Unknown fields are skipped and not kept.
 * **Not `constexpr`:** `encode`, `decode` and `encoded_size` run only at run time.
