@@ -120,3 +120,7 @@ Added on the user's request after the first draft. Today the plugin writes each 
 * The test source for the reflection check and the name of the CMake helper function.
 * How the Arm test names get the version (from the folder name or from `--version`).
 * The `-mcpu` value can be a cache variable if that is simple. Default `cortex-m4`.
+
+## Changes: remove reflection
+
+`2026-11-20-remove-reflection-design.md` removes `MICROPB_REFLECTION` and `micropb_cxx23` (`micropb` is unconditionally C++23). The standard integer rules, narrow ZigZag types, narrow enums, and the Arm compile tests stay.

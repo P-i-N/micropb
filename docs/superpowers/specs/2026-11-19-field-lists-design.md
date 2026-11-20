@@ -123,3 +123,7 @@ GCC 16 is the only compiler on this machine. "No reflection" is tested as GCC 16
 * The C++23 configuration is not a second build folder. It is a set of more test targets (`*_cxx23`) in the same build.
 * `std::monostate` has no field list. The rule functions skip it.
 * The code size became smaller: 14,517 bytes for 32 message types (before: 14,700).
+
+## Changes: remove reflection
+
+`2026-11-20-remove-reflection-design.md` removes Front end 1 (reflection), renames `meta_schema.hpp` to `schema.hpp`, and removes `micropb_cxx23` (`micropb` itself is C++23).

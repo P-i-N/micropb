@@ -222,3 +222,7 @@ Each stage is a separate, reviewable change.
 * Removed: `pb::span_buffer<T>` and its rules `span_buffer_in_optional`, `span_buffer_in_variant`, `span_buffer_in_repeated`. Use `std::span<const T>` with an arena.
 * The core also uses `<new>` (placement new for the items of a block).
 * A nested message that occurs more than once still merges: its span field gets a new block with the old items and the new items. The old block stays used until `clear()`.
+
+## Changes: remove reflection
+
+`2026-11-20-remove-reflection-design.md` removes C++26 reflection (`<meta>`, `pb::tag`, `pb::oneof_tags`, `pb::build_tag_table`), renames `meta_schema.hpp` to `schema.hpp`, makes `pb::fields_of` the only schema source, and drops `schema_gen.hpp`.
