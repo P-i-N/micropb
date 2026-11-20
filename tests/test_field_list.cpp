@@ -62,6 +62,17 @@ struct spans
 	std::span<const float> values;
 };
 
+/// Encode only: the element of a span has a `const` member, so it has no default constructor.
+struct const_item
+{
+	const std::int32_t a;
+};
+
+struct const_items
+{
+	std::span<const const_item> items;
+};
+
 /// A message that contains itself. The codec rejects it (`recursive_message`).
 struct tree
 {
@@ -150,6 +161,18 @@ struct pb::fields_of<manual::spans>
   : pb::field_list<manual::spans,
                    pb::field_at<decltype( manual::spans::items ), 1, offsetof( manual::spans, items )>,
                    pb::field_at<decltype( manual::spans::values ), 2, offsetof( manual::spans, values )>>
+{};
+
+template <>
+struct pb::fields_of<manual::const_item>
+  : pb::field_list<manual::const_item,
+                   pb::field_at<decltype( manual::const_item::a ), 1, offsetof( manual::const_item, a )>>
+{};
+
+template <>
+struct pb::fields_of<manual::const_items>
+  : pb::field_list<manual::const_items,
+                   pb::field_at<decltype( manual::const_items::items ), 1, offsetof( manual::const_items, items )>>
 {};
 
 template <>
@@ -303,6 +326,17 @@ bool test_encode_only()
 	                     0x0a, 0x08, 0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x00, 0x40, 0x12, 0x02, 0x08, 0x03 } );
 }
 
+/// A span of an element with a `const` member encodes. Its descriptor has no constructor.
+bool test_const_span_element()
+{
+	using items = decltype( manual::const_items::items );
+	const d::sequence_desc& desc = *d::value_descriptor<items>::value.sequence;
+	const manual::const_item values[2]{ { 1 }, { 2 } };
+	return desc.construct == nullptr &&
+	       encodes_to( manual::const_items{ values },
+	                   std::array<std::uint8_t, 8>{ 0x0a, 0x02, 0x08, 0x01, 0x0a, 0x02, 0x08, 0x02 } );
+}
+
 bool test_const_members()
 {
 	const manual::constants constants{ 7, 3, std::uint32_t{ 9 }, {}, "a" };
@@ -314,6 +348,6 @@ bool test_const_members()
 int main()
 {
 	const bool ok = test_encode() && test_decode() && test_decode_message_alternative() && test_decode_spans() &&
-	                test_encode_only() && test_const_members();
+	                test_encode_only() && test_const_members() && test_const_span_element();
 	return ok ? 0 : 1;
 }

@@ -335,7 +335,12 @@ template <typename S>
 	}
 	else if constexpr ( is_std_span<S> && !is_fixed_span<S> )
 	{
-		return { item,  access_sequence<S>,        bind_span<S>, construct_item<element>, reserve, item_size, 0, 0,
+		// An element without a default constructor, for example with a `const`
+		// member, is encode-only (`decode_const_member`): it gets no constructor.
+		item_constructor construct = nullptr;
+		if constexpr ( std::is_default_constructible_v<element> )
+			construct = construct_item<element>;
+		return { item,  access_sequence<S>,        bind_span<S>, construct, reserve, item_size, 0, 0,
 		         align, sequence_storage::ACCESSOR };
 	}
 	else
