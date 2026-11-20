@@ -1,5 +1,7 @@
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -166,7 +168,36 @@ bool test_sequence_accessor()
 	return view.data() == block.data() && view.size() == 2 && view_desc.element_align == alignof( std::int32_t ) &&
 	       view_desc.construct == &d::construct_item<std::int32_t> && buffer_desc.bind == nullptr &&
 	       buffer_desc.construct == nullptr &&
-	       d::value_descriptor<pb::repeated<float, 4>>::value.sequence->bind == nullptr;
+	       d::value_descriptor<pb::repeated<float, 4>>::value.sequence->bind == nullptr &&
+	       view_desc.reserve == &d::reserve && buffer_desc.reserve == nullptr &&
+	       d::value_descriptor<pb::repeated<float, 4>>::value.sequence->reserve == nullptr &&
+	       d::value_descriptor<std::array<float, 2>>::value.sequence->reserve == nullptr;
+}
+
+/// A span with more items than the capacity of its block fails closed: the count takes no block
+/// (`ARENA_FULL`), and the fill adds no item (`TRUNCATED`).
+bool test_block_bound()
+{
+	// A block with the capacity 1 and 2 items: a span that `decode` did not bind.
+	alignas( std::size_t ) std::array<unsigned char, sizeof( std::size_t ) + 2 * sizeof( std::int32_t )> block{};
+	const std::size_t capacity = 1;
+	std::memcpy( block.data(), &capacity, sizeof capacity );
+	const auto* first = reinterpret_cast<const std::int32_t*>( block.data() + sizeof( std::size_t ) );
+	std::span<const std::int32_t> view( first, 2 );
+
+	const d::sequence_desc& desc = *d::value_descriptor<std::span<const std::int32_t>>::value.sequence;
+	std::array<std::uint8_t, 64> storage{};
+	pb::arena memory( storage );
+	constexpr std::array<std::uint8_t, 1> value{ 0x05 };
+	const pb::field_key key{ 1, pb::wire_type::VARINT };
+
+	pb::reader record( value );
+	d::decode_repeated( record, key, desc, &view, &memory );
+	pb::reader element( value );
+	d::decode_element( element, key.type, desc, &view, &memory );
+	return record.failed() && record.status().error() == pb::error::ARENA_FULL && element.failed() &&
+	       element.status().error() == pb::error::TRUNCATED && memory.used() == 0 && view.data() == first &&
+	       view.size() == 2;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -413,6 +444,7 @@ bool test_all_kinds()
 
 int main()
 {
-	const bool ok = test_optional_accessor() && test_variant_accessor() && test_sequence_accessor() && test_all_kinds();
+	const bool ok = test_optional_accessor() && test_variant_accessor() && test_sequence_accessor() &&
+	                test_block_bound() && test_all_kinds();
 	return ok ? 0 : 1;
 }
