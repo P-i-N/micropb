@@ -151,3 +151,13 @@ README.md                       new section "Generate structs from a .proto file
 * The plugin needs only Python 3. The Python package `protobuf` is not necessary. Reason: on Windows, the first `python` in `PATH` is often the MSYS2 Python, which has no `protobuf` package.
 * The plugin has a small reader and writer for the protobuf wire format. The reader keeps only the fields of `descriptor.proto` and `plugin.proto` that the plugin uses, and skips the other fields. Their field numbers are written in the plugin; protobuf does not change them. A request that is not valid protobuf, or a known field with a different wire type, is an error.
 * The tests start the plugin with `python -S`, so an installed package cannot hide a dependency.
+
+## Changes: `type:FT_POINTER`
+
+* Reason: a message that the device only encodes does not need storage in the struct. `pb::repeated<ClientState, 32>` with two `pb::repeated<std::uint8_t, N>` members made the message 11024 bytes on the device (Arm GNU Toolchain 14.2); with views it is 20 bytes.
+* `type:FT_POINTER` is the option of NanoPB for data that is not in the struct. Thus the options file stays NanoPB compatible.
+* A repeated field with `type:FT_POINTER` is `std::span<const T>`. It needs no `max_count`. The library allows this type only for `encode`; `decode` gives `pb: decode_encode_only`. The plugin does not check this: the library decides.
+* A `bytes` field with `type:FT_POINTER` is `std::span<const std::uint8_t>`, also when a wildcard line sets `max_size`. On a `string` field the option changes nothing.
+* `max_count`, `fixed_count`, `max_size` and `fixed_length` do not apply to a field with `type:FT_POINTER`: an exact line gives a warning.
+* `type:FT_STATIC` and `type:FT_DEFAULT` give the result of the other options. They can override a wildcard `type:FT_POINTER`. Other values (`FT_CALLBACK`, `FT_IGNORE`) are an error, because the plugin cannot do what they ask. Before this change, `type` was an unknown option with a warning.
+* `type` on a scalar field that is not repeated does not apply: an exact line gives a warning.

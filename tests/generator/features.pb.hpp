@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <variant>
 
@@ -65,6 +66,16 @@ struct Calibration {
     std::array<std::uint8_t, 6> id;
 };
 
+struct Batch {
+    std::span<const Device_Slot> slots;
+    std::span<const pb::wire_int<std::int16_t, pb::int_encoding::ZIGZAG>> deltas;
+    std::span<const std::uint8_t> blob;
+};
+
+struct Report {
+    std::variant<std::monostate, std::uint32_t, Batch> body;
+};
+
 } // namespace features
 
 // Field lists: with these, the messages also work on a compiler without reflection.
@@ -111,3 +122,14 @@ template <>
 struct pb::fields_of<::features::Calibration> : pb::field_list<::features::Calibration,
     pb::field_at<decltype(::features::Calibration::gains), 1, offsetof(::features::Calibration, gains)>,
     pb::field_at<decltype(::features::Calibration::id), 2, offsetof(::features::Calibration, id)>> {};
+
+template <>
+struct pb::fields_of<::features::Batch> : pb::field_list<::features::Batch,
+    pb::field_at<decltype(::features::Batch::slots), 1, offsetof(::features::Batch, slots)>,
+    pb::field_at<decltype(::features::Batch::deltas), 2, offsetof(::features::Batch, deltas)>,
+    pb::field_at<decltype(::features::Batch::blob), 3, offsetof(::features::Batch, blob)>> {};
+
+template <>
+struct pb::fields_of<::features::Report> : pb::field_list<::features::Report,
+    pb::field_at<decltype(::features::Report::body), 1, offsetof(::features::Report, body), 1>,
+    pb::field_at<decltype(::features::Report::body), 2, offsetof(::features::Report, body), 2>> {};

@@ -14,6 +14,8 @@ file in the NanoPB format:
     Message.field  max_size:6 fixed_length:true   bytes: std::array<std::uint8_t, 6>
     Message.field  int_size:IS_8                  std::int8_t or std::uint8_t (also IS_16, IS_32, IS_64);
                                                     sint32, sint64: pb::wire_int<std::int8_t, pb::int_encoding::ZIGZAG>
+    Message.field  type:FT_POINTER                repeated: std::span<const T>, encode only;
+                                                    bytes: std::span<const std::uint8_t>
     Enum           enum_intsize:IS_8              enum class Enum : std::int8_t (also IS_16, IS_32)
 
 The plugin looks for app.options with the path that protoc has for app.proto: first from the
@@ -249,6 +251,13 @@ def boolean(text):
     return text == "true"
 
 
+def field_type(text):
+    """`true` for FT_POINTER."""
+    if text not in ("FT_DEFAULT", "FT_STATIC", "FT_POINTER"):
+        raise ValueError("FT_DEFAULT, FT_STATIC or FT_POINTER")
+    return text == "FT_POINTER"
+
+
 def int_size(text):
     sizes = {"IS_DEFAULT": 0, "IS_8": 8, "IS_16": 16, "IS_32": 32, "IS_64": 64}
     if text not in sizes:
@@ -271,7 +280,7 @@ class Options:
     """The rules of one options file. `path` is None when the .proto file has no options file."""
 
     PARSERS = {"max_count": positive, "max_size": positive, "fixed_count": boolean, "fixed_length": boolean,
-               "int_size": int_size, "enum_intsize": int_size}
+               "int_size": int_size, "enum_intsize": int_size, "type": field_type}
 
     def __init__(self, path):
         self.path = path
@@ -449,14 +458,18 @@ class Header:
             if repeated and text == "std::uint8_t":
                 raise self.error(f"{name}: int_size:IS_8 on a repeated unsigned field gives a bytes field")
 
-        if field.type == Field.TYPE_BYTES and not repeated:
+        pointer = option("type") if repeated or field.type in (Field.TYPE_BYTES, Field.TYPE_STRING) else False
+
+        if field.type == Field.TYPE_BYTES and not repeated and not pointer:
             size, fixed = option("max_size"), option("fixed_length")
             if fixed and not size:
                 raise self.error(f"{name}: fixed_length needs max_size")
             if size:
                 text = f"std::array<std::uint8_t, {size}>" if fixed else f"pb::repeated<std::uint8_t, {size}>"
 
-        if repeated:
+        if repeated and pointer:
+            text = f"std::span<const {text}>"
+        elif repeated:
             count, fixed = option("max_count"), option("fixed_count")
             if not count:
                 file = self.options.path or stem(self.file.name) + ".options"

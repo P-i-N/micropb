@@ -36,6 +36,8 @@ static_assert(
   std::is_same_v<decltype( features::Device::trim_delta ), pb::wire_int<std::int16_t, pb::int_encoding::ZIGZAG>> );
 static_assert( std::is_same_v<decltype( features::Frame::origin ), shared::types::Point> );
 static_assert( std::is_same_v<decltype( features::Calibration::gains ), std::array<float, 4>> );
+static_assert( std::is_same_v<decltype( features::Batch::slots ), std::span<const features::Device_Slot>> );
+static_assert( std::is_same_v<decltype( features::Batch::blob ), std::span<const std::uint8_t>> );
 
 #if defined( __cpp_impl_reflection )
 
@@ -68,6 +70,8 @@ static_assert( lists_agree_with_reflection<features::limits,
                                            features::Device,
                                            features::Frame,
                                            features::Calibration,
+                                           features::Batch,
+                                           features::Report,
                                            shared::types::Point,
                                            ::detail::tag,
                                            ::detail::reader> );
@@ -151,6 +155,20 @@ bool test_fixed_arrays()
 	                                                              0x12, 0x06, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06 } );
 }
 
+/// `batch { slots { index: 1 key: "ab" } slots {} deltas: [-1, 300] blob: "xyz" }` (libprotoc 36.2)
+bool test_views()
+{
+	features::Device_Slot slots[2]{ { 1, {} }, {} };
+	const pb::wire_int<std::int16_t, pb::int_encoding::ZIGZAG> deltas[]{ -1, 300 };
+	const std::uint8_t blob[]{ 'x', 'y', 'z' };
+	features::Report report{ features::Batch{ slots, deltas, blob } };
+
+	return slots[0].key.push_back( 'a' ) && slots[0].key.push_back( 'b' ) &&
+	       encodes_to( report,
+	                   std::array<std::uint8_t, 22>{ 0x12, 0x14, 0x0a, 0x06, 0x08, 0x01, 0x12, 0x02, 0x61, 0x62, 0x0a,
+	                                                 0x00, 0x12, 0x03, 0x01, 0xd8, 0x04, 0x1a, 0x03, 0x78, 0x79, 0x7a } );
+}
+
 /// `device { class: -2 state: STATE_BUSY limits { low: 1 high: 2 } backup {} serial: 7 offset: -300 token: ""
 /// spare { index: 3 } slots { index: 1 key: "ab" } slots {} history: [STATE_BUSY, STATE_IDLE] trims: [-1, 5]
 /// trim_delta: -300 history_delta: [-1, 2, -32768] moved { index: 9 } } slot { key: "k" } origin { x: -4 y: 4 }
@@ -225,6 +243,6 @@ bool test_names_of_the_library()
 int main()
 {
 	const bool ok = test_reference_vectors() && test_reference_values() && test_field_numbers() && test_fixed_arrays() &&
-	                test_frame_encode() && test_frame_decode() && test_names_of_the_library();
+	                test_views() && test_frame_encode() && test_frame_decode() && test_names_of_the_library();
 	return ok ? 0 : 1;
 }

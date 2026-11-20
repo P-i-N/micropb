@@ -299,6 +299,35 @@ class OptionsTest(unittest.TestCase):
             "pb::repeated<std::string_view, 2> a;", "pb::repeated<inner, 2> b;", "pb::repeated<kind, 2> c;",
             "pb::repeated<std::span<const std::uint8_t>, 2> d;"])
 
+    def test_pointer_repeated(self):
+        text = header("""
+            enum kind { KIND_A = 0; }
+            message inner { int32 x = 1; }
+            message m {
+              repeated int32 a = 1; repeated inner b = 2; repeated kind c = 3; repeated string d = 4;
+              repeated bytes e = 5; repeated sint32 f = 6;
+            }
+            """, "m.* type:FT_POINTER\nm.f int_size:IS_16\n")
+        self.assertEqual(members(text, "m"), [
+            "std::span<const std::int32_t> a;", "std::span<const inner> b;", "std::span<const kind> c;",
+            "std::span<const std::string_view> d;", "std::span<const std::span<const std::uint8_t>> e;",
+            "std::span<const pb::wire_int<std::int16_t, pb::int_encoding::ZIGZAG>> f;"])
+
+    def test_pointer_bytes_and_string(self):
+        text = header("message m { bytes a = 1; string b = 2; bytes c = 3; }",
+                      "m.* max_size:8\nm.a type:FT_POINTER\nm.b type:FT_POINTER\n")
+        self.assertEqual(members(text, "m"), [
+            "std::span<const std::uint8_t> a;", "std::string_view b;", "pb::repeated<std::uint8_t, 8> c;"])
+
+    def test_type_static_and_default(self):
+        text = header("message m { repeated int32 a = 1; repeated int32 b = 2; }",
+                      "m.* type:FT_POINTER\nm.a max_count:2 type:FT_STATIC\nm.b max_count:3 type:FT_DEFAULT\n")
+        self.assertEqual(members(text, "m"), ["pb::repeated<std::int32_t, 2> a;", "pb::repeated<std::int32_t, 3> b;"])
+
+    def test_pointer_on_a_repeated_unsigned_byte_is_an_error(self):
+        self.assertIn("a.proto: m.a: int_size:IS_8 on a repeated unsigned field gives a bytes field",
+                      error(PROTO3 + "message m { repeated uint32 a = 1; }", "m.a int_size:IS_8 type:FT_POINTER\n"))
+
     def test_wildcards(self):
         proto = "message m { repeated int32 a = 1; repeated int32 b = 2; }"
         self.assertEqual(members(header(proto, "* max_count:8\n"), "m"),
@@ -700,6 +729,7 @@ class ErrorTest(unittest.TestCase):
             "m.a max_size:-1\n": "a.options:1: max_size needs a number from 1 to 999999999",
             "m.a max_count:4 fixed_count:maybe\n": "a.options:1: fixed_count needs true or false",
             "m.a max_count:4 int_size:IS_12\n": "a.options:1: int_size needs IS_8, IS_16, IS_32 or IS_64",
+            "m.a type:FT_CALLBACK\n": "a.options:1: type needs FT_DEFAULT, FT_STATIC or FT_POINTER",
         }
         for options, expected in cases.items():
             with self.subTest(options=options):
@@ -732,8 +762,8 @@ class WarningTest(unittest.TestCase):
         self.assertIn("std::int8_t", text)
 
     def test_unknown_option(self):
-        stderr, text = self.warnings("message m { repeated int32 a = 1; }", "m.a max_count:4 type:FT_POINTER\n")
-        self.assertIn("a.options:1: warning: the unknown option 'type' is ignored", stderr)
+        stderr, text = self.warnings("message m { repeated int32 a = 1; }", "m.a max_count:4 anonymous_oneof:true\n")
+        self.assertIn("a.options:1: warning: the unknown option 'anonymous_oneof' is ignored", stderr)
         self.assertEqual(members(text, "m"), ["pb::repeated<std::int32_t, 4> a;"])
 
     def test_option_that_does_not_apply(self):
@@ -754,6 +784,19 @@ class WarningTest(unittest.TestCase):
     def test_max_size_does_not_apply_to_repeated_bytes(self):
         stderr, text = self.warnings("message m { repeated bytes a = 1; }", "m.a max_count:2 max_size:8\n")
         self.assertIn("a.options:1: warning: max_size does not apply to m.a", stderr)
+
+    def test_pointer_ignores_the_sizes(self):
+        stderr, text = self.warnings("message m { repeated int32 a = 1; bytes b = 2; }",
+                                     "m.a max_count:4 fixed_count:true type:FT_POINTER\nm.b max_size:8 type:FT_POINTER\n")
+        self.assertIn("a.options:1: warning: max_count does not apply to m.a", stderr)
+        self.assertIn("a.options:1: warning: fixed_count does not apply to m.a", stderr)
+        self.assertIn("a.options:2: warning: max_size does not apply to m.b", stderr)
+        self.assertEqual(members(text, "m"), ["std::span<const std::int32_t> a;", "std::span<const std::uint8_t> b;"])
+
+    def test_type_does_not_apply_to_a_scalar(self):
+        stderr, text = self.warnings("message m { int32 a = 1; }", "m.a type:FT_POINTER\n")
+        self.assertIn("a.options:1: warning: type does not apply to m.a", stderr)
+        self.assertEqual(members(text, "m"), ["std::int32_t a;"])
 
     def test_wildcard_rule_gives_no_warning(self):
         stderr, _ = self.warnings("message m { string name = 1; int32 a = 2; repeated int32 b = 3; bytes c = 4; }",
