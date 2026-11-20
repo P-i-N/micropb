@@ -233,7 +233,7 @@ const auto result = pb::decode(input, received, memory);
 * The items of one field are in one contiguous block. Before `decode` takes the block, it counts the elements of the field in the message.
 * `decode` does not free a block. More than one message can use one arena. `memory.clear()` frees all blocks: then each message that `decode` wrote with this arena is not valid.
 * When the arena is too small, `decode` returns `ARENA_FULL`. It never writes outside the arena.
-* `memory.used()` gives the bytes that the blocks use. The use depends on the content of the message. The order of the fields on the wire changes only the alignment padding between the blocks. Measure `used()` with the largest message that you expect, and add a margin.
+* `memory.used()` gives the bytes that the blocks use. The use depends on the content of the message. The order of the fields on the wire changes only the alignment padding between the blocks. Measure `used()` with the largest message that you expect, on the target: the pointer size and the alignment of the storage change it. Or add a margin.
 * A nested message that occurs two times in one message (`protoc` does not write this) gets a new block with a copy of the old items. The old block stays used until `clear()`.
 * The element type must be trivially copyable and trivially destructible: the arena never calls a destructor.
 * `std::span<const std::span<const std::uint8_t>>` is `repeated bytes`: the block in the arena holds the views, and the views point into the input.

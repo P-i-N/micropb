@@ -760,8 +760,9 @@ inline void store_scalar( void* value, std::uint8_t code, std::uint64_t bits )
 
 inline void reset_message( const message_desc& message, void* object );
 
-/// Sets the value at `value` to its initial state. A sequence keeps its
-/// storage and only gets the count 0.
+/// Sets the value at `value` to its initial state. A `pb::repeated` keeps its
+/// storage and only gets the count 0. A `std::span<const T>` becomes empty and
+/// loses its block.
 inline void reset_value( const value_desc& type, void* value )
 {
 	switch ( type.kind )
@@ -1143,12 +1144,12 @@ template <typename T>
 }
 
 /// Decodes the proto3 message in `in` into `msg` and returns `in.size()`. Resets
-/// `msg` first. On error, `msg` holds the
-/// fields that `decode` read before the error. A `std::string_view` or a
-/// `std::span<const std::uint8_t>` of `msg` points into `in`. The items of each
-/// `std::span<const T>` repeated field are in one block of `memory`. `in` and
-/// `memory` must stay valid while `msg` is in use. When `memory` is too small,
-/// returns `error::ARENA_FULL`. `decode` does not free the blocks of `memory`.
+/// `msg` first. On error, `msg` holds the fields that `decode` read before the
+/// error. A `std::string_view` or a `std::span<const std::uint8_t>` of `msg`
+/// points into `in`. The items of each `std::span<const T>` repeated field are
+/// in one block of `memory`. `in` and `memory` must stay valid while `msg` is
+/// in use. When `memory` is too small, returns `error::ARENA_FULL`. `decode`
+/// does not free the blocks of `memory`.
 template <typename T>
 [[nodiscard]] std::expected<std::size_t, error> decode( std::span<const std::uint8_t> in, T& msg, arena& memory )
 {
