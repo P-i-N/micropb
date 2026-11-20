@@ -8,7 +8,7 @@ also works on a compiler without reflection. The sizes of repeated fields come f
 file in the NanoPB format:
 
     # <name pattern> <option>:<value> ...
-    Message.field  (no max_count)                 repeated: std::span<const T>; decode needs a pb::arena
+    Message.field  (no option)                    repeated: std::span<const T>; decode needs a pb::arena
     Message.field  max_count:8                    pb::repeated<T, 8>
     Message.field  max_count:3 fixed_count:true   std::array<T, 3>
     Message.field  max_size:16                    bytes: pb::repeated<std::uint8_t, 16>
@@ -469,6 +469,8 @@ class Header:
                 text = f"std::array<std::uint8_t, {size}>" if fixed else f"pb::repeated<std::uint8_t, {size}>"
 
         count = option("max_count") if repeated and not pointer else None
+        if repeated and not pointer and not count and option("fixed_count"):
+            raise self.error(f"{name}: fixed_count needs max_count")
         if count and option("fixed_count"):
             text = f"std::array<{text}, {count}>"
         elif count:

@@ -662,6 +662,10 @@ class ErrorTest(unittest.TestCase):
         self.assertEqual(members(text, "m"),
                          ["std::span<const n> a;", "std::span<const std::span<const std::uint8_t>> b;"])
 
+    def test_fixed_count_without_max_count(self):
+        self.assertIn("a.proto: m.a: fixed_count needs max_count",
+                      error(PROTO3 + "message m { repeated int32 a = 1; }", "m.a fixed_count:true\n"))
+
     def test_fixed_length_without_max_size(self):
         self.assertIn("a.proto: m.a: fixed_length needs max_size",
                       error(PROTO3 + "message m { bytes a = 1; }", "m.a fixed_length:true\n"))
@@ -749,11 +753,6 @@ class WarningTest(unittest.TestCase):
     def test_enum_intsize_on_a_field(self):
         stderr, _ = self.warnings("message m { int32 a = 1; }", "m.a enum_intsize:IS_8\n")
         self.assertIn("a.options:1: warning: enum_intsize does not apply to m.a", stderr)
-
-    def test_fixed_count_without_max_count(self):
-        stderr, text = self.warnings("message m { repeated int32 a = 1; }", "m.a fixed_count:true\n")
-        self.assertIn("a.options:1: warning: fixed_count does not apply to m.a", stderr)
-        self.assertEqual(members(text, "m"), ["std::span<const std::int32_t> a;"])
 
     def test_enum_rule_is_not_a_rule_without_a_match(self):
         stderr, text = self.warnings("enum E { E_A = 0; }", "E enum_intsize:IS_8\n")

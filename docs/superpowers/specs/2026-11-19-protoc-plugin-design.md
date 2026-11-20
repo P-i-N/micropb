@@ -165,4 +165,4 @@ README.md                       new section "Generate structs from a .proto file
 
 * A repeated field without `max_count` is `std::span<const T>`. Before, it was an error that showed the line to add to the options file. The library decodes the span with a `pb::arena` (design `2026-11-20-arena-spans-design.md`).
 * `max_count:N` and `max_count:N fixed_count:true` give `pb::repeated<T, N>` and `std::array<T, N>`, as before. `type:FT_POINTER` gives the span also when a wildcard line sets `max_count`.
-* `fixed_count` without `max_count` does not apply: an exact line gives a warning.
+* `fixed_count` without `max_count` is an error (`fixed_count needs max_count`), as `fixed_length` without `max_size`. Else the plugin would lose the fixed size.

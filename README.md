@@ -364,7 +364,7 @@ The plugin reads sizes from `<name>.options`, in the format of NanoPB options fi
 * A narrow member saves RAM, not bytes on the wire. Decode truncates a value to the width of the member, also an enum value from a newer peer. An enum value that does not fit the type is an error when you generate the header.
 * `int_size` on a wildcard line also narrows each `sint32` and `sint64` field that it matches. Check an existing options file before you generate headers again.
 * When more than one line sets the same option for a field, the last line wins.
-* A repeated field without `max_count` is a `std::span<const T>`. Decode puts its items in a `pb::arena`.
+* A repeated field without `max_count` is a `std::span<const T>`. Decode puts its items in a `pb::arena`. `fixed_count` needs `max_count`, and `fixed_length` needs `max_size`: else the plugin stops with an error.
 * The plugin looks for `<name>.options` with the path that `protoc` has for the `.proto` file, from the current folder. Give more folders with `--micropb_opt=options_dir=<folder>`. When it finds no options file, a `bytes` field is a `std::span` and an integer has its full size, without a message.
 * An unknown option and a pattern that matches no field give a warning. An option that does not apply to its field gives a warning when its line has no wildcard. `max_size` on a `string` field is such a case.
 * The file must be UTF-8 text.
