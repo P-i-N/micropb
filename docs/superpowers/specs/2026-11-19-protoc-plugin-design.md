@@ -57,7 +57,7 @@ protoc --plugin=protoc-gen-micropb=tools/protoc-gen-micropb.py --micropb_out=gen
 | `enum E { E_A = 0; }` | `enum class E : std::int32_t { A = 0 };` |
 | message field | the struct as a plain member |
 | `optional T` | `std::optional<T>` |
-| `repeated T` | `pb::repeated<T, N>`, `N` from `max_count` |
+| `repeated T` | `pb::repeated<T, N>`, `N` from `max_count`; without `max_count`: `std::span<const T>` |
 | `oneof name { A a = 1; B b = 2; }` | `std::variant<std::monostate, A, B> name;` |
 | `import "x.proto"` | `#include "x.pb.hpp"` |
 
@@ -91,7 +91,6 @@ The plugin reports these to `protoc`, which prints them and stops. No header is 
 
 * A file that is not `syntax = "proto3"`.
 * A `map` field. (proto3 has no groups. An `extend` block in a proto3 file can only add custom options, so the plugin ignores it: see "Changes during the implementation".)
-* A repeated field without `max_count`. The message shows the line to add to the options file.
 * A message that contains itself, directly or through other messages.
 * A `oneof` with two members of the same type (the library rule `variant_duplicate_alternative`).
 * A bad line in the options file, with the file name and the line number.
@@ -156,8 +155,14 @@ README.md                       new section "Generate structs from a .proto file
 
 * Reason: a message that the device only encodes does not need storage in the struct. `pb::repeated<ClientState, 32>` with two `pb::repeated<std::uint8_t, N>` members made the message 11024 bytes on the device (Arm GNU Toolchain 14.2); with views it is 20 bytes.
 * `type:FT_POINTER` is the option of NanoPB for data that is not in the struct. Thus the options file stays NanoPB compatible.
-* A repeated field with `type:FT_POINTER` is `std::span<const T>`. It needs no `max_count`. The library allows this type only for `encode`; `decode` gives `pb: decode_encode_only`. The plugin does not check this: the library decides.
+* A repeated field with `type:FT_POINTER` is `std::span<const T>`. It needs no `max_count`. The library decodes it only with a `pb::arena` (`pb: decode_needs_arena`). The plugin does not check this: the library decides.
 * A `bytes` field with `type:FT_POINTER` is `std::span<const std::uint8_t>`, also when a wildcard line sets `max_size`. On a `string` field the option changes nothing.
 * `max_count`, `fixed_count`, `max_size` and `fixed_length` do not apply to a field with `type:FT_POINTER`: an exact line gives a warning.
 * `type:FT_STATIC` and `type:FT_DEFAULT` give the result of the other options. They can override a wildcard `type:FT_POINTER`. Other values (`FT_CALLBACK`, `FT_IGNORE`) are an error, because the plugin cannot do what they ask. Before this change, `type` was an unknown option with a warning.
 * `type` on a scalar field that is not repeated does not apply: an exact line gives a warning.
+
+## Changes: arena spans
+
+* A repeated field without `max_count` is `std::span<const T>`. Before, it was an error that showed the line to add to the options file. The library decodes the span with a `pb::arena` (design `2026-11-20-arena-spans-design.md`).
+* `max_count:N` and `max_count:N fixed_count:true` give `pb::repeated<T, N>` and `std::array<T, N>`, as before. `type:FT_POINTER` gives the span also when a wildcard line sets `max_count`.
+* `fixed_count` without `max_count` does not apply: an exact line gives a warning.

@@ -354,7 +354,7 @@ The plugin reads sizes from `<name>.options`, in the format of NanoPB options fi
 | `max_size:N fixed_length:true` | a `bytes` field | `std::array<std::uint8_t, N>` |
 | `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `int32`, `int64`, `uint32`, `uint64` | `std::int8_t` ... `std::uint64_t`, with the sign of the field |
 | `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `sint32`, `sint64` | `pb::wire_int<std::intN_t, pb::int_encoding::ZIGZAG>`; `pb::sint32` for `IS_32`, `pb::sint64` for `IS_64` |
-| `type:FT_POINTER` | a repeated field | `std::span<const T>`, no `max_count` |
+| `type:FT_POINTER` | a repeated field | `std::span<const T>`, also when a wildcard line sets `max_count` |
 | `type:FT_POINTER` | a `bytes` field | `std::span<const std::uint8_t>`, also when a wildcard line sets `max_size` |
 | `type:FT_STATIC`, `type:FT_DEFAULT` | a repeated, `bytes` or `string` field | the result of the other options |
 | `enum_intsize:IS_8`, `IS_16`, `IS_32` | an enum | `enum class E : std::int8_t`, `std::int16_t` or `std::int32_t` (the default) |
@@ -364,7 +364,7 @@ The plugin reads sizes from `<name>.options`, in the format of NanoPB options fi
 * A narrow member saves RAM, not bytes on the wire. Decode truncates a value to the width of the member, also an enum value from a newer peer. An enum value that does not fit the type is an error when you generate the header.
 * `int_size` on a wildcard line also narrows each `sint32` and `sint64` field that it matches. Check an existing options file before you generate headers again.
 * When more than one line sets the same option for a field, the last line wins.
-* Each repeated field must have a `max_count` or `type:FT_POINTER`. Else the plugin stops with an error.
+* A repeated field without `max_count` is a `std::span<const T>`. Decode puts its items in a `pb::arena`.
 * The plugin looks for `<name>.options` with the path that `protoc` has for the `.proto` file, from the current folder. Give more folders with `--micropb_opt=options_dir=<folder>`. When it finds no options file, a `bytes` field is a `std::span` and an integer has its full size, without a message.
 * An unknown option and a pattern that matches no field give a warning. An option that does not apply to its field gives a warning when its line has no wildcard. `max_size` on a `string` field is such a case.
 * The file must be UTF-8 text.

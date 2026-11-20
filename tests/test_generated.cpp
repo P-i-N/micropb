@@ -169,6 +169,27 @@ bool test_views()
 	                                                 0x00, 0x12, 0x03, 0x01, 0xd8, 0x04, 0x1a, 0x03, 0x78, 0x79, 0x7a } );
 }
 
+/// Decodes the bytes of `test_views` into the spans of `Batch`. The items are in the arena.
+bool test_views_decode()
+{
+	constexpr std::array<std::uint8_t, 22> wire{ 0x12, 0x14, 0x0a, 0x06, 0x08, 0x01, 0x12, 0x02, 0x61, 0x62, 0x0a,
+	                                             0x00, 0x12, 0x03, 0x01, 0xd8, 0x04, 0x1a, 0x03, 0x78, 0x79, 0x7a };
+	std::array<std::uint8_t, 256> storage{};
+	pb::arena memory{ std::span<std::uint8_t>( storage ) };
+	features::Report report{};
+
+	const auto decoded = pb::decode( std::span<const std::uint8_t>( wire ), report, memory );
+	const auto* batch = std::get_if<features::Batch>( &report.body );
+	if ( !decoded || *decoded != wire.size() || !batch || batch->slots.size() != 2 || batch->deltas.size() != 2 ||
+	     batch->blob.size() != 3 )
+		return false;
+
+	const auto key = batch->slots[0].key;
+	return batch->slots[0].index == 1 && key.size() == 2 && key[0] == 'a' && key[1] == 'b' &&
+	       batch->slots[1].index == 0 && batch->slots[1].key.empty() && batch->deltas[0].value == -1 &&
+	       batch->deltas[1].value == 300 && batch->blob[0] == 'x' && batch->blob[1] == 'y' && batch->blob[2] == 'z';
+}
+
 /// `device { class: -2 state: STATE_BUSY limits { low: 1 high: 2 } backup {} serial: 7 offset: -300 token: ""
 /// spare { index: 3 } slots { index: 1 key: "ab" } slots {} history: [STATE_BUSY, STATE_IDLE] trims: [-1, 5]
 /// trim_delta: -300 history_delta: [-1, 2, -32768] moved { index: 9 } } slot { key: "k" } origin { x: -4 y: 4 }
@@ -243,6 +264,7 @@ bool test_names_of_the_library()
 int main()
 {
 	const bool ok = test_reference_vectors() && test_reference_values() && test_field_numbers() && test_fixed_arrays() &&
-	                test_views() && test_frame_encode() && test_frame_decode() && test_names_of_the_library();
+	                test_views() && test_views_decode() && test_frame_encode() && test_frame_decode() &&
+	                test_names_of_the_library();
 	return ok ? 0 : 1;
 }

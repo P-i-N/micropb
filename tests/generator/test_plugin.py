@@ -654,19 +654,13 @@ class ErrorTest(unittest.TestCase):
                       error(PROTO3 + "message m { map<string, int32> values = 1; }"))
 
     def test_repeated_without_max_count(self):
-        text = error(PROTO3 + "package p; message m { repeated int32 a = 1; }")
-        self.assertIn("a.proto: p.m.a: a repeated field needs a capacity. "
-                      "Add this line to a.options: p.m.a max_count:<N>", text)
+        text = header("package p; message m { repeated int32 a = 1; }")
+        self.assertIn("std::span<const std::int32_t> a;", text)
 
-    def test_repeated_without_max_count_says_when_no_options_file_was_found(self):
-        hint = "No file a.options was found. If it is in another folder, use --micropb_opt=options_dir=<folder>."
-        proto = PROTO3 + "message m { repeated int32 a = 1; repeated int32 b = 2; }"
-        self.assertIn("m.a max_count:<N>. " + hint, error(proto))
-        self.assertNotIn("was found", error(proto, "m.b max_count:2\n"))
-
-    def test_fixed_count_without_max_count(self):
-        self.assertIn("a repeated field needs a capacity",
-                      error(PROTO3 + "message m { repeated int32 a = 1; }", "m.a fixed_count:true\n"))
+    def test_repeated_message_without_max_count(self):
+        text = header("package p; message n { int32 x = 1; } message m { repeated n a = 1; repeated bytes b = 2; }")
+        self.assertEqual(members(text, "m"),
+                         ["std::span<const n> a;", "std::span<const std::span<const std::uint8_t>> b;"])
 
     def test_fixed_length_without_max_size(self):
         self.assertIn("a.proto: m.a: fixed_length needs max_size",
@@ -756,6 +750,11 @@ class WarningTest(unittest.TestCase):
         stderr, _ = self.warnings("message m { int32 a = 1; }", "m.a enum_intsize:IS_8\n")
         self.assertIn("a.options:1: warning: enum_intsize does not apply to m.a", stderr)
 
+    def test_fixed_count_without_max_count(self):
+        stderr, text = self.warnings("message m { repeated int32 a = 1; }", "m.a fixed_count:true\n")
+        self.assertIn("a.options:1: warning: fixed_count does not apply to m.a", stderr)
+        self.assertEqual(members(text, "m"), ["std::span<const std::int32_t> a;"])
+
     def test_enum_rule_is_not_a_rule_without_a_match(self):
         stderr, text = self.warnings("enum E { E_A = 0; }", "E enum_intsize:IS_8\n")
         self.assertNotIn("matches no field", stderr)
@@ -818,11 +817,11 @@ class WarningTest(unittest.TestCase):
         self.assertEqual(members(text, "m"), ["pb::repeated<std::int32_t, 4> a;"])
 
     def test_warnings_are_printed_also_when_an_error_follows(self):
-        proto = PROTO3 + "message m { repeated int32 a = 1; repeated int32 b = 2; }"
-        text = error(proto, "m.a max_cout:4\nm.b max_count:2\n")
+        proto = PROTO3 + "message m { repeated int32 a = 1; bytes b = 2; }"
+        text = error(proto, "m.a max_cout:4\nm.b fixed_length:true\n")
         self.assertIn("a.options:1: warning: the unknown option 'max_cout' is ignored", text)
-        self.assertIn("m.a: a repeated field needs a capacity", text)
-        text = error(proto, "m.aa max_count:4\nm.b max_count:2\n")
+        self.assertIn("m.b: fixed_length needs max_size", text)
+        text = error(proto, "m.aa max_count:4\nm.b fixed_length:true\n")
         self.assertIn("a.options:1: warning: 'm.aa' matches no field", text)
         self.assertNotIn("'m.b' matches no field", text)
 

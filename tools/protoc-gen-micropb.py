@@ -8,13 +8,14 @@ also works on a compiler without reflection. The sizes of repeated fields come f
 file in the NanoPB format:
 
     # <name pattern> <option>:<value> ...
+    Message.field  (no max_count)                 repeated: std::span<const T>; decode needs a pb::arena
     Message.field  max_count:8                    pb::repeated<T, 8>
     Message.field  max_count:3 fixed_count:true   std::array<T, 3>
     Message.field  max_size:16                    bytes: pb::repeated<std::uint8_t, 16>
     Message.field  max_size:6 fixed_length:true   bytes: std::array<std::uint8_t, 6>
     Message.field  int_size:IS_8                  std::int8_t or std::uint8_t (also IS_16, IS_32, IS_64);
                                                     sint32, sint64: pb::wire_int<std::int8_t, pb::int_encoding::ZIGZAG>
-    Message.field  type:FT_POINTER                repeated: std::span<const T>, encode only;
+    Message.field  type:FT_POINTER                repeated: std::span<const T>, also with max_count;
                                                     bytes: std::span<const std::uint8_t>
     Enum           enum_intsize:IS_8              enum class Enum : std::int8_t (also IS_16, IS_32)
 
@@ -467,17 +468,13 @@ class Header:
             if size:
                 text = f"std::array<std::uint8_t, {size}>" if fixed else f"pb::repeated<std::uint8_t, {size}>"
 
-        if repeated and pointer:
-            text = f"std::span<const {text}>"
+        count = option("max_count") if repeated and not pointer else None
+        if count and option("fixed_count"):
+            text = f"std::array<{text}, {count}>"
+        elif count:
+            text = f"pb::repeated<{text}, {count}>"
         elif repeated:
-            count, fixed = option("max_count"), option("fixed_count")
-            if not count:
-                file = self.options.path or stem(self.file.name) + ".options"
-                hint = "" if self.options.path else (f". No file {file} was found. If it is in another folder, "
-                                                     "use --micropb_opt=options_dir=<folder>.")
-                raise self.error(f"{name}: a repeated field needs a capacity. "
-                                 f"Add this line to {file}: {name} max_count:<N>{hint}")
-            text = f"std::array<{text}, {count}>" if fixed else f"pb::repeated<{text}, {count}>"
+            text = f"std::span<const {text}>"
 
         self.options.check_use(name, found, used)
         return text
