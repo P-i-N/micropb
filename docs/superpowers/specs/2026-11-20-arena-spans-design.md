@@ -6,22 +6,22 @@ Date: 2026-11-20. Status: draft for approval. This document changes the type map
 
 A repeated field is `pb::repeated<T, N>` today. Its storage is in the struct and has the size of the largest message. A message with nested repeated fields thus becomes very large: the `ApToHost` message of a device project is 11024 bytes on the Arm GNU Toolchain 14.2, and most of it is not used. Each repeated field must also have a `max_count` in the options file.
 
-The user wants a repeated field to be a `std::span<const T>` for encode and for decode. To decode, the caller gives a memory area, `pb::arena`. `decode` puts the items of each repeated field there, in one contiguous block for each field. Then the struct has only the size of its views, and the options file needs no sizes.
+The user wants a repeated field without a size to be a `std::span<const T>` for encode and for decode. To decode, the caller gives a memory area, `pb::arena`. `decode` puts the items of each such field there, in one contiguous block for each field. Then the struct has only the size of its views, and the options file needs no sizes. A field with a size in the options file stays `pb::repeated<T, N>`, with its storage in the struct and no arena.
 
 The library is not used by other projects yet. The user allows changes to all compatibility contracts in this design.
 
 ## Goals
 
-* Each repeated field is `std::span<const T>`, in each position: a plain member, an element of a repeated field, a value of a `std::optional`, a member of a oneof alternative.
-* `decode` makes the items of each repeated field in a caller-supplied `pb::arena` and sets the span to them. The items of one field are contiguous.
+* A repeated field can be `std::span<const T>` for encode and for decode, in each position: a plain member, an element of a repeated field, a value of a `std::optional`, a member of a oneof alternative.
+* `decode` makes the items of each `std::span<const T>` field in a caller-supplied `pb::arena` and sets the span to them. The items of one field are contiguous.
+* `pb::repeated<T, N>` stays as it is: storage in the struct, `CAPACITY_EXCEEDED` when it is full. A message that has only `pb::repeated` fields needs no arena.
 * An arena that is too small for the message is a run-time error, `pb::error::ARENA_FULL`. `decode` never writes outside the arena and never drops an item without an error.
 * The arena use depends on the message content. The order of the fields on the wire changes only the alignment padding between blocks, at most `alignof( std::max_align_t ) - 1` bytes for each block. (Exception: a nested message that occurs more than once, see "Merge".) The caller measures `used()` and adds a margin; the README states this. (Builder's call: exact use for each order needs a fixed alignment for each block, which costs more RAM on the device.)
-* The plugin writes a `std::span<const T>` for each repeated field. The options file needs no `max_count` and no `max_size`.
+* The plugin writes `pb::repeated<T, N>` for a field with `max_count` or `max_size`, and `std::span<const T>` for a field without. A repeated field without `max_count` is no longer an error.
 
 ## Non-goals
 
 * A function that gives the arena size for a message before `decode` (`pb::arena_size`). The caller finds the size by test with `arena.used()`. It can come later, if necessary.
-* Storage of fixed size in the struct (`pb::repeated<T, N>`): removed by decision of the user.
 * PMR (`std::pmr::memory_resource`): `<memory_resource>` is not in the freestanding subset, and `monotonic_buffer_resource` throws `std::bad_alloc` when it is full. With `-fno-exceptions`, that stops the program.
 * A change to the wire format. The bytes stay identical to `protoc`.
 
@@ -88,7 +88,7 @@ enum class error {
 	INVALID_VARINT,
 	INVALID_WIRE_TYPE,
 	INVALID_TAG,
-	/// decode: a `bytes` field is longer than its `std::array`.
+	/// decode: a field has more elements or bytes than its `pb::repeated` or `std::array` holds.
 	CAPACITY_EXCEEDED,
 	/// decode: the arena has no space for the items of a repeated field.
 	ARENA_FULL,
@@ -101,7 +101,7 @@ template <typename T>
 [[nodiscard]] std::expected<std::size_t, error> decode( std::span<const std::uint8_t> in, T& msg );
 ```
 
-* The overload without an arena is for a message that has no repeated field, also not in a nested message. For a message with a repeated field it is a compile error with the new rule `pb: decode_needs_arena:`.
+* The overload without an arena is for a message that has no `std::span<const T>` repeated field, also not in a nested message. For a message with such a field it is a compile error with the new rule `pb: decode_needs_arena:`.
 * `encode` and `encoded_size` do not change.
 * After `decode`, `msg` points into `in` (strings, bytes) and into the arena (repeated fields). Both must stay valid while `msg` is in use.
 
@@ -110,32 +110,34 @@ template <typename T>
 | C++ type | Proto3 | Encode | Decode |
 | --- | --- | --- | --- |
 | `std::span<const T>` | `repeated T` | yes | yes, items in the arena |
+| `pb::repeated<T, N>` | `repeated T` | yes | yes, items in the struct |
 | `std::array<T, N>` | `repeated T` | yes | no (`decode_encode_only`) |
 | `std::span<const std::uint8_t>` | `bytes` | yes | yes, a view into the input |
+| `pb::repeated<std::uint8_t, N>` | `bytes` | yes | yes, a copy in the struct |
 | `std::array<std::uint8_t, N>` | `bytes`, fixed length | yes | yes |
 
-* Removed: `pb::repeated<T, N>` and `pb::span_buffer<T>`, also as `bytes` with `std::uint8_t` elements.
+* Removed: `pb::span_buffer<T>`. The arena does its job, also in the positions where a `span_buffer` is not allowed today.
 * A `std::span<T>` with a non-const `T`, or with a static extent, stays not mapped (`unmapped_type`) or encode-only (`decode_fixed_span`) as today.
 * `std::span<const std::span<const std::uint8_t>>` is `repeated bytes`. Its items are views into the input, in a block in the arena.
 
 ### Rules
 
 * Removed: `span_buffer_in_optional`, `span_buffer_in_variant`, `span_buffer_in_repeated`, and their tests in `tests/compile_fail/`. The arena makes the storage for a span in each position.
-* Changed: the text of `decode_encode_only` names only `std::array`.
+* Changed: the text of `decode_encode_only` names only `std::array`, and tells to use `pb::repeated` or `std::span<const T>`.
 * New: `decode_needs_arena` (see "Public API"), with a test in `tests/compile_fail/`.
 * New: `recursive_message`. A span makes a type that contains itself possible (`struct node { std::span<const node> children; };`). The library rejects it, directly or through other types, with a test in `tests/compile_fail/`. Thus the recursion depth of `decode` keeps its bound at compile time, and the input cannot overflow the stack of the device. The plugin keeps its error for a message that contains itself. (Builder's call: recursive messages need a run-time depth limit and a new error; not asked for.)
 * The other rules stay. A repeated field still cannot be a oneof alternative, the value of a `std::optional`, or the element of a repeated field.
 
 ### Descriptors
 
-* `sequence_storage` has two values: `ARRAY` (`std::array`, encode only) and `SPAN` (`std::span<const T>`). `REPEATED` and the count offset go away.
+* `sequence_storage` keeps `REPEATED` and `ARRAY`. `ACCESSOR` serves only `std::span<const T>`, because `pb::span_buffer` goes away.
 * The span accessor gets a second operation that sets the span to a block and a count. The interpreter does not assume the layout of `std::span`.
 * `sequence_desc` gets the alignment of the element.
 * The type of the element must be trivially copyable and trivially destructible: the arena never calls a destructor, and a merge copies items with `memcpy`. All mapped types are. A `static_assert` in the descriptor examines it.
 
 ### Count and fill
 
-`decode` resets `msg` first: each span becomes empty. Then, for a record of a repeated field:
+`decode` resets `msg` first: each span becomes empty. A `pb::repeated` field fills as today. For a record of a `std::span<const T>` field:
 
 1. If the block of the field has space for the elements of this record, `decode` adds them.
 2. Else `decode` counts the elements of this field from this record to the end of the current message: the records of the field number, which it finds from the keys; it skips all other values. Then it takes a new block for the old items and the counted items, copies the old items, and adds the elements of this record.
@@ -161,17 +163,16 @@ A oneof that changes to a different alternative resets the alternative. The bloc
 
 ### Plugin
 
-* Each repeated field is `std::span<const T>`. A field without `max_count` is no longer an error.
-* `bytes` is always `std::span<const std::uint8_t>`, or `std::array<std::uint8_t, N>` with `max_size:N fixed_length:true`.
-* `max_count:N fixed_count:true` stays: `std::array<T, N>`, encode only.
-* `max_count` without `fixed_count`, and `max_size` without `fixed_length`, do not apply: a warning, as for each option that does not apply.
-* `type:FT_POINTER`, `FT_STATIC` and `FT_DEFAULT` have no effect, because a repeated field is always a span. The plugin accepts them without a warning, so that a NanoPB file works. `FT_CALLBACK` and `FT_IGNORE` stay errors.
+* A repeated field without `max_count` is `std::span<const T>`. Before, it was an error.
+* All other options keep their result: `max_count:N` gives `pb::repeated<T, N>`, `max_size:N` gives `pb::repeated<std::uint8_t, N>`, `fixed_count` and `fixed_length` give `std::array`. A `bytes` field without `max_size` stays `std::span<const std::uint8_t>`.
+* `type:FT_POINTER` stays as in "Changes: `type:FT_POINTER`" of the plugin design: it gives the span also when a wildcard line sets `max_count` or `max_size`. Its decode is now possible with an arena. `FT_STATIC` and `FT_DEFAULT` give the result of the other options. `FT_CALLBACK` and `FT_IGNORE` stay errors.
 * `int_size:IS_8` on a repeated unsigned field stays an error: `std::span<const std::uint8_t>` is `bytes`.
 * The generated headers in `tests/` are made again with the plugin.
 
 ## Tests
 
-* The tests that use `pb::repeated` or `pb::span_buffer` change to `std::span<const T>` and an arena. The reference vectors in `tests/vectors/` do not change.
+* The tests that use `pb::span_buffer` change to `std::span<const T>` and an arena. The tests of `pb::repeated` stay. The reference vectors in `tests/vectors/` do not change.
+* `test_wire_compat.cpp` and `test_generated.cpp`: at least one message decodes with spans and an arena, and its bytes agree with the reference vectors.
 * `test_types.cpp`: `pb::arena` with `static_assert` tests where it is `constexpr`, and run-time tests for alignment and for a full arena.
 * `test_decode.cpp`, new cases:
     * An arena that is exactly large enough decodes the message. An arena that is 1 byte smaller gives `ARENA_FULL`.
@@ -184,18 +185,18 @@ A oneof that changes to a different alternative resets the alternative. The bloc
     * Input that is not valid: a packed varint record whose last varint has no end, a packed fixed record whose length is not a multiple of the element size. No write outside the block (the sanitizer build examines it).
     * For two encodings of one message with a different order of the fields, `used()` differs by no more than the padding bound of "Goals".
 * `tests/compile_fail/decode_needs_arena.cpp`, `tests/compile_fail/recursive_message.cpp` (direct, and through a second type).
-* `test_plugin.py`: repeated fields without `max_count`; the warnings for `max_count` and `max_size`; `type` without effect.
+* `test_plugin.py`: a repeated field without `max_count` gives `std::span<const T>`; the test that expects an error for it changes.
 * All tests with reflection and with `-DMICROPB_REFLECTION=OFF`, and the Arm compile tests.
 
 ### Size report
 
-The structs of `tests/size/size_report.cpp` change from `pb::repeated` to `std::span<const T>`. The report gives the numbers before and after the change, also when they become larger. Today: 16 types 9400 bytes, 32 types 13736 bytes, one more type 271 bytes.
+The structs of `tests/size/size_report.cpp` keep `pb::repeated`, so the numbers before and after the change compare the same structs. The report gives both, also when they become larger. Today: 16 types 9400 bytes, 32 types 13736 bytes, one more type 271 bytes. A second measurement with one span field in each struct shows the cost of the count and the arena.
 
 ## Documents
 
 * `README.md`: the type mapping, the API (`pb::arena`, `decode`), the errors, the options file, the lifetime of a decoded message.
 * `2026-11-18-micropb-design.md`, `2026-11-18-micropb-table-codec-design.md`, `2026-11-19-protoc-plugin-design.md`: a short section "Changes: arena spans" that names this document.
-* `CLAUDE.md`, section "Code", names `pb::repeated<T, N>` and `pb::span_buffer<T>` as the storage. It needs a change of one sentence. The user decides on it.
+* `CLAUDE.md`, section "Code", names `pb::span_buffer<T>` as storage from the caller. It needs a change of one sentence (`pb::arena`). The user decides on it.
 
 ## Left to the builder
 
