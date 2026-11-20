@@ -212,24 +212,9 @@ Scalar elements are packed. Strings, bytes and messages are one field for each e
 | --- | --- | --- |
 | `pb::repeated<T, N>` | in the struct, up to `N` elements | yes |
 | `std::span<const T>` | a view of your data; after decode, a block in a `pb::arena` | yes, with a `pb::arena` |
-| `pb::span_buffer<T>` | a span that you supply | yes |
 | `std::array<T, N>` | in the struct, always `N` elements | no |
 
 `pb::repeated<T, N>` has `push_back` (returns `false` when it is full), `size`, `capacity`, `empty`, `clear`, `operator[]`, `begin` and `end`.
-
-Give a `pb::span_buffer<T>` its storage before you decode:
-
-```cpp
-struct samples {
-    pb::span_buffer<std::int32_t> values;
-};
-
-std::array<std::int32_t, 256> storage{};
-samples received{pb::span_buffer<std::int32_t>(storage)};
-const auto result = pb::decode(input, received);
-```
-
-A `pb::span_buffer` cannot be in a `std::optional`, in a `std::variant`, or in the element of a repeated field: use `pb::repeated` there.
 
 A `std::span<const T>` repeated field has no size limit in the struct. `decode` puts its items in a `pb::arena`, a memory area that you supply, and sets the span to them. This also works in a nested message, in a `std::optional`, in a `oneof` alternative and in the element of a repeated field:
 
@@ -259,7 +244,6 @@ const auto result = pb::decode(input, received, memory);
 | --- | --- |
 | `std::span<const std::uint8_t>` | a view into the input, no copy |
 | `pb::repeated<std::uint8_t, N>` | a copy, up to `N` bytes |
-| `pb::span_buffer<std::uint8_t>` | a copy into your storage |
 | `std::array<std::uint8_t, N>` | a copy; fixed length, see below |
 | `std::span<const std::uint8_t, N>` | no (encode only) |
 
@@ -452,7 +436,7 @@ std::expected<std::size_t, pb::error> pb::decode(std::span<const std::uint8_t> i
 
 `decode` reads exactly one message from `in`. On success it returns `in.size()`. A message with a `std::span<const T>` repeated field, also in a nested message, needs the overload with a `pb::arena` (see [Repeated fields](#repeated-fields)). Without the arena, it does not compile (`pb: decode_needs_arena`).
 
-* It resets `msg` first. You can use the same object again for each message. A `pb::repeated` and a `pb::span_buffer` keep their storage and get the size 0.
+* It resets `msg` first. You can use the same object again for each message. A `pb::repeated` gets the size 0. A `std::span<const T>` becomes empty.
 * A value that `decode` makes for a `std::optional` or for a new `oneof` alternative also starts from the reset state: a field that is not in the input is zero or empty, as in protobuf. A default member initializer in such a value has no effect.
 * It skips a field number that the message does not have, and a known field with a different wire type. Thus the other side can add fields, and old firmware continues to work.
 * A scalar that occurs more than one time: the last value wins. A nested message: the occurrences merge. A `oneof`: the last alternative wins.
@@ -520,7 +504,6 @@ A message that the codec cannot handle correctly does not compile. Each error is
 | `variant_repeated_alternative`, `variant_optional_alternative`, `variant_variant_alternative` | An alternative is a repeated field, a `std::optional` or a `std::variant`. |
 | `optional_repeated`, `optional_optional`, `optional_variant` | The value of a `std::optional` is a repeated field, a `std::optional` or a `std::variant`. |
 | `repeated_repeated`, `repeated_optional`, `repeated_variant` | The element of a repeated field is a repeated field, a `std::optional` or a `std::variant`. |
-| `span_buffer_in_optional`, `span_buffer_in_variant`, `span_buffer_in_repeated` | A `pb::span_buffer` is in a place where it cannot get its storage. |
 
 **Field lists that a person wrote**
 
@@ -627,7 +610,7 @@ The output has no timestamp and no absolute path. The script writes temporary fi
 ```text
 src/micropb/
     micropb.hpp      include this header
-    types.hpp        pb::error, pb::repeated, pb::span_buffer, pb::arena, pb::sint32 ..., pb::tag, pb::oneof_tags
+    types.hpp        pb::error, pb::repeated, pb::arena, pb::sint32 ..., pb::tag, pb::oneof_tags
     wire.hpp         reader and writer for varints, fixed-width values and keys
     meta_schema.hpp  type rules, compile-time checks, field lists from reflection
     codec.hpp        descriptor tables, interpreter, encoded_size, encode, decode

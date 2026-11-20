@@ -27,16 +27,6 @@ constexpr bool test_repeated()
 	return r.empty();
 }
 
-constexpr bool test_span_buffer()
-{
-	std::array<int, 2> storage{};
-	span_buffer<int> b{ storage };
-	if ( !b.push_back( 7 ) || storage[0] != 7 || b.capacity() != 2 )
-		return false;
-	b.clear();
-	return b.size() == 0;
-}
-
 constexpr bool test_arena_empty()
 {
 	std::array<std::uint8_t, 16> storage{};
@@ -98,14 +88,13 @@ bool test_arena_overflow()
 
 static_assert( test_wire_int() );
 static_assert( test_repeated() );
-static_assert( test_span_buffer() );
 static_assert( test_arena_empty() );
 
 } // namespace
 
 int main()
 {
-	const bool ok = test_wire_int() && test_repeated() && test_span_buffer() && test_arena_empty() &&
-	                test_arena_allocate() && test_arena_odd_start() && test_arena_full() && test_arena_overflow();
+	const bool ok = test_wire_int() && test_repeated() && test_arena_empty() && test_arena_allocate() &&
+	                test_arena_odd_start() && test_arena_full() && test_arena_overflow();
 	return ok ? 0 : 1;
 }

@@ -101,7 +101,7 @@ template <typename T>
 struct fields_of;
 
 namespace detail {
-/// Gives the codec the count member of `repeated` and `span_buffer`.
+/// Gives the codec the count member of `repeated`.
 struct sequence_access;
 } // namespace detail
 
@@ -140,45 +140,6 @@ private:
 	friend struct detail::sequence_access;
 
 	std::array<T, N> _items{};
-	std::size_t _count = 0;
-};
-
-/// Sequence that keeps its items in storage that the caller owns. The storage
-/// must exist for as long as the buffer exists. Does not allocate.
-template <typename T>
-struct span_buffer
-{
-	constexpr explicit span_buffer( std::span<T> storage ) : _storage( storage ) {}
-
-	[[nodiscard]] constexpr std::size_t size() const { return _count; }
-	[[nodiscard]] constexpr std::size_t capacity() const { return _storage.size(); }
-	[[nodiscard]] constexpr bool empty() const { return _count == 0; }
-
-	[[nodiscard]] constexpr T* begin() { return _storage.data(); }
-	[[nodiscard]] constexpr T* end() { return _storage.data() + _count; }
-	[[nodiscard]] constexpr const T* begin() const { return _storage.data(); }
-	[[nodiscard]] constexpr const T* end() const { return _storage.data() + _count; }
-
-	/// `index` must be less than `size()`.
-	[[nodiscard]] constexpr T& operator[]( std::size_t index ) { return _storage[index]; }
-	[[nodiscard]] constexpr const T& operator[]( std::size_t index ) const { return _storage[index]; }
-
-	/// Returns `false` and does not add `item` when the storage is full.
-	[[nodiscard]] constexpr bool push_back( const T& item )
-	{
-		if ( _count == _storage.size() )
-			return false;
-
-		_storage[_count++] = item;
-		return true;
-	}
-
-	constexpr void clear() { _count = 0; }
-
-private:
-	friend struct detail::sequence_access;
-
-	std::span<T> _storage;
 	std::size_t _count = 0;
 };
 

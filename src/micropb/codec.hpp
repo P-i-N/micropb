@@ -137,7 +137,7 @@ enum class sequence_storage : std::uint8_t
 	REPEATED,
 	/// `std::array`: the items are at offset 0, the count is `capacity`.
 	ARRAY,
-	/// `std::span<const T>` and `pb::span_buffer<T>`: `access` gives the items.
+	/// `std::span<const T>`: `access` gives the items.
 	ACCESSOR,
 };
 
@@ -206,38 +206,24 @@ struct message_descriptor
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/// The count member of `pb::repeated` and `pb::span_buffer` is private. The
-/// codec reads and writes it through this friend of the two types.
+/// The count member of `pb::repeated` is private. The codec reads and writes it
+/// through this friend of the type.
 struct sequence_access
 {
 	template <typename S>
 	static constexpr std::size_t items_offset = offsetof( S, _items );
 	template <typename S>
 	static constexpr std::size_t count_offset = offsetof( S, _count );
-
-	template <typename T>
-	[[nodiscard]] static std::size_t* count_of( span_buffer<T>& buffer )
-	{
-		return &buffer._count;
-	}
 };
 
-/// Accessor of `std::span<const T>` and `pb::span_buffer<T>`. These types keep
-/// their items in a different object, so the interpreter cannot find the items
-/// from an offset.
+/// Accessor of `std::span<const T>`. The span keeps its items in a different
+/// object, so the interpreter cannot find the items from an offset.
 template <typename S>
 [[nodiscard]] sequence_view access_sequence( void* sequence )
 {
 	S& items = *static_cast<S*>( sequence );
-	if constexpr ( is_span_buffer<S> )
-	{
-		return { items.begin(), items.size(), items.capacity(), sequence_access::count_of( items ) };
-	}
-	else
-	{
-		const void* data = items.data();
-		return { const_cast<void*>( data ), items.size(), items.size(), nullptr };
-	}
+	const void* data = items.data();
+	return { const_cast<void*>( data ), items.size(), items.size(), nullptr };
 }
 
 /// Binder of `std::span<const T>`.
@@ -1157,7 +1143,7 @@ template <typename T>
 }
 
 /// Decodes the proto3 message in `in` into `msg` and returns `in.size()`. Resets
-/// `msg` first. A `pb::span_buffer` keeps its storage. On error, `msg` holds the
+/// `msg` first. On error, `msg` holds the
 /// fields that `decode` read before the error. A `std::string_view` or a
 /// `std::span<const std::uint8_t>` of `msg` points into `in`. The items of each
 /// `std::span<const T>` repeated field are in one block of `memory`. `in` and

@@ -270,21 +270,17 @@ bool test_encode_each_short_buffer()
 	       each_short_buffer_fails( lists_full() );
 }
 
-struct buffers
+struct spans
 {
-	pb::span_buffer<std::int32_t> ints;
-	pb::span_buffer<std::uint8_t> bytes;
+	std::span<const std::int32_t> ints;
+	std::span<const std::uint8_t> bytes;
 };
 
-bool test_encode_span_buffer()
+bool test_encode_span_and_bytes()
 {
-	std::array<std::int32_t, 4> int_storage{};
-	std::array<std::uint8_t, 4> byte_storage{};
-	buffers value{ pb::span_buffer<std::int32_t>( int_storage ), pb::span_buffer<std::uint8_t>( byte_storage ) };
-	for ( std::int32_t i : { 1, -2, 3 } )
-		static_cast<void>( value.ints.push_back( i ) );
-	for ( std::uint8_t b : { 7, 8, 9 } )
-		static_cast<void>( value.bytes.push_back( b ) );
+	constexpr std::array<std::int32_t, 3> int_values{ 1, -2, 3 };
+	constexpr std::array<std::uint8_t, 3> byte_values{ 7, 8, 9 };
+	const spans value{ int_values, byte_values };
 
 	constexpr std::array<std::uint8_t, 19> expected{ 0x0a, 0x0c, 0x01, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 	                                                 0xff, 0xff, 0x01, 0x03, 0x12, 0x03, 7,    8,    9 };
@@ -336,7 +332,7 @@ int main()
 	                test_encode_envelope_pose() && test_encode_envelope_ping() && test_encode_envelope_long() &&
 	                test_encode_spans() && test_encode_too_small() && test_encode_order() &&
 	                test_encode_unsigned_enum() && test_encode_empty_message() && test_encode_deep() &&
-	                test_encode_each_short_buffer() && test_encode_span_buffer() && test_encode_fixed_extent_span() &&
+	                test_encode_each_short_buffer() && test_encode_span_and_bytes() && test_encode_fixed_extent_span() &&
 	                test_encode_const_nested();
 	return ok ? 0 : 1;
 }

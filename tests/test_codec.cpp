@@ -148,28 +148,16 @@ bool test_sequence_accessor()
 	if ( a.count != 3 || a.capacity != 3 || a.data != items.data() || a.stored_count != nullptr )
 		return false;
 
-	std::array<std::int32_t, 4> storage{};
-	pb::span_buffer<std::int32_t> buffer( storage );
-	static_cast<void>( buffer.push_back( 1 ) );
-	static_cast<void>( buffer.push_back( 2 ) );
-	const d::sequence_desc& buffer_desc = *d::value_descriptor<pb::span_buffer<std::int32_t>>::value.sequence;
-	const d::sequence_view b = buffer_desc.access( &buffer );
-	if ( b.count != 2 || b.capacity != 4 || b.data != storage.data() || b.stored_count == nullptr ||
-	     *b.stored_count != 2 )
-		return false;
-
-	*b.stored_count = 3;
-	if ( buffer.size() != 3 || view_desc.element_size != 4 || buffer_desc.storage != d::sequence_storage::ACCESSOR )
+	if ( view_desc.element_size != 4 || view_desc.storage != d::sequence_storage::ACCESSOR )
 		return false;
 
 	// Only a `std::span<const T>` has a binder: `decode` sets it to a block in the arena.
 	std::array<std::int32_t, 2> block{ 5, 6 };
 	view_desc.bind( &view, block.data(), 2 );
 	return view.data() == block.data() && view.size() == 2 && view_desc.element_align == alignof( std::int32_t ) &&
-	       view_desc.construct == &d::construct_item<std::int32_t> && buffer_desc.bind == nullptr &&
-	       buffer_desc.construct == nullptr &&
+	       view_desc.construct == &d::construct_item<std::int32_t> &&
 	       d::value_descriptor<pb::repeated<float, 4>>::value.sequence->bind == nullptr &&
-	       view_desc.reserve == &d::reserve && buffer_desc.reserve == nullptr &&
+	       view_desc.reserve == &d::reserve &&
 	       d::value_descriptor<pb::repeated<float, 4>>::value.sequence->reserve == nullptr &&
 	       d::value_descriptor<std::array<float, 2>>::value.sequence->reserve == nullptr;
 }
@@ -238,7 +226,6 @@ using choice = std::variant<std::monostate, pose, ping, std::uint32_t>;
 /// One member of each kind, with the storage types that `decode` accepts.
 struct all
 {
-	pb::span_buffer<std::int32_t> buffered;
 	bool flag;
 	std::int8_t i8;
 	std::int16_t i16;
@@ -278,7 +265,6 @@ struct all
 /// place of the sequences of scalars.
 struct all_views
 {
-	std::span<const std::int32_t> buffered;
 	bool flag;
 	std::int8_t i8;
 	std::int16_t i16;
@@ -315,7 +301,6 @@ struct all_views
 };
 
 constexpr std::array<std::uint8_t, 3> raw{ 9, 8, 7 };
-constexpr std::array<std::int32_t, 3> buffered_values{ 4, 5, 6 };
 constexpr std::array<std::int32_t, 3> int_values{ 1, -1, 100000 };
 constexpr std::array<pb::sint32, 2> zz_values{ pb::sint32( -1 ), pb::sint32( 2 ) };
 
@@ -363,16 +348,6 @@ void fill_common( T& v )
 
 using buffer = std::array<std::uint8_t, 512>;
 
-/// An `all` with all members in their initial state. `all` has no default
-/// constructor, because a `pb::span_buffer` must get its storage.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
-all make_all( std::span<std::int32_t> storage )
-{
-	return { .buffered = pb::span_buffer<std::int32_t>( storage ) };
-}
-#pragma GCC diagnostic pop
-
 /// `encode`, `decode` and `encode` again give the same bytes, and `encoded_size` agrees.
 bool round_trips( const all& value )
 {
@@ -381,8 +356,7 @@ bool round_trips( const all& value )
 	if ( !size || pb::encoded_size( value ) != *size )
 		return false;
 
-	std::array<std::int32_t, 4> storage{};
-	all back = make_all( storage );
+	all back{};
 	const auto used = pb::decode( std::span<const std::uint8_t>( first ).first( *size ), back );
 	if ( !used || *used != *size )
 		return false;
@@ -404,23 +378,20 @@ bool same_bytes( const A& a, const B& b )
 
 bool test_all_kinds()
 {
-	std::array<std::int32_t, 4> storage{};
-	const all empty = make_all( storage );
+	const all empty{};
 	// A nested message (key 2, length 1) and a fixed-length bytes field (key 2, length 1, 6 bytes) are
 	// always on the wire.
 	if ( !round_trips( empty ) || pb::encoded_size( empty ) != 12 )
 		return false;
 
-	all value = make_all( storage );
+	all value{};
 	fill_common( value );
-	append_all( value.buffered, buffered_values );
 	append_all( value.ints, int_values );
 	append_all( value.zz, zz_values );
 	append_all( value.ds, std::array<double, 2>{ 1.0, -2.0 } );
 
 	all_views views{};
 	fill_common( views );
-	views.buffered = buffered_values;
 	views.ints = int_values;
 	views.zz = zz_values;
 	views.ds = { 1.0, -2.0 };

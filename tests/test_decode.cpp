@@ -142,22 +142,6 @@ struct floats_only
 	pb::repeated<float, 4> floats;
 };
 
-struct int_buffer
-{
-	pb::span_buffer<std::int32_t> ints;
-};
-
-struct sink
-{
-	pb::span_buffer<std::uint8_t> bytes;
-};
-
-struct nested_sink
-{
-	inner head;
-	sink body;
-};
-
 /// Repeated fields as spans: `decode` puts their items in a `pb::arena`.
 struct arena_lists
 {
@@ -207,7 +191,7 @@ struct fragile_items
 };
 
 static_assert( !detail::needs_arena<ints_only>() && !detail::needs_arena<lists>() && !detail::needs_arena<text>() &&
-               !detail::needs_arena<int_buffer>() && !detail::needs_arena<envelope_owned>() );
+               !detail::needs_arena<envelope_owned>() );
 static_assert( detail::needs_arena<arena_lists>() && detail::needs_arena<arena_items>() &&
                detail::needs_arena<arena_holder>() && detail::needs_arena<arena_choices>() &&
                detail::needs_arena<byte_lists>() );
@@ -457,36 +441,6 @@ bool test_repeated_bytes()
 	return result && message.bytes.size() == 4 && message.bytes[3] == 4;
 }
 
-bool test_span_buffer()
-{
-	constexpr std::array<std::uint8_t, 5> in{ 0x0a, 0x03, 7, 8, 9 };
-	constexpr std::array<std::uint8_t, 6> big{ 0x0a, 0x04, 1, 2, 3, 4 };
-	std::array<std::uint8_t, 3> storage{};
-
-	sink message{ pb::span_buffer<std::uint8_t>( storage ) };
-	const auto first = decode( bytes_of( in ), message );
-	const bool filled = first && message.bytes.size() == 3 && message.bytes[2] == 9 && storage[0] == 7;
-
-	const auto second = decode( std::span<const std::uint8_t>(), message );
-	const bool cleared = second && message.bytes.empty() && message.bytes.capacity() == 3;
-
-	const auto third = decode( bytes_of( big ), message );
-	return filled && cleared && !third && third.error() == error::CAPACITY_EXCEEDED;
-}
-
-bool test_span_buffer_nested()
-{
-	constexpr std::array<std::uint8_t, 7> in{ 0x12, 0x05, 0x0a, 0x03, 7, 8, 9 };
-	std::array<std::uint8_t, 3> storage{};
-
-	nested_sink message{ {}, sink{ pb::span_buffer<std::uint8_t>( storage ) } };
-	const auto first = decode( bytes_of( in ), message );
-	const bool filled = first && message.body.bytes.size() == 3 && message.body.bytes[1] == 8;
-
-	const auto second = decode( std::span<const std::uint8_t>(), message );
-	return filled && second && message.body.bytes.empty() && message.body.bytes.capacity() == 3;
-}
-
 bool test_errors()
 {
 	constexpr std::array<std::uint8_t, 1> truncated{ 0x08 };
@@ -617,19 +571,6 @@ bool test_repeated_message_no_merge()
 	return result && message.items.size() == 2 && message.items[0].x == 1 && message.items[1].x == 0;
 }
 
-bool test_span_buffer_repeated()
-{
-	constexpr std::array<std::uint8_t, 4> in{ 0x0a, 0x02, 1, 2 };
-	std::array<std::int32_t, 4> storage{};
-
-	int_buffer message{ pb::span_buffer<std::int32_t>( storage ) };
-	const auto first = decode( bytes_of( in ), message );
-	const bool filled = first && message.ints.size() == 2 && storage[0] == 1 && storage[1] == 2;
-
-	const auto second = decode( std::span<const std::uint8_t>(), message );
-	return filled && second && message.ints.empty() && message.ints.capacity() == 4 && storage[0] == 1;
-}
-
 bool test_oneof_last_wins()
 {
 	std::array<std::uint8_t, 2 + vectors::envelope_pose.size()> in{ 0x1a, 0x00 };
@@ -695,15 +636,6 @@ bool test_reuse_oneof()
 
 	const auto c = decode( std::span<const std::uint8_t>(), message );
 	return filled && replaced && c && std::holds_alternative<std::monostate>( message.payload );
-}
-
-bool test_span_buffer_no_storage()
-{
-	constexpr std::array<std::uint8_t, 3> one{ 0x0a, 0x01, 0x05 };
-	int_buffer message{ pb::span_buffer<std::int32_t>( std::span<std::int32_t>() ) };
-	const auto full = decode( bytes_of( one ), message );
-	const auto none = decode( std::span<const std::uint8_t>(), message );
-	return !full && full.error() == error::CAPACITY_EXCEEDED && none && message.ints.empty();
 }
 
 struct nothing
@@ -1074,6 +1006,37 @@ bool test_arena_new_items()
 	       !message.items[2].o && chosen && *chosen == 7 && message.items[2].flag && storage.intact();
 }
 
+/// A second `decode` into the same message resets each span field, also in a nested message. The arena does
+/// not free the first blocks.
+bool test_arena_reset()
+{
+	constexpr auto in = std::to_array<std::uint8_t>( { 0x0a, 0x04, 0x0a, 0x02, 0x01, 0x02 } );
+
+	guarded storage( 512 );
+	pb::arena memory = storage.memory();
+	arena_holder message{};
+	const auto first = decode( bytes_of( in ), message, memory );
+	const bool filled = first && holds_items( message.child.ints, std::to_array<std::int32_t>( { 1, 2 } ) );
+	const std::size_t used = memory.used();
+
+	const auto second = decode( std::span<const std::uint8_t>(), message, memory );
+	return filled && second && message.child.ints.empty() && memory.used() == used && storage.intact();
+}
+
+/// An arena of capacity 0 gives `ARENA_FULL` for a span field with one item. A message without items needs no block.
+bool test_arena_no_storage()
+{
+	constexpr auto one = std::to_array<std::uint8_t>( { 0x0a, 0x01, 0x05 } );
+
+	guarded storage( 0 );
+	pb::arena memory = storage.memory();
+	arena_lists message{};
+	const auto full = decode( bytes_of( one ), message, memory );
+	const auto none = decode( std::span<const std::uint8_t>(), message, memory );
+	return !full && full.error() == error::ARENA_FULL && none && message.ints.empty() && memory.used() == 0 &&
+	       storage.intact();
+}
+
 /// The arena tests, with the arena storage filled with `fill` before each `decode`.
 bool test_arena( std::uint8_t fill )
 {
@@ -1081,7 +1044,8 @@ bool test_arena( std::uint8_t fill )
 	return test_arena_exact() && test_arena_mixed_records() && test_arena_nested_repeated() && test_arena_merge() &&
 	       test_arena_oneof_and_optional() && test_arena_alignment() && test_arena_bad_packed() &&
 	       test_arena_huge_length() && test_arena_error_mid_field() && test_arena_two_messages() && test_arena_order() &&
-	       test_arena_wrong_wire_type() && test_arena_new_value_reset() && test_arena_new_items();
+	       test_arena_wrong_wire_type() && test_arena_new_value_reset() && test_arena_new_items() && test_arena_reset() &&
+	       test_arena_no_storage();
 }
 
 /// A message with only `pb::repeated` fields decodes without an arena.
@@ -1102,15 +1066,13 @@ int main()
 	  test_decode_scalars_enum_neg() && test_decode_text_short() && test_decode_text_long() && test_decode_outer_set() &&
 	  test_decode_outer_unset() && test_zero_copy() && test_reset() && test_last_wins() && test_merge() &&
 	  test_unknown_skip() && test_wrong_wire_type() && test_wrong_wire_type_optional() && test_narrowing() &&
-	  test_narrow_enum() && test_fixed_bytes() && test_repeated_bytes() && test_span_buffer() &&
-	  test_span_buffer_nested() && test_errors() && test_decode_lists_empty() && test_decode_pose_zero() &&
-	  test_decode_envelope_none() && test_decode_envelope_pose() && test_decode_envelope_ping() &&
-	  test_unpacked_scalars() && test_mixed_packing() && test_capacity() && test_packed_bad_length() &&
-	  test_repeated_wrong_wire_type() && test_repeated_message_no_merge() && test_span_buffer_repeated() &&
+	  test_narrow_enum() && test_fixed_bytes() && test_repeated_bytes() && test_errors() && test_decode_lists_empty() &&
+	  test_decode_pose_zero() && test_decode_envelope_none() && test_decode_envelope_pose() &&
+	  test_decode_envelope_ping() && test_unpacked_scalars() && test_mixed_packing() && test_capacity() &&
+	  test_packed_bad_length() && test_repeated_wrong_wire_type() && test_repeated_message_no_merge() &&
 	  test_oneof_last_wins() && test_oneof_merge() && test_oneof_replace() && test_oneof_wrong_wire_type() &&
 	  test_decode_lists_full() && test_decode_envelope_long() && test_reuse_repeated_message() && test_reuse_oneof() &&
-	  test_span_buffer_no_storage() && test_decode_empty_message() && test_error_order() &&
-	  test_reuse_resets_each_kind() && test_partial_result() && test_fixed_bytes_last_wins() && test_arena( 0x00 ) &&
-	  test_arena( 0xA5 ) && test_no_arena_needed();
+	  test_decode_empty_message() && test_error_order() && test_reuse_resets_each_kind() && test_partial_result() &&
+	  test_fixed_bytes_last_wins() && test_arena( 0x00 ) && test_arena( 0xA5 ) && test_no_arena_needed();
 	return ok ? 0 : 1;
 }
