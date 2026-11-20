@@ -20,8 +20,8 @@ constexpr bool equal( const std::array<std::uint8_t, N>& actual, const std::arra
 
 constexpr bool test_varint_size()
 {
-	return varint_size( 0 ) == 1 && varint_size( 127 ) == 1 && varint_size( 128 ) == 2 && varint_size( 16383 ) == 2 &&
-	       varint_size( 16384 ) == 3 && varint_size( u64_max ) == 10;
+	return detail::varint_size( 0 ) == 1 && detail::varint_size( 127 ) == 1 && detail::varint_size( 128 ) == 2 &&
+	       detail::varint_size( 16383 ) == 2 && detail::varint_size( 16384 ) == 3 && detail::varint_size( u64_max ) == 10;
 }
 
 constexpr bool test_zigzag()
@@ -30,23 +30,23 @@ constexpr bool test_zigzag()
 	constexpr auto i32_min = std::numeric_limits<std::int32_t>::min();
 	constexpr auto i64_min = std::numeric_limits<std::int64_t>::min();
 
-	if ( zigzag_encode( std::int32_t{ 0 } ) != 0 || zigzag_encode( std::int32_t{ -1 } ) != 1 ||
-	     zigzag_encode( std::int32_t{ 1 } ) != 2 || zigzag_encode( std::int32_t{ -2 } ) != 3 )
+	if ( detail::zigzag_encode( std::int32_t{ 0 } ) != 0 || detail::zigzag_encode( std::int32_t{ -1 } ) != 1 ||
+	     detail::zigzag_encode( std::int32_t{ 1 } ) != 2 || detail::zigzag_encode( std::int32_t{ -2 } ) != 3 )
 		return false;
-	if ( zigzag_encode( i32_max ) != 0xFFFFFFFEu || zigzag_encode( i32_min ) != 0xFFFFFFFFu )
+	if ( detail::zigzag_encode( i32_max ) != 0xFFFFFFFEu || detail::zigzag_encode( i32_min ) != 0xFFFFFFFFu )
 		return false;
-	if ( zigzag_encode( i64_min ) != u64_max )
+	if ( detail::zigzag_encode( i64_min ) != u64_max )
 		return false;
 
 	for ( std::int32_t v : std::initializer_list<std::int32_t>{ 0, -1, 1, -2, 2, i32_max, i32_min } )
-		if ( zigzag_decode( zigzag_encode( v ) ) != v )
+		if ( detail::zigzag_decode( detail::zigzag_encode( v ) ) != v )
 			return false;
 	for ( std::int64_t v : { std::int64_t{ 0 },
 	                         std::int64_t{ -1 },
 	                         std::int64_t{ 1 },
 	                         i64_min,
 	                         std::numeric_limits<std::int64_t>::max() } )
-		if ( zigzag_decode( zigzag_encode( v ) ) != v )
+		if ( detail::zigzag_decode( detail::zigzag_encode( v ) ) != v )
 			return false;
 	return true;
 }

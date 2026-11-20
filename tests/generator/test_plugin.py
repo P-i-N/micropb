@@ -2,7 +2,7 @@
 """Tests of tools/protoc-gen-micropb.py. Each test runs the plugin through protoc.
 
     python tests/generator/test_plugin.py                 run the tests
-    python tests/generator/test_plugin.py --check-tools   return 0 when protoc and protobuf are available
+    python tests/generator/test_plugin.py --check-tools   return 0 when protoc is available
 
 protoc comes from the environment variable PROTOC, from PATH, or from the Python module grpc_tools.
 MICROPB_UPDATE_GENERATED=1 writes the checked-in headers again.
@@ -37,7 +37,7 @@ def protoc_command():
 
 
 def tools_available():
-    return protoc_command() is not None and importlib.util.find_spec("google.protobuf") is not None
+    return protoc_command() is not None
 
 
 class Result(NamedTuple):
@@ -47,13 +47,14 @@ class Result(NamedTuple):
 
 
 def make_starter(folder):
-    """protoc needs an executable file. This one starts the plugin with the Python of the tests."""
+    """protoc needs an executable file. This one starts the plugin with the Python of the tests. `-S` removes the
+    installed packages, so the plugin can use only the standard library."""
     if os.name == "nt":
         starter = Path(folder) / "protoc-gen-micropb.bat"
-        starter.write_text(f'@"{sys.executable}" "{PLUGIN}" %*\n')
+        starter.write_text(f'@"{sys.executable}" -S "{PLUGIN}" %*\n')
     else:
         starter = Path(folder) / "protoc-gen-micropb"
-        starter.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{PLUGIN}" "$@"\n')
+        starter.write_text(f'#!/bin/sh\nexec "{sys.executable}" -S "{PLUGIN}" "$@"\n')
         starter.chmod(starter.stat().st_mode | stat.S_IXUSR)
     return starter
 
@@ -205,6 +206,11 @@ class CoreTest(unittest.TestCase):
         text = header("enum size { SIZE_8 = 0; SIZE_16 = 1; }")
         self.assertIn("    SIZE_8 = 0,\n    SIZE_16 = 1,\n", text)
 
+    def test_limits_of_numbers(self):
+        text = header("enum e { E_MIN = 0; E_LOW = -2147483648; E_HIGH = 2147483647; } message m { e a = 536870911; }")
+        self.assertIn("    MIN = 0,\n    LOW = -2147483648,\n    HIGH = 2147483647,\n", text)
+        self.assertEqual(field_list(text, "m"), ["a = 536870911"])
+
     def test_output_is_next_to_the_proto_path(self):
         result = run({"sub/dir/b.proto": 'syntax = "proto3"; message m {}'})
         self.assertEqual(result.rc, 0, result.stderr)
@@ -292,6 +298,35 @@ class OptionsTest(unittest.TestCase):
         self.assertEqual(members(text, "m"), [
             "pb::repeated<std::string_view, 2> a;", "pb::repeated<inner, 2> b;", "pb::repeated<kind, 2> c;",
             "pb::repeated<std::span<const std::uint8_t>, 2> d;"])
+
+    def test_pointer_repeated(self):
+        text = header("""
+            enum kind { KIND_A = 0; }
+            message inner { int32 x = 1; }
+            message m {
+              repeated int32 a = 1; repeated inner b = 2; repeated kind c = 3; repeated string d = 4;
+              repeated bytes e = 5; repeated sint32 f = 6;
+            }
+            """, "m.* type:FT_POINTER\nm.f int_size:IS_16\n")
+        self.assertEqual(members(text, "m"), [
+            "std::span<const std::int32_t> a;", "std::span<const inner> b;", "std::span<const kind> c;",
+            "std::span<const std::string_view> d;", "std::span<const std::span<const std::uint8_t>> e;",
+            "std::span<const pb::wire_int<std::int16_t, pb::int_encoding::ZIGZAG>> f;"])
+
+    def test_pointer_bytes_and_string(self):
+        text = header("message m { bytes a = 1; string b = 2; bytes c = 3; }",
+                      "m.* max_size:8\nm.a type:FT_POINTER\nm.b type:FT_POINTER\n")
+        self.assertEqual(members(text, "m"), [
+            "std::span<const std::uint8_t> a;", "std::string_view b;", "pb::repeated<std::uint8_t, 8> c;"])
+
+    def test_type_static_and_default(self):
+        text = header("message m { repeated int32 a = 1; repeated int32 b = 2; }",
+                      "m.* type:FT_POINTER\nm.a max_count:2 type:FT_STATIC\nm.b max_count:3 type:FT_DEFAULT\n")
+        self.assertEqual(members(text, "m"), ["pb::repeated<std::int32_t, 2> a;", "pb::repeated<std::int32_t, 3> b;"])
+
+    def test_pointer_on_a_repeated_unsigned_byte_is_an_error(self):
+        self.assertIn("a.proto: m.a: int_size:IS_8 on a repeated unsigned field gives a bytes field",
+                      error(PROTO3 + "message m { repeated uint32 a = 1; }", "m.a int_size:IS_8 type:FT_POINTER\n"))
 
     def test_wildcards(self):
         proto = "message m { repeated int32 a = 1; repeated int32 b = 2; }"
@@ -619,18 +654,16 @@ class ErrorTest(unittest.TestCase):
                       error(PROTO3 + "message m { map<string, int32> values = 1; }"))
 
     def test_repeated_without_max_count(self):
-        text = error(PROTO3 + "package p; message m { repeated int32 a = 1; }")
-        self.assertIn("a.proto: p.m.a: a repeated field needs a capacity. "
-                      "Add this line to a.options: p.m.a max_count:<N>", text)
+        text = header("package p; message m { repeated int32 a = 1; }")
+        self.assertIn("std::span<const std::int32_t> a;", text)
 
-    def test_repeated_without_max_count_says_when_no_options_file_was_found(self):
-        hint = "No file a.options was found. If it is in another folder, use --micropb_opt=options_dir=<folder>."
-        proto = PROTO3 + "message m { repeated int32 a = 1; repeated int32 b = 2; }"
-        self.assertIn("m.a max_count:<N>. " + hint, error(proto))
-        self.assertNotIn("was found", error(proto, "m.b max_count:2\n"))
+    def test_repeated_message_without_max_count(self):
+        text = header("package p; message n { int32 x = 1; } message m { repeated n a = 1; repeated bytes b = 2; }")
+        self.assertEqual(members(text, "m"),
+                         ["std::span<const n> a;", "std::span<const std::span<const std::uint8_t>> b;"])
 
     def test_fixed_count_without_max_count(self):
-        self.assertIn("a repeated field needs a capacity",
+        self.assertIn("a.proto: m.a: fixed_count needs max_count",
                       error(PROTO3 + "message m { repeated int32 a = 1; }", "m.a fixed_count:true\n"))
 
     def test_fixed_length_without_max_size(self):
@@ -694,6 +727,7 @@ class ErrorTest(unittest.TestCase):
             "m.a max_size:-1\n": "a.options:1: max_size needs a number from 1 to 999999999",
             "m.a max_count:4 fixed_count:maybe\n": "a.options:1: fixed_count needs true or false",
             "m.a max_count:4 int_size:IS_12\n": "a.options:1: int_size needs IS_8, IS_16, IS_32 or IS_64",
+            "m.a type:FT_CALLBACK\n": "a.options:1: type needs FT_DEFAULT, FT_STATIC or FT_POINTER",
         }
         for options, expected in cases.items():
             with self.subTest(options=options):
@@ -726,8 +760,8 @@ class WarningTest(unittest.TestCase):
         self.assertIn("std::int8_t", text)
 
     def test_unknown_option(self):
-        stderr, text = self.warnings("message m { repeated int32 a = 1; }", "m.a max_count:4 type:FT_POINTER\n")
-        self.assertIn("a.options:1: warning: the unknown option 'type' is ignored", stderr)
+        stderr, text = self.warnings("message m { repeated int32 a = 1; }", "m.a max_count:4 anonymous_oneof:true\n")
+        self.assertIn("a.options:1: warning: the unknown option 'anonymous_oneof' is ignored", stderr)
         self.assertEqual(members(text, "m"), ["pb::repeated<std::int32_t, 4> a;"])
 
     def test_option_that_does_not_apply(self):
@@ -749,6 +783,19 @@ class WarningTest(unittest.TestCase):
         stderr, text = self.warnings("message m { repeated bytes a = 1; }", "m.a max_count:2 max_size:8\n")
         self.assertIn("a.options:1: warning: max_size does not apply to m.a", stderr)
 
+    def test_pointer_ignores_the_sizes(self):
+        stderr, text = self.warnings("message m { repeated int32 a = 1; bytes b = 2; }",
+                                     "m.a max_count:4 fixed_count:true type:FT_POINTER\nm.b max_size:8 type:FT_POINTER\n")
+        self.assertIn("a.options:1: warning: max_count does not apply to m.a", stderr)
+        self.assertIn("a.options:1: warning: fixed_count does not apply to m.a", stderr)
+        self.assertIn("a.options:2: warning: max_size does not apply to m.b", stderr)
+        self.assertEqual(members(text, "m"), ["std::span<const std::int32_t> a;", "std::span<const std::uint8_t> b;"])
+
+    def test_type_does_not_apply_to_a_scalar(self):
+        stderr, text = self.warnings("message m { int32 a = 1; }", "m.a type:FT_POINTER\n")
+        self.assertIn("a.options:1: warning: type does not apply to m.a", stderr)
+        self.assertEqual(members(text, "m"), ["std::int32_t a;"])
+
     def test_wildcard_rule_gives_no_warning(self):
         stderr, _ = self.warnings("message m { string name = 1; int32 a = 2; repeated int32 b = 3; bytes c = 4; }",
                                   "* max_count:8 max_size:16 int_size:IS_16\n")
@@ -769,11 +816,11 @@ class WarningTest(unittest.TestCase):
         self.assertEqual(members(text, "m"), ["pb::repeated<std::int32_t, 4> a;"])
 
     def test_warnings_are_printed_also_when_an_error_follows(self):
-        proto = PROTO3 + "message m { repeated int32 a = 1; repeated int32 b = 2; }"
-        text = error(proto, "m.a max_cout:4\nm.b max_count:2\n")
+        proto = PROTO3 + "message m { repeated int32 a = 1; bytes b = 2; }"
+        text = error(proto, "m.a max_cout:4\nm.b fixed_length:true\n")
         self.assertIn("a.options:1: warning: the unknown option 'max_cout' is ignored", text)
-        self.assertIn("m.a: a repeated field needs a capacity", text)
-        text = error(proto, "m.aa max_count:4\nm.b max_count:2\n")
+        self.assertIn("m.b: fixed_length needs max_size", text)
+        text = error(proto, "m.aa max_count:4\nm.b fixed_length:true\n")
         self.assertIn("a.options:1: warning: 'm.aa' matches no field", text)
         self.assertNotIn("'m.b' matches no field", text)
 
@@ -819,5 +866,5 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["--check-tools"]:
         sys.exit(0 if tools_available() else 1)
     if not tools_available():
-        sys.exit("test_plugin.py: protoc or the Python package protobuf is not available")
+        sys.exit("test_plugin.py: protoc is not available")
     unittest.main()

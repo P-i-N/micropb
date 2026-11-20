@@ -10,3 +10,7 @@ Device.Slot.key        max_size:16
 Calibration.gains      max_count:4 fixed_count:true
 Calibration.id         max_size:6 fixed_length:true
 Device.State           enum_intsize:IS_8
+Batch.*                max_size:4
+Batch.slots            type:FT_POINTER
+Batch.deltas           type:FT_POINTER int_size:IS_16
+Batch.blob             type:FT_POINTER

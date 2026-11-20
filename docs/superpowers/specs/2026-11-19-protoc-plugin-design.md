@@ -40,7 +40,7 @@ protoc --plugin=protoc-gen-micropb=tools/protoc-gen-micropb.py --micropb_out=gen
 
 * Output: `<name>.pb.hpp` for each `.proto` file on the command line, in the same sub-folder as the `.proto` file.
 * Options file: `<name>.options` in the folder of the `.proto` file. The plugin looks for it relative to the current folder and relative to each folder of the parameter `--micropb_opt=options_dir=<folder>`. A missing file is not an error.
-* Dependencies: Python 3, the `protobuf` Python package, `protoc`. The plugin uses `google.protobuf.compiler.plugin_pb2` from the package, so it has no generated code of its own.
+* Dependencies: Python 3 and `protoc`. The plugin reads the `CodeGeneratorRequest` and writes the `CodeGeneratorResponse` itself, see "Changes: no protobuf package".
 * Windows: `tools/protoc-gen-micropb.bat` starts the Python file, because `protoc` cannot start a `.py` file there. (Not verified in this session.)
 
 ## Mapping
@@ -57,7 +57,7 @@ protoc --plugin=protoc-gen-micropb=tools/protoc-gen-micropb.py --micropb_out=gen
 | `enum E { E_A = 0; }` | `enum class E : std::int32_t { A = 0 };` |
 | message field | the struct as a plain member |
 | `optional T` | `std::optional<T>` |
-| `repeated T` | `pb::repeated<T, N>`, `N` from `max_count` |
+| `repeated T` | `pb::repeated<T, N>`, `N` from `max_count`; without `max_count`: `std::span<const T>` |
 | `oneof name { A a = 1; B b = 2; }` | `std::variant<std::monostate, A, B> name;` |
 | `import "x.proto"` | `#include "x.pb.hpp"` |
 
@@ -91,7 +91,6 @@ The plugin reports these to `protoc`, which prints them and stops. No header is 
 
 * A file that is not `syntax = "proto3"`.
 * A `map` field. (proto3 has no groups. An `extend` block in a proto3 file can only add custom options, so the plugin ignores it: see "Changes during the implementation".)
-* A repeated field without `max_count`. The message shows the line to add to the options file.
 * A message that contains itself, directly or through other messages.
 * A `oneof` with two members of the same type (the library rule `variant_duplicate_alternative`).
 * A bad line in the options file, with the file name and the line number.
@@ -103,7 +102,7 @@ The compile-time checks of the library find all other problems when the header i
 * `tests/generator/test_plugin.py` (Python `unittest`): runs `protoc` with the plugin on small `.proto` texts and compares the header text or the error text. It covers each mapping rule, each option and each error.
 * `tests/vectors/vectors.options` and the checked-in output `tests/vectors/vectors.pb.hpp`: a Python test makes the header again and compares it with the checked-in file.
 * `tests/test_generated.cpp`: includes `vectors.pb.hpp`, encodes and decodes the generated types and compares the bytes with the `protoc` reference vectors. It needs no `protoc`, because the header is checked in.
-* CMake adds the Python tests to CTest only when it finds Python, the `protobuf` package and `protoc`. Without them the other tests still run.
+* CMake adds the Python tests to CTest only when it finds Python and `protoc`. Without them the other tests still run.
 
 ## Files
 
@@ -145,3 +144,25 @@ README.md                       new section "Generate structs from a .proto file
 * Enum values keep their names when the text after the prefix does not start with a letter.
 * The plugin has no syntax that needs Python 3.12.
 * Not changed, by decision of the builder: no message when no options file is found; a `(nanopb)` option in the `.proto` file is not read; an import of a proto2 file or of a well-known type gives an `#include` of a header that the user must generate; a type name collision between two files is not found; `[packed = false]` is ignored.
+
+## Changes: no protobuf package
+
+* The plugin needs only Python 3. The Python package `protobuf` is not necessary. Reason: on Windows, the first `python` in `PATH` is often the MSYS2 Python, which has no `protobuf` package.
+* The plugin has a small reader and writer for the protobuf wire format. The reader keeps only the fields of `descriptor.proto` and `plugin.proto` that the plugin uses, and skips the other fields. Their field numbers are written in the plugin; protobuf does not change them. A request that is not valid protobuf, or a known field with a different wire type, is an error.
+* The tests start the plugin with `python -S`, so an installed package cannot hide a dependency.
+
+## Changes: `type:FT_POINTER`
+
+* Reason: a message that the device only encodes does not need storage in the struct. `pb::repeated<ClientState, 32>` with two `pb::repeated<std::uint8_t, N>` members made the message 11024 bytes on the device (Arm GNU Toolchain 14.2); with views it is 20 bytes.
+* `type:FT_POINTER` is the option of NanoPB for data that is not in the struct. Thus the options file stays NanoPB compatible.
+* A repeated field with `type:FT_POINTER` is `std::span<const T>`. It needs no `max_count`. The library decodes it only with a `pb::arena` (`pb: decode_needs_arena`). The plugin does not check this: the library decides.
+* A `bytes` field with `type:FT_POINTER` is `std::span<const std::uint8_t>`, also when a wildcard line sets `max_size`. On a `string` field the option changes nothing.
+* `max_count`, `fixed_count`, `max_size` and `fixed_length` do not apply to a field with `type:FT_POINTER`: an exact line gives a warning.
+* `type:FT_STATIC` and `type:FT_DEFAULT` give the result of the other options. They can override a wildcard `type:FT_POINTER`. Other values (`FT_CALLBACK`, `FT_IGNORE`) are an error, because the plugin cannot do what they ask. Before this change, `type` was an unknown option with a warning.
+* `type` on a scalar field that is not repeated does not apply: an exact line gives a warning.
+
+## Changes: arena spans
+
+* A repeated field without `max_count` is `std::span<const T>`. Before, it was an error that showed the line to add to the options file. The library decodes the span with a `pb::arena` (design `2026-11-20-arena-spans-design.md`).
+* `max_count:N` and `max_count:N fixed_count:true` give `pb::repeated<T, N>` and `std::array<T, N>`, as before. `type:FT_POINTER` gives the span also when a wildcard line sets `max_count`.
+* `fixed_count` without `max_count` is an error (`fixed_count needs max_count`), as `fixed_length` without `max_size`. Else the plugin would lose the fixed size.

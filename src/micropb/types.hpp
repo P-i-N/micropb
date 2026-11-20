@@ -22,8 +22,10 @@ enum class error
 	INVALID_WIRE_TYPE,
 	/// decode: a key has field number 0 or a field number above 2^29 - 1.
 	INVALID_TAG,
-	/// decode: a field has more elements or bytes than its container holds.
+	/// decode: a field has more elements or bytes than its `pb::repeated` or `std::array` holds.
 	CAPACITY_EXCEEDED,
+	/// decode: the arena has no space for the items of a repeated field.
+	ARENA_FULL,
 };
 
 /// Wire types of proto3 that this library supports. It does not support the group types (3, 4).
@@ -99,7 +101,7 @@ template <typename T>
 struct fields_of;
 
 namespace detail {
-/// Gives the codec the count member of `repeated` and `span_buffer`.
+/// Gives the codec the count member of `repeated`.
 struct sequence_access;
 } // namespace detail
 
@@ -141,43 +143,38 @@ private:
 	std::size_t _count = 0;
 };
 
-/// Sequence that keeps its items in storage that the caller owns. The storage
-/// must exist for as long as the buffer exists. Does not allocate.
-template <typename T>
-struct span_buffer
+/// Memory for the items of repeated fields that `decode` makes. The caller owns
+/// the storage. The arena gives out aligned blocks from the start of the storage
+/// and never frees one block: `clear()` frees all. Does not allocate.
+struct arena
 {
-	constexpr explicit span_buffer( std::span<T> storage ) : _storage( storage ) {}
+	constexpr explicit arena( std::span<std::uint8_t> storage ) : _storage( storage ) {}
 
-	[[nodiscard]] constexpr std::size_t size() const { return _count; }
+	/// Bytes that the blocks use, with the padding for alignment.
+	[[nodiscard]] constexpr std::size_t used() const { return _used; }
 	[[nodiscard]] constexpr std::size_t capacity() const { return _storage.size(); }
-	[[nodiscard]] constexpr bool empty() const { return _count == 0; }
 
-	[[nodiscard]] constexpr T* begin() { return _storage.data(); }
-	[[nodiscard]] constexpr T* end() { return _storage.data() + _count; }
-	[[nodiscard]] constexpr const T* begin() const { return _storage.data(); }
-	[[nodiscard]] constexpr const T* end() const { return _storage.data() + _count; }
+	/// Frees all blocks. Each message that `decode` wrote with this arena is then not valid.
+	constexpr void clear() { _used = 0; }
 
-	/// `index` must be less than `size()`.
-	[[nodiscard]] constexpr T& operator[]( std::size_t index ) { return _storage[index]; }
-	[[nodiscard]] constexpr const T& operator[]( std::size_t index ) const { return _storage[index]; }
-
-	/// Returns `false` and does not add `item` when the storage is full.
-	[[nodiscard]] constexpr bool push_back( const T& item )
+	/// A block of `size` bytes at a multiple of `alignment`, or null when the
+	/// storage is too small. `alignment` is a power of 2.
+	[[nodiscard]] void* allocate( std::size_t size, std::size_t alignment )
 	{
-		if ( _count == _storage.size() )
-			return false;
+		const auto address = reinterpret_cast<std::uintptr_t>( _storage.data() ) + _used;
+		const std::size_t padding = ( ( address + alignment - 1 ) & ~( alignment - 1 ) ) - address;
+		const std::size_t remaining = _storage.size() - _used;
+		if ( padding > remaining || size > remaining - padding )
+			return nullptr;
 
-		_storage[_count++] = item;
-		return true;
+		std::uint8_t* block = _storage.data() + _used + padding;
+		_used += padding + size;
+		return block;
 	}
 
-	constexpr void clear() { _count = 0; }
-
 private:
-	friend struct detail::sequence_access;
-
-	std::span<T> _storage;
-	std::size_t _count = 0;
+	std::span<std::uint8_t> _storage;
+	std::size_t _used = 0;
 };
 
 } // namespace pb

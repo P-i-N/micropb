@@ -1,5 +1,7 @@
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -146,18 +148,44 @@ bool test_sequence_accessor()
 	if ( a.count != 3 || a.capacity != 3 || a.data != items.data() || a.stored_count != nullptr )
 		return false;
 
-	std::array<std::int32_t, 4> storage{};
-	pb::span_buffer<std::int32_t> buffer( storage );
-	static_cast<void>( buffer.push_back( 1 ) );
-	static_cast<void>( buffer.push_back( 2 ) );
-	const d::sequence_desc& buffer_desc = *d::value_descriptor<pb::span_buffer<std::int32_t>>::value.sequence;
-	const d::sequence_view b = buffer_desc.access( &buffer );
-	if ( b.count != 2 || b.capacity != 4 || b.data != storage.data() || b.stored_count == nullptr ||
-	     *b.stored_count != 2 )
+	if ( view_desc.element_size != 4 || view_desc.storage != d::sequence_storage::ACCESSOR )
 		return false;
 
-	*b.stored_count = 3;
-	return buffer.size() == 3 && view_desc.element_size == 4 && buffer_desc.storage == d::sequence_storage::ACCESSOR;
+	// Only a `std::span<const T>` has a binder: `decode` sets it to a block in the arena.
+	std::array<std::int32_t, 2> block{ 5, 6 };
+	view_desc.bind( &view, block.data(), 2 );
+	return view.data() == block.data() && view.size() == 2 && view_desc.element_align == alignof( std::int32_t ) &&
+	       view_desc.construct == &d::construct_item<std::int32_t> &&
+	       d::value_descriptor<pb::repeated<float, 4>>::value.sequence->bind == nullptr &&
+	       view_desc.reserve == &d::reserve &&
+	       d::value_descriptor<pb::repeated<float, 4>>::value.sequence->reserve == nullptr &&
+	       d::value_descriptor<std::array<float, 2>>::value.sequence->reserve == nullptr;
+}
+
+/// A span with more items than the capacity of its block fails closed: the count takes no block
+/// (`ARENA_FULL`), and the fill adds no item (`TRUNCATED`).
+bool test_block_bound()
+{
+	// A block with the capacity 1 and 2 items: a span that `decode` did not bind.
+	alignas( std::size_t ) std::array<unsigned char, sizeof( std::size_t ) + 2 * sizeof( std::int32_t )> block{};
+	const std::size_t capacity = 1;
+	std::memcpy( block.data(), &capacity, sizeof capacity );
+	const auto* first = reinterpret_cast<const std::int32_t*>( block.data() + sizeof( std::size_t ) );
+	std::span<const std::int32_t> view( first, 2 );
+
+	const d::sequence_desc& desc = *d::value_descriptor<std::span<const std::int32_t>>::value.sequence;
+	std::array<std::uint8_t, 64> storage{};
+	pb::arena memory( storage );
+	constexpr std::array<std::uint8_t, 1> value{ 0x05 };
+	const pb::field_key key{ 1, pb::wire_type::VARINT };
+
+	pb::reader record( value );
+	d::decode_repeated( record, key, desc, &view, &memory );
+	pb::reader element( value );
+	d::decode_element( element, key.type, desc, &view, &memory );
+	return record.failed() && record.status().error() == pb::error::ARENA_FULL && element.failed() &&
+	       element.status().error() == pb::error::TRUNCATED && memory.used() == 0 && view.data() == first &&
+	       view.size() == 2;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -198,7 +226,6 @@ using choice = std::variant<std::monostate, pose, ping, std::uint32_t>;
 /// One member of each kind, with the storage types that `decode` accepts.
 struct all
 {
-	pb::span_buffer<std::int32_t> buffered;
 	bool flag;
 	std::int8_t i8;
 	std::int16_t i16;
@@ -238,7 +265,6 @@ struct all
 /// place of the sequences of scalars.
 struct all_views
 {
-	std::span<const std::int32_t> buffered;
 	bool flag;
 	std::int8_t i8;
 	std::int16_t i16;
@@ -275,7 +301,6 @@ struct all_views
 };
 
 constexpr std::array<std::uint8_t, 3> raw{ 9, 8, 7 };
-constexpr std::array<std::int32_t, 3> buffered_values{ 4, 5, 6 };
 constexpr std::array<std::int32_t, 3> int_values{ 1, -1, 100000 };
 constexpr std::array<pb::sint32, 2> zz_values{ pb::sint32( -1 ), pb::sint32( 2 ) };
 
@@ -323,16 +348,6 @@ void fill_common( T& v )
 
 using buffer = std::array<std::uint8_t, 512>;
 
-/// An `all` with all members in their initial state. `all` has no default
-/// constructor, because a `pb::span_buffer` must get its storage.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
-all make_all( std::span<std::int32_t> storage )
-{
-	return { .buffered = pb::span_buffer<std::int32_t>( storage ) };
-}
-#pragma GCC diagnostic pop
-
 /// `encode`, `decode` and `encode` again give the same bytes, and `encoded_size` agrees.
 bool round_trips( const all& value )
 {
@@ -341,8 +356,7 @@ bool round_trips( const all& value )
 	if ( !size || pb::encoded_size( value ) != *size )
 		return false;
 
-	std::array<std::int32_t, 4> storage{};
-	all back = make_all( storage );
+	all back{};
 	const auto used = pb::decode( std::span<const std::uint8_t>( first ).first( *size ), back );
 	if ( !used || *used != *size )
 		return false;
@@ -364,23 +378,20 @@ bool same_bytes( const A& a, const B& b )
 
 bool test_all_kinds()
 {
-	std::array<std::int32_t, 4> storage{};
-	const all empty = make_all( storage );
+	const all empty{};
 	// A nested message (key 2, length 1) and a fixed-length bytes field (key 2, length 1, 6 bytes) are
 	// always on the wire.
 	if ( !round_trips( empty ) || pb::encoded_size( empty ) != 12 )
 		return false;
 
-	all value = make_all( storage );
+	all value{};
 	fill_common( value );
-	append_all( value.buffered, buffered_values );
 	append_all( value.ints, int_values );
 	append_all( value.zz, zz_values );
 	append_all( value.ds, std::array<double, 2>{ 1.0, -2.0 } );
 
 	all_views views{};
 	fill_common( views );
-	views.buffered = buffered_values;
 	views.ints = int_values;
 	views.zz = zz_values;
 	views.ds = { 1.0, -2.0 };
@@ -404,6 +415,7 @@ bool test_all_kinds()
 
 int main()
 {
-	const bool ok = test_optional_accessor() && test_variant_accessor() && test_sequence_accessor() && test_all_kinds();
+	const bool ok = test_optional_accessor() && test_variant_accessor() && test_sequence_accessor() &&
+	                test_block_bound() && test_all_kinds();
 	return ok ? 0 : 1;
 }

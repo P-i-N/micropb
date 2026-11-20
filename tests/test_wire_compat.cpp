@@ -4,8 +4,12 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <span>
+#include <string_view>
 #include <variant>
 
 #include <micropb/micropb.hpp>
@@ -29,6 +33,57 @@ struct envelope_owned
 	std::uint32_t id;
 	std::variant<std::monostate, pose_owned, ping, text> payload;
 };
+
+/// `lists` with spans: `decode` puts the items in a `pb::arena`.
+struct span_lists
+{
+	std::span<const std::int32_t> ints;
+	std::span<const float> floats;
+	std::span<const std::string_view> names;
+	std::span<const inner> items;
+	std::span<const sint64> zz;
+};
+
+inline constexpr std::size_t canary_size = 16;
+inline constexpr std::uint8_t canary = 0xA5;
+
+/// Storage of a `pb::arena`, filled with 0xA5: `decode` must not read an item that it did not make. The 16
+/// canary bytes (0xA5) after it must not change.
+struct guarded
+{
+	guarded() { _bytes.fill( canary ); }
+
+	[[nodiscard]] pb::arena memory() { return pb::arena( std::span( _bytes ).first( arena_size ) ); }
+
+	[[nodiscard]] bool intact() const
+	{
+		return std::all_of( _bytes.begin() + arena_size, _bytes.end(), []( std::uint8_t b ) { return b == canary; } );
+	}
+
+private:
+	static constexpr std::size_t arena_size = 1024;
+
+	alignas( std::max_align_t ) std::array<std::uint8_t, arena_size + canary_size> _bytes{};
+};
+
+/// Decodes `in` into a new `T`, with a guarded arena when `T` needs one, and gives the result and the message
+/// to `check`. `false` when `check` gives `false` or `decode` changed a canary.
+template <typename T, typename F>
+bool decode_then( std::span<const std::uint8_t> in, F check )
+{
+	T message{};
+	if constexpr ( !detail::needs_arena<T>() )
+	{
+		return check( decode( in, message ), message );
+	}
+	else
+	{
+		guarded storage;
+		pb::arena memory = storage.memory();
+		const auto result = decode( in, message, memory );
+		return check( result, message ) && storage.intact();
+	}
+}
 
 template <typename T, std::size_t N>
 bool round_trips( const std::array<std::uint8_t, N>& wire )
@@ -61,9 +116,10 @@ bool prefixes_are_safe( const std::array<std::uint8_t, N>& wire )
 {
 	for ( std::size_t length = 0; length < N; ++length )
 	{
-		T message{};
-		const auto result = decode( std::span<const std::uint8_t>( wire ).first( length ), message );
-		if ( result ? *result != length || !reencodes( message ) : result.error() != error::TRUNCATED )
+		const auto valid = [&]( const auto& result, const T& message ) {
+			return result ? *result == length && reencodes( message ) : result.error() == error::TRUNCATED;
+		};
+		if ( !decode_then<T>( std::span<const std::uint8_t>( wire ).first( length ), valid ) )
 			return false;
 	}
 	return true;
@@ -79,8 +135,8 @@ bool corruptions_are_safe( const std::array<std::uint8_t, N>& wire )
 		{
 			std::array<std::uint8_t, N> in = wire;
 			in[i] ^= mask;
-			T message{};
-			if ( decode( std::span<const std::uint8_t>( in ), message ) && !reencodes( message ) )
+			const auto valid = []( const auto& result, const T& message ) { return !result || reencodes( message ); };
+			if ( !decode_then<T>( std::span<const std::uint8_t>( in ), valid ) )
 				return false;
 		}
 	}
@@ -175,6 +231,47 @@ bool test_envelope_stream()
 	       std::equal( message->data.begin(), message->data.end(), short_data.begin(), short_data.end() );
 }
 
+template <typename A, typename B, typename F>
+bool same_items( const A& a, const B& b, F equal )
+{
+	return std::equal( a.begin(), a.end(), b.begin(), b.end(), equal );
+}
+
+/// `span_lists` with an arena decodes the items of the `pb::repeated` decode, and encodes to the reference bytes.
+template <std::size_t N>
+bool spans_match( const std::array<std::uint8_t, N>& wire )
+{
+	lists owned{};
+	const auto a = decode( std::span<const std::uint8_t>( wire ), owned );
+
+	guarded storage;
+	pb::arena memory = storage.memory();
+	span_lists views{};
+	const auto b = decode( std::span<const std::uint8_t>( wire ), views, memory );
+
+	std::array<std::uint8_t, N> out{};
+	const auto encoded = encode( views, std::span<std::uint8_t>( out ) );
+	const auto same_bits = []( float x, float y ) {
+		return std::bit_cast<std::uint32_t>( x ) == std::bit_cast<std::uint32_t>( y );
+	};
+	return a && b && *b == N && same_items( owned.ints, views.ints, std::equal_to<>{} ) &&
+	       same_items( owned.floats, views.floats, same_bits ) &&
+	       same_items( owned.names, views.names, std::equal_to<>{} ) &&
+	       same_items( owned.items,
+	                   views.items,
+	                   []( const inner& x, const inner& y ) { return x.x == y.x && x.label == y.label; } ) &&
+	       same_items( owned.zz, views.zz, []( sint64 x, sint64 y ) { return x.value == y.value; } ) && encoded &&
+	       *encoded == N && out == wire && storage.intact();
+}
+
+bool test_span_lists()
+{
+	return spans_match( vectors::lists_full ) && spans_match( vectors::lists_empty ) &&
+	       prefixes_are_safe<span_lists>( vectors::lists_full ) &&
+	       corruptions_are_safe<span_lists>( vectors::lists_full ) &&
+	       corruptions_are_safe<span_lists>( vectors::lists_empty );
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 } // namespace
@@ -182,6 +279,6 @@ bool test_envelope_stream()
 int main()
 {
 	const bool ok = test_round_trip_constexpr() && test_round_trip_runtime() && test_prefix_sweep_constexpr() &&
-	                test_prefix_sweep_runtime() && test_corruption_sweep() && test_envelope_stream();
+	                test_prefix_sweep_runtime() && test_corruption_sweep() && test_envelope_stream() && test_span_lists();
 	return ok ? 0 : 1;
 }

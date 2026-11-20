@@ -15,7 +15,6 @@ namespace pb {
 namespace detail {
 /// Largest field number of proto3.
 inline constexpr std::uint32_t max_field_number = ( 1u << 29 ) - 1;
-} // namespace detail
 
 /// Number of bytes that `value` uses as a varint (1 to 10).
 [[nodiscard]] constexpr std::size_t varint_size( std::uint64_t value )
@@ -48,6 +47,8 @@ inline constexpr std::uint32_t max_field_number = ( 1u << 29 ) - 1;
 {
 	return static_cast<std::int64_t>( ( value >> 1 ) ^ ( ~( value & 1 ) + 1 ) );
 }
+
+} // namespace detail
 
 ////////////////////////////////////////////////////////////////////////////////
 

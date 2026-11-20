@@ -238,3 +238,15 @@ Its results, which the targets come from (GCC 16.2, `-Os`, x86-64, encode and de
 | 32 | 35490 | 12793 |
 
 It gave the same bytes as the template encoder for four test messages. It gave the same result as the template decoder for each prefix and each single-byte corruption of those messages, under AddressSanitizer and UndefinedBehaviorSanitizer.
+
+## Changes: arena spans
+
+`2026-11-20-arena-spans-design.md` changes the sequence descriptor and the decode part of the interpreter:
+
+* The sequence descriptor has the alignment of the element, a pointer to a binder and a pointer to a constructor of the element. The constructor makes each new item in the arena before the reset. The binder of `std::span<const T>` sets the span to a block and a count through the constructor of the span. It is null for the other storage types. Reset sets a span to empty through the binder.
+* The decode functions of the interpreter have a parameter `arena*`. It is null for `decode` without an arena. `decode_message` gives each record of a repeated field with its key to `decode_repeated`, because the count needs the field number.
+* A block in the arena has the capacity in a `std::size_t` just before the first item. The items are at a multiple of the alignment of the element. Each add of an item examines the capacity.
+* For a record of a span field, the interpreter counts the elements of the record with a copy of the reader. If the block has no space for them, it counts the elements of the field from this record to the end of the message: it reads the keys and skips the other values. Then it takes a new block and copies the old items. A record with a different wire type counts 0. A read that fails ends the count.
+* A full block during the fill means that the count was too small, thus the input is not valid: `TRUNCATED`.
+* The descriptor of a span has a pointer to the count function (`reserve`). The other sequence descriptors have null there. Thus a program without a span field does not contain the count and the new block.
+* Size report: 16 types 9920 bytes, 32 types 14256 bytes, one more type 271 bytes (before: 9400, 13736, 271).

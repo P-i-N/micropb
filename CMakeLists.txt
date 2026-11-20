@@ -250,7 +250,7 @@ if(MICROPB_TESTS)
         endif()
     endforeach()
 
-    # The tests of tools/protoc-gen-micropb.py need Python, the Python package protobuf and protoc.
+    # The tests of tools/protoc-gen-micropb.py need Python and protoc.
     # Without them, CTest does not have the test `generator`. The other tests do not need these tools.
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_Interpreter_FOUND)
@@ -260,7 +260,7 @@ if(MICROPB_TESTS)
         if(micropb_plugin_tools EQUAL 0)
             add_test(NAME generator COMMAND ${Python3_EXECUTABLE} ${micropb_plugin_tests})
         else()
-            message(STATUS "micropb: no protoc or no Python package protobuf, the test `generator` is off")
+            message(STATUS "micropb: no protoc, the test `generator` is off")
         endif()
     endif()
 
@@ -269,13 +269,13 @@ if(MICROPB_TESTS)
                 duplicate_tag tag_zero tag_too_large tag_reserved oneof_tags_count
                 variant_no_monostate variant_duplicate_alternative variant_repeated_alternative
                 variant_optional_alternative variant_variant_alternative unmapped_type monostate_member
-                span_buffer_in_variant span_buffer_in_optional span_buffer_in_repeated
                 optional_repeated optional_optional optional_variant
                 repeated_repeated repeated_optional repeated_variant
                 tag_on_variant oneof_tags_on_non_variant decode_encode_only
                 not_aggregate base_class inaccessible_member enum_too_wide
                 bit_field member_offset_too_large decode_const_member decode_fixed_span
-                field_list_type field_list_offset field_list_alternative)
+                field_list_type field_list_offset field_list_alternative recursive_message
+                decode_needs_arena span_element_trivial)
             micropb_add_compile_fail_test(${rule})
         endforeach()
     endif()
@@ -296,6 +296,8 @@ if(MICROPB_TESTS)
     micropb_add_list_compile_fail_test(list_member_type optional_repeated)
     micropb_add_list_compile_fail_test(list_duplicate_number duplicate_tag)
     micropb_add_list_compile_fail_test(list_decode_alternative decode_encode_only)
+    micropb_add_list_compile_fail_test(list_decode_fixed_span decode_fixed_span)
+    micropb_add_list_compile_fail_test(list_decode_const_span_element decode_const_member)
     micropb_add_list_compile_fail_test(list_alternative_on_plain_member field_list_alternative)
     micropb_add_list_compile_fail_test(list_alternative_index_too_large field_list_alternative)
     micropb_add_list_compile_fail_test(list_alternative_missing field_list_alternative)

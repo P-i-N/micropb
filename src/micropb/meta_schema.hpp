@@ -72,19 +72,19 @@ inline constexpr bool is_std_span = false;
 template <typename T, std::size_t E>
 inline constexpr bool is_std_span<std::span<T, E>> = true;
 
+/// A `std::span` with a static extent.
+template <typename T>
+inline constexpr bool is_fixed_span = false;
+template <typename T, std::size_t E>
+inline constexpr bool is_fixed_span<std::span<T, E>> = E != std::dynamic_extent;
+
 template <typename T>
 inline constexpr bool is_repeated = false;
 template <typename T, std::size_t N>
 inline constexpr bool is_repeated<repeated<T, N>> = true;
 
-template <typename T>
-inline constexpr bool is_span_buffer = false;
-template <typename T>
-inline constexpr bool is_span_buffer<span_buffer<T>> = true;
-
-/// The sequence types: `std::array`, `std::span<const T>`, `pb::repeated` and
-/// `pb::span_buffer`. `element` has no `const`. `capacity` is the size `N` of
-/// a type that has one, else 0.
+/// The sequence types: `std::array`, `std::span<const T>` and `pb::repeated`. `element` has no `const`. `capacity` is
+/// the size `N` of a type that has one, else 0.
 template <typename T>
 struct sequence_traits
 {
@@ -112,14 +112,6 @@ struct sequence_traits<repeated<T, N>>
 {
 	static constexpr bool is_sequence = true;
 	static constexpr std::size_t capacity = N;
-	using element = std::remove_const_t<T>;
-};
-
-template <typename T>
-struct sequence_traits<span_buffer<T>>
-{
-	static constexpr bool is_sequence = true;
-	static constexpr std::size_t capacity = 0;
 	using element = std::remove_const_t<T>;
 };
 
@@ -257,8 +249,12 @@ template <typename T>
 
 namespace detail {
 
+template <typename Target, typename T, typename... Visited>
+[[nodiscard]] consteval bool reaches();
 template <typename T>
-[[nodiscard]] consteval bool contains_span_buffer();
+[[nodiscard]] consteval bool is_recursive();
+template <typename T>
+[[nodiscard]] consteval bool needs_arena();
 template <typename T>
 consteval void check_member_type();
 template <typename T>
@@ -378,9 +374,15 @@ struct variant_traits<std::variant<First, More...>>
 		return kind_of<First>() == kind || ( ( kind_of<More>() == kind ) || ... );
 	}
 
-	[[nodiscard]] static consteval bool contains_span_buffer()
+	template <typename Target, typename... Visited>
+	[[nodiscard]] static consteval bool reaches()
 	{
-		return detail::contains_span_buffer<First>() || ( detail::contains_span_buffer<More>() || ... );
+		return detail::reaches<Target, First, Visited...>() || ( detail::reaches<Target, More, Visited...>() || ... );
+	}
+
+	[[nodiscard]] static consteval bool needs_arena()
+	{
+		return detail::needs_arena<First>() || ( detail::needs_arena<More>() || ... );
 	}
 
 	static consteval void check_decodable()
@@ -407,7 +409,7 @@ struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>>
 		return numbers;
 	}
 
-	/// Applies the rules for the entries, the field numbers and the member types.
+	/// Applies the rules for the entries, the field numbers, the member types and recursion.
 	static consteval void check()
 	{
 		static_assert( ( ( Offset <= max_offset ) && ... ),
@@ -428,12 +430,19 @@ struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>>
 
 		check_field_numbers<sorted_numbers()>();
 		( check_member_type<std::remove_const_t<M>>(), ... );
+		static_assert( !is_recursive<T>(),
+		               "pb: recursive_message: a message cannot contain itself, also through a std::span or other "
+		               "messages" );
 	}
 
-	[[nodiscard]] static consteval bool contains_span_buffer()
+	/// `true` when a member reaches `Target`. `Visited` has the message types on the path, `T` included.
+	template <typename Target, typename... Visited>
+	[[nodiscard]] static consteval bool reaches()
 	{
-		return ( detail::contains_span_buffer<std::remove_const_t<M>>() || ... );
+		return ( detail::reaches<Target, std::remove_const_t<M>, Visited...>() || ... );
 	}
+
+	[[nodiscard]] static consteval bool needs_arena() { return ( detail::needs_arena<std::remove_const_t<M>>() || ... ); }
 
 	static consteval void check_decodable()
 	{
@@ -442,10 +451,51 @@ struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>>
 	}
 };
 
-/// `true` when `T` has a `pb::span_buffer` in a place that `decode` cannot bind:
-/// in it, or in a member, alternative, value or element of it.
+/// `true` when `T`, or a member, element, optional value or alternative of it, is
+/// `Target`, also through other message types. The walk does not enter a message
+/// type in `Visited` again, thus it stops at a cycle.
+template <typename Target, typename T, typename... Visited>
+[[nodiscard]] consteval bool reaches()
+{
+	if constexpr ( std::is_same_v<T, Target> )
+	{
+		return true;
+	}
+	else if constexpr ( std::is_same_v<T, std::monostate> )
+	{
+		return false;
+	}
+	else
+	{
+		constexpr field_kind kind = kind_of<T>();
+		if constexpr ( kind == field_kind::OPTIONAL )
+			return reaches<Target, typename T::value_type, Visited...>();
+		else if constexpr ( kind == field_kind::REPEATED )
+			return reaches<Target, element_t<T>, Visited...>();
+		else if constexpr ( kind == field_kind::ONEOF )
+			return variant_traits<T>::template reaches<Target, Visited...>();
+		else if constexpr ( kind == field_kind::MESSAGE && !is_one_of<T, Visited...> )
+			return list_traits<field_list_of<T>>::template reaches<Target, T, Visited...>();
+		else
+			return false;
+	}
+}
+
+/// `true` when a member, element, optional value or alternative of the message
+/// type `T` is `T`, also through other message types. `decode` recurses for each
+/// message in a message: for a recursive type, the stack has no bound.
 template <typename T>
-[[nodiscard]] consteval bool contains_span_buffer()
+[[nodiscard]] consteval bool is_recursive()
+{
+	return list_traits<field_list_of<T>>::template reaches<T, T>();
+}
+
+/// `true` when `T` has a `std::span<const E>` repeated field: in it, or in a member,
+/// alternative, value or element of it. `decode` puts the items of such a field in a
+/// `pb::arena`. The walk stops at a recursive message type: the rule
+/// `recursive_message` rejects it.
+template <typename T>
+[[nodiscard]] consteval bool needs_arena()
 {
 	if constexpr ( std::is_same_v<T, std::monostate> )
 	{
@@ -454,16 +504,14 @@ template <typename T>
 	else
 	{
 		constexpr field_kind kind = kind_of<T>();
-		if constexpr ( is_span_buffer<T> )
-			return true;
+		if constexpr ( kind == field_kind::REPEATED )
+			return ( is_std_span<T> && !is_fixed_span<T> ) || needs_arena<element_t<T>>();
 		else if constexpr ( kind == field_kind::OPTIONAL )
-			return contains_span_buffer<typename T::value_type>();
-		else if constexpr ( kind == field_kind::REPEATED )
-			return contains_span_buffer<element_t<T>>();
+			return needs_arena<typename T::value_type>();
 		else if constexpr ( kind == field_kind::ONEOF )
-			return variant_traits<T>::contains_span_buffer();
+			return variant_traits<T>::needs_arena();
 		else if constexpr ( kind == field_kind::MESSAGE )
-			return list_traits<field_list_of<T>>::contains_span_buffer();
+			return !is_recursive<T>() && list_traits<field_list_of<T>>::needs_arena();
 		else
 			return false;
 	}
@@ -494,7 +542,6 @@ consteval void check_member_type()
 		               "pb: optional_optional: the value of a std::optional cannot be a std::optional" );
 		static_assert( value_kind != field_kind::ONEOF,
 		               "pb: optional_variant: the value of a std::optional cannot be a std::variant" );
-		static_assert( !contains_span_buffer<value>(), "pb: span_buffer_in_optional: use pb::repeated in a std::optional" );
 	}
 	else if constexpr ( kind == field_kind::ONEOF )
 	{
@@ -509,7 +556,6 @@ consteval void check_member_type()
 		               "pb: variant_optional_alternative: a std::optional cannot be a oneof alternative" );
 		static_assert( !variant_traits<M>::has_kind( field_kind::ONEOF ),
 		               "pb: variant_variant_alternative: a std::variant cannot be a oneof alternative" );
-		static_assert( !contains_span_buffer<M>(), "pb: span_buffer_in_variant: use pb::repeated in a std::variant" );
 	}
 	else if constexpr ( kind == field_kind::REPEATED )
 	{
@@ -522,14 +568,18 @@ consteval void check_member_type()
 		               "pb: repeated_optional: the element of a repeated field cannot be a std::optional" );
 		static_assert( element_kind != field_kind::ONEOF,
 		               "pb: repeated_variant: the element of a repeated field cannot be a std::variant" );
-		static_assert( !contains_span_buffer<element>(),
-		               "pb: span_buffer_in_repeated: use pb::repeated as the element of a repeated field" );
+		// The arena never calls a destructor, and a new block gets the old items with `memcpy`.
+		if constexpr ( is_std_span<M> && !is_fixed_span<M> )
+			static_assert( std::is_trivially_copyable_v<element> && std::is_trivially_destructible_v<element>,
+			               "pb: span_element_trivial: the element of a std::span<const T> repeated field must be "
+			               "trivially copyable and trivially destructible" );
 	}
 }
 
 /// Rejects types that `decode` cannot write: a repeated field in an
-/// encode-only container, bytes in a span with a static extent, and a `const`
-/// member. It examines `T`, and each member, alternative, value and element of it.
+/// encode-only container, a span with a static extent, and a `const` member.
+/// It examines `T`, and each member, alternative, value and element of it.
+/// It stops at a recursive message type: the rule `recursive_message` rejects it.
 template <typename T>
 consteval void check_decodable()
 {
@@ -539,9 +589,12 @@ consteval void check_decodable()
 
 		if constexpr ( kind == field_kind::REPEATED )
 		{
-			static_assert( !is_std_array<T> && !is_std_span<T>,
-			               "pb: decode_encode_only: std::array and std::span<const T> are encode-only, "
-			               "use pb::repeated or pb::span_buffer to decode" );
+			static_assert( !is_std_array<T>,
+			               "pb: decode_encode_only: std::array is encode-only, use pb::repeated or std::span<const T> "
+			               "to decode" );
+			static_assert( !is_fixed_span<T>,
+			               "pb: decode_fixed_span: a std::span with a static extent is encode-only, "
+			               "use std::span<const T> or pb::repeated to decode" );
 			check_decodable<element_t<T>>();
 		}
 		else if constexpr ( kind == field_kind::BYTES )
@@ -560,9 +613,19 @@ consteval void check_decodable()
 		}
 		else if constexpr ( kind == field_kind::MESSAGE )
 		{
-			list_traits<field_list_of<T>>::check_decodable();
+			if constexpr ( !is_recursive<T>() )
+				list_traits<field_list_of<T>>::check_decodable();
 		}
 	}
+}
+
+/// Rejects a message for `decode` without a `pb::arena` when it has a `std::span<const T>` repeated field.
+template <typename T>
+consteval void check_no_arena()
+{
+	static_assert( !needs_arena<T>(),
+	               "pb: decode_needs_arena: a std::span<const T> repeated field needs a pb::arena, use decode( in, msg, "
+	               "arena )" );
 }
 
 } // namespace detail

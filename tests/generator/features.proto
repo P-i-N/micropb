@@ -60,3 +60,17 @@ message Calibration {
   repeated float gains = 1;
   bytes id = 2;
 }
+
+// Encode only: `type:FT_POINTER` gives a `std::span<const T>`, also in a oneof alternative.
+message Batch {
+  repeated Device.Slot slots = 1;
+  repeated sint32 deltas = 2;
+  bytes blob = 3;
+}
+
+message Report {
+  oneof body {
+    uint32 code = 1;
+    Batch batch = 2;
+  }
+}

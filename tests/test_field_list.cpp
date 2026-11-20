@@ -55,6 +55,63 @@ struct constants
 	const std::string_view name;
 };
 
+/// Repeated fields as spans: `decode` puts their items in a `pb::arena`.
+struct spans
+{
+	std::span<const inner> items;
+	std::span<const float> values;
+};
+
+/// Encode only: the element of a span has a `const` member, so it has no default constructor.
+struct const_item
+{
+	const std::int32_t a;
+};
+
+struct const_items
+{
+	std::span<const const_item> items;
+};
+
+/// A message that contains itself. The codec rejects it (`recursive_message`).
+struct tree
+{
+	std::int32_t id;
+	std::span<const tree> children;
+};
+
+/// Holds a recursive type, but is not on its cycle.
+struct forest
+{
+	tree t;
+};
+
+/// A cycle through a `std::optional`: `opt_node`, `opt_link`, `opt_node`.
+struct opt_node;
+
+struct opt_link
+{
+	std::span<const opt_node> nodes;
+};
+
+struct opt_node
+{
+	std::optional<opt_link> link;
+};
+
+/// A cycle through a `std::variant` alternative: `var_node`, `var_link`, `var_node`.
+struct var_node;
+
+struct var_link
+{
+	std::span<const var_node> nodes;
+};
+
+struct var_node
+{
+	std::variant<std::monostate, var_link> choice;
+};
+
 } // namespace manual
 
 // The lists are in the order of the members, not in the order of the numbers.
@@ -99,6 +156,61 @@ struct pb::fields_of<manual::constants>
                    pb::field_at<decltype( manual::constants::name ), 6, offsetof( manual::constants, name )>>
 {};
 
+template <>
+struct pb::fields_of<manual::spans>
+  : pb::field_list<manual::spans,
+                   pb::field_at<decltype( manual::spans::items ), 1, offsetof( manual::spans, items )>,
+                   pb::field_at<decltype( manual::spans::values ), 2, offsetof( manual::spans, values )>>
+{};
+
+template <>
+struct pb::fields_of<manual::const_item>
+  : pb::field_list<manual::const_item,
+                   pb::field_at<decltype( manual::const_item::a ), 1, offsetof( manual::const_item, a )>>
+{};
+
+template <>
+struct pb::fields_of<manual::const_items>
+  : pb::field_list<manual::const_items,
+                   pb::field_at<decltype( manual::const_items::items ), 1, offsetof( manual::const_items, items )>>
+{};
+
+template <>
+struct pb::fields_of<manual::tree>
+  : pb::field_list<manual::tree,
+                   pb::field_at<decltype( manual::tree::id ), 1, offsetof( manual::tree, id )>,
+                   pb::field_at<decltype( manual::tree::children ), 2, offsetof( manual::tree, children )>>
+{};
+
+template <>
+struct pb::fields_of<manual::forest>
+  : pb::field_list<manual::forest, pb::field_at<decltype( manual::forest::t ), 1, offsetof( manual::forest, t )>>
+{};
+
+template <>
+struct pb::fields_of<manual::opt_link>
+  : pb::field_list<manual::opt_link,
+                   pb::field_at<decltype( manual::opt_link::nodes ), 1, offsetof( manual::opt_link, nodes )>>
+{};
+
+template <>
+struct pb::fields_of<manual::opt_node>
+  : pb::field_list<manual::opt_node,
+                   pb::field_at<decltype( manual::opt_node::link ), 1, offsetof( manual::opt_node, link )>>
+{};
+
+template <>
+struct pb::fields_of<manual::var_link>
+  : pb::field_list<manual::var_link,
+                   pb::field_at<decltype( manual::var_link::nodes ), 1, offsetof( manual::var_link, nodes )>>
+{};
+
+template <>
+struct pb::fields_of<manual::var_node>
+  : pb::field_list<manual::var_node,
+                   pb::field_at<decltype( manual::var_node::choice ), 1, offsetof( manual::var_node, choice ), 1>>
+{};
+
 namespace {
 
 namespace d = pb::detail;
@@ -116,6 +228,17 @@ static_assert( table.fields[5].offset == offsetof( manual::message, choice ) && 
                table.fields[6].type == &d::value_descriptor<decltype( manual::message::choice )>::value );
 static_assert( d::message_descriptor<manual::empty>::value.count == 0 );
 
+static_assert( !d::is_recursive<manual::inner>() && !d::is_recursive<manual::message>() &&
+               !d::is_recursive<manual::empty>() && !d::is_recursive<manual::fixed>() &&
+               !d::is_recursive<manual::constants>() );
+static_assert( d::is_recursive<manual::tree>() );
+static_assert( !d::is_recursive<manual::forest>() );
+static_assert( d::is_recursive<manual::opt_node>() && d::is_recursive<manual::opt_link>() );
+static_assert( d::is_recursive<manual::var_node>() && d::is_recursive<manual::var_link>() );
+
+static_assert( d::needs_arena<manual::spans>() && !d::needs_arena<manual::message>() &&
+               !d::needs_arena<manual::inner>() && !d::needs_arena<manual::empty>() );
+
 #if defined( __cpp_impl_reflection )
 // The list that reflection makes from the struct is the same type as the list above.
 static_assert( std::is_same_v<d::reflected_fields<manual::inner>, d::field_list_of<manual::inner>> );
@@ -123,6 +246,7 @@ static_assert( std::is_same_v<d::reflected_fields<manual::message>, d::field_lis
 static_assert( std::is_same_v<d::reflected_fields<manual::empty>, d::field_list_of<manual::empty>> );
 static_assert( std::is_same_v<d::reflected_fields<manual::fixed>, d::field_list_of<manual::fixed>> );
 static_assert( std::is_same_v<d::reflected_fields<manual::constants>, d::field_list_of<manual::constants>> );
+static_assert( std::is_same_v<d::reflected_fields<manual::spans>, d::field_list_of<manual::spans>> );
 #endif
 
 template <typename T, std::size_t N>
@@ -172,12 +296,45 @@ bool test_decode_message_alternative()
 	return size && first && first->x == 3 && first->label == "b";
 }
 
+/// `encode`, `decode` with an arena, and `encode` again give the same bytes.
+bool test_decode_spans()
+{
+	const std::array<manual::inner, 2> items{ manual::inner{ 1, "a" }, { 2, {} } };
+	const std::array<float, 3> values{ 1.0f, -2.5f, 0.0f };
+	std::array<std::uint8_t, 64> wire{};
+	const auto size = pb::encode( manual::spans{ items, values }, std::span<std::uint8_t>( wire ) );
+	if ( !size )
+		return false;
+
+	std::array<std::uint8_t, 256> storage{};
+	pb::arena memory( storage );
+	manual::spans message{};
+	const auto decoded = pb::decode( std::span<const std::uint8_t>( wire ).first( *size ), message, memory );
+	std::array<std::uint8_t, 64> again{};
+	const auto resized = pb::encode( message, std::span<std::uint8_t>( again ) );
+	return decoded && *decoded == *size && message.items.size() == 2 && message.items[0].x == 1 &&
+	       message.items[0].label == "a" && message.items[1].x == 2 && message.items[1].label.empty() &&
+	       message.values.size() == 3 && message.values[0] == 1.0f && message.values[1] == -2.5f &&
+	       message.values[2] == 0.0f && resized && *resized == *size && again == wire;
+}
+
 bool test_encode_only()
 {
 	const manual::fixed fixed{ { 1.0f, 2.0f }, { 3, {} } };
 	return encodes_to( fixed,
 	                   std::array<std::uint8_t, 14>{
 	                     0x0a, 0x08, 0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x00, 0x40, 0x12, 0x02, 0x08, 0x03 } );
+}
+
+/// A span of an element with a `const` member encodes. Its descriptor has no constructor.
+bool test_const_span_element()
+{
+	using items = decltype( manual::const_items::items );
+	const d::sequence_desc& desc = *d::value_descriptor<items>::value.sequence;
+	const manual::const_item values[2]{ { 1 }, { 2 } };
+	return desc.construct == nullptr &&
+	       encodes_to( manual::const_items{ values },
+	                   std::array<std::uint8_t, 8>{ 0x0a, 0x02, 0x08, 0x01, 0x0a, 0x02, 0x08, 0x02 } );
 }
 
 bool test_const_members()
@@ -190,7 +347,7 @@ bool test_const_members()
 
 int main()
 {
-	const bool ok =
-	  test_encode() && test_decode() && test_decode_message_alternative() && test_encode_only() && test_const_members();
+	const bool ok = test_encode() && test_decode() && test_decode_message_alternative() && test_decode_spans() &&
+	                test_encode_only() && test_const_members() && test_const_span_element();
 	return ok ? 0 : 1;
 }

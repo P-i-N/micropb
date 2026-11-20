@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 #include <expected>
+#include <new>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -120,13 +121,23 @@ struct sequence_view
 
 using sequence_accessor = sequence_view ( * )( void* sequence );
 
+/// Sets the sequence to `count` items at `data`.
+using sequence_binder = void ( * )( void* sequence, void* data, std::size_t count );
+
+/// Makes a value-initialized element at `item`.
+using item_constructor = void ( * )( void* item );
+
+/// Makes space in the arena block of a span for the elements of a record (`reserve`).
+using sequence_reserver =
+  bool ( * )( const reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory );
+
 enum class sequence_storage : std::uint8_t
 {
 	/// `pb::repeated`: the items are at offset 0, the count is at `count_offset`.
 	REPEATED,
 	/// `std::array`: the items are at offset 0, the count is `capacity`.
 	ARRAY,
-	/// `std::span<const T>` and `pb::span_buffer<T>`: `access` gives the items.
+	/// `std::span<const T>`: `access` gives the items.
 	ACCESSOR,
 };
 
@@ -134,9 +145,17 @@ struct sequence_desc
 {
 	const value_desc* element;
 	sequence_accessor access;
+	/// `std::span<const T>`: `decode` sets it to a block in the arena. Null for the other types.
+	sequence_binder bind;
+	/// `std::span<const T>`: makes each new item in the arena. Null for the other types.
+	item_constructor construct;
+	/// `std::span<const T>`: `reserve`. Null for the other types: then a program
+	/// without a span field does not contain the count.
+	sequence_reserver reserve;
 	std::uint32_t element_size;
 	std::uint32_t capacity;
 	std::uint16_t count_offset;
+	std::uint16_t element_align;
 	sequence_storage storage;
 };
 
@@ -187,38 +206,40 @@ struct message_descriptor
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/// The count member of `pb::repeated` and `pb::span_buffer` is private. The
-/// codec reads and writes it through this friend of the two types.
+/// The count member of `pb::repeated` is private. The codec reads and writes it
+/// through this friend of the type.
 struct sequence_access
 {
 	template <typename S>
 	static constexpr std::size_t items_offset = offsetof( S, _items );
 	template <typename S>
 	static constexpr std::size_t count_offset = offsetof( S, _count );
-
-	template <typename T>
-	[[nodiscard]] static std::size_t* count_of( span_buffer<T>& buffer )
-	{
-		return &buffer._count;
-	}
 };
 
-/// Accessor of `std::span<const T>` and `pb::span_buffer<T>`. These types keep
-/// their items in a different object, so the interpreter cannot find the items
-/// from an offset.
+/// Accessor of `std::span<const T>`. The span keeps its items in a different
+/// object, so the interpreter cannot find the items from an offset.
 template <typename S>
 [[nodiscard]] sequence_view access_sequence( void* sequence )
 {
 	S& items = *static_cast<S*>( sequence );
-	if constexpr ( is_span_buffer<S> )
-	{
-		return { items.begin(), items.size(), items.capacity(), sequence_access::count_of( items ) };
-	}
-	else
-	{
-		const void* data = items.data();
-		return { const_cast<void*>( data ), items.size(), items.size(), nullptr };
-	}
+	const void* data = items.data();
+	return { const_cast<void*>( data ), items.size(), items.size(), nullptr };
+}
+
+/// Binder of `std::span<const T>`.
+template <typename S>
+void bind_span( void* sequence, void* data, std::size_t count )
+{
+	*static_cast<S*>( sequence ) = S( static_cast<const element_t<S>*>( data ), count );
+}
+
+/// Constructor of the element of `std::span<const T>`. A new block in the arena has
+/// no objects, and `reset_value` reads a `std::optional` or `std::variant` before
+/// it writes.
+template <typename E>
+void construct_item( void* item )
+{
+	::new ( item ) E();
 }
 
 /// Accessor of `std::optional`. The codec cannot make a value with a `const`
@@ -271,6 +292,9 @@ template <typename V>
 
 ////////////////////////////////////////////////////////////////////////////////
 
+[[nodiscard]] inline bool reserve(
+  const reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory );
+
 template <typename S>
 [[nodiscard]] consteval sequence_desc describe_sequence()
 {
@@ -278,26 +302,36 @@ template <typename S>
 	constexpr const value_desc* item = &value_descriptor<element>::value;
 	constexpr std::uint32_t item_size = sizeof( element );
 	constexpr auto capacity = static_cast<std::uint32_t>( sequence_traits<S>::capacity );
+	constexpr auto align = static_cast<std::uint16_t>( alignof( element ) );
 
 	if constexpr ( is_repeated<S> )
 	{
 		static_assert( sequence_access::items_offset<S> == 0 );
 		static_assert( sequence_access::count_offset<S> <= max_offset,
 		               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
-		return { item,
-		         nullptr,
-		         item_size,
-		         capacity,
-		         static_cast<std::uint16_t>( sequence_access::count_offset<S> ),
-		         sequence_storage::REPEATED };
+		return { item,     nullptr,
+		         nullptr,  nullptr,
+		         nullptr,  item_size,
+		         capacity, static_cast<std::uint16_t>( sequence_access::count_offset<S> ),
+		         align,    sequence_storage::REPEATED };
 	}
 	else if constexpr ( is_std_array<S> )
 	{
-		return { item, nullptr, item_size, capacity, 0, sequence_storage::ARRAY };
+		return { item, nullptr, nullptr, nullptr, nullptr, item_size, capacity, 0, align, sequence_storage::ARRAY };
+	}
+	else if constexpr ( is_std_span<S> && !is_fixed_span<S> )
+	{
+		// An element without a default constructor, for example with a `const`
+		// member, is encode-only (`decode_const_member`): it gets no constructor.
+		item_constructor construct = nullptr;
+		if constexpr ( std::is_default_constructible_v<element> )
+			construct = construct_item<element>;
+		return { item,  access_sequence<S>,        bind_span<S>, construct, reserve, item_size, 0, 0,
+		         align, sequence_storage::ACCESSOR };
 	}
 	else
 	{
-		return { item, access_sequence<S>, item_size, 0, 0, sequence_storage::ACCESSOR };
+		return { item, access_sequence<S>, nullptr, nullptr, nullptr, item_size, 0, 0, align, sequence_storage::ACCESSOR };
 	}
 }
 
@@ -726,8 +760,9 @@ inline void store_scalar( void* value, std::uint8_t code, std::uint64_t bits )
 
 inline void reset_message( const message_desc& message, void* object );
 
-/// Sets the value at `value` to its initial state. A sequence keeps its
-/// storage and only gets the count 0.
+/// Sets the value at `value` to its initial state. A `pb::repeated` keeps its
+/// storage and only gets the count 0. A `std::span<const T>` becomes empty and
+/// loses its block.
 inline void reset_value( const value_desc& type, void* value )
 {
 	switch ( type.kind )
@@ -748,7 +783,9 @@ inline void reset_value( const value_desc& type, void* value )
 			}
 			[[fallthrough]];
 		case field_kind::REPEATED:
-			if ( std::size_t* count = view_of( *type.sequence, value ).stored_count )
+			if ( type.sequence->bind != nullptr )
+				type.sequence->bind( value, nullptr, 0 );
+			else if ( std::size_t* count = view_of( *type.sequence, value ).stored_count )
 				*count = 0;
 			break;
 		case field_kind::MESSAGE: reset_message( *type.message, value ); break;
@@ -769,55 +806,167 @@ inline void reset_message( const message_desc& message, void* object )
 	}
 }
 
-inline void decode_message( reader& in, const message_desc& message, void* object );
-inline void decode_value( reader& in, wire_type wire, const value_desc& type, void* value );
+inline void decode_message( reader& in, const message_desc& message, void* object, arena* memory );
+inline void decode_value( reader& in, wire_type wire, const value_desc& type, void* value, arena* memory );
+
+/// Capacity of the arena block at `data`: a `std::size_t` just before the first
+/// item. 0 for a span without a block.
+[[nodiscard]] inline std::size_t block_capacity( const void* data )
+{
+	std::size_t capacity = 0;
+	if ( data != nullptr )
+		std::memcpy( &capacity, static_cast<const unsigned char*>( data ) - sizeof capacity, sizeof capacity );
+	return capacity;
+}
+
+/// The items of the sequence at `value` for `decode`. The capacity of a span is
+/// the capacity of its arena block.
+[[nodiscard]] inline sequence_view decode_view( const sequence_desc& sequence, void* value )
+{
+	sequence_view items = view_of( sequence, value );
+	if ( sequence.bind != nullptr )
+		items.capacity = block_capacity( items.data );
+	return items;
+}
+
+/// Elements of a repeated field in the value of one record, which the function
+/// reads from `in`. 0 for a wrong wire type and for a read that fails.
+[[nodiscard]] inline std::size_t count_record( reader& in, wire_type wire, const sequence_desc& sequence )
+{
+	const value_desc& element = *sequence.element;
+	if ( element.kind == field_kind::SCALAR && wire == wire_type::LENGTH_DELIMITED )
+	{
+		const std::span<const std::uint8_t> bytes = in.read_length_delimited();
+		if ( element.scalar & scalar_fixed )
+			return bytes.size() >> ( element.scalar & scalar_size_mask );
+
+		// Each varint ends with a byte without bit 7.
+		const auto last = []( std::uint8_t byte ) { return ( byte & 0x80 ) == 0; };
+		return static_cast<std::size_t>( std::count_if( bytes.begin(), bytes.end(), last ) );
+	}
+
+	const bool match = wire == wire_of( element );
+	in.skip( wire );
+	return match && !in.failed() ? 1 : 0;
+}
+
+/// Elements of the field `key.number` from the record at `in` to the end of the
+/// message. `in` is a copy of the reader after the key of the record. A read
+/// that fails ends the count.
+[[nodiscard]] inline std::size_t count_elements( reader in, field_key key, const sequence_desc& sequence )
+{
+	std::size_t count = count_record( in, key.type, sequence );
+	while ( !in.empty() )
+	{
+		const field_key next = in.read_key();
+		if ( in.failed() )
+			break;
+
+		if ( next.number == key.number )
+			count += count_record( in, next.type, sequence );
+		else
+			in.skip( next.type );
+	}
+	return count;
+}
+
+/// Takes a block for `capacity` items from `memory`, copies `items` into it and
+/// sets the span at `value` to it. `false` when the arena is full.
+[[nodiscard]] inline bool grow(
+  const sequence_desc& sequence, void* value, const sequence_view& items, std::size_t capacity, arena* memory )
+{
+	// The block has `header` bytes with the capacity at their end, then the items.
+	const std::size_t alignment = std::max<std::size_t>( sequence.element_align, alignof( std::size_t ) );
+	const std::size_t header = ( sizeof( std::size_t ) + alignment - 1 ) & ~( alignment - 1 );
+	if ( memory == nullptr || capacity > ( std::size_t( -1 ) - header ) / sequence.element_size )
+		return false;
+
+	auto* block = static_cast<unsigned char*>( memory->allocate( header + capacity * sequence.element_size, alignment ) );
+	if ( block == nullptr )
+		return false;
+
+	unsigned char* data = block + header;
+	std::memcpy( data - sizeof capacity, &capacity, sizeof capacity );
+	// `memcpy` makes the objects in the block: each element type is implicit-lifetime.
+	if ( items.count != 0 )
+		std::memcpy( data, items.data, items.count * sequence.element_size );
+	sequence.bind( value, data, items.count );
+	return true;
+}
+
+/// Makes space in the arena block of the span at `value` for the elements of
+/// the record at `in`. When the block is too small, takes a new block for the
+/// items and for all elements of the field from this record to the end of the
+/// message. `false` when the arena is full.
+[[nodiscard]] inline bool reserve(
+  const reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory )
+{
+	// Only a span that `decode` did not bind can have more items than its block.
+	const sequence_view items = decode_view( sequence, value );
+	if ( items.count > items.capacity )
+		return false;
+
+	reader record = in;
+	if ( count_record( record, key.type, sequence ) <= items.capacity - items.count )
+		return true;
+	return grow( sequence, value, items, items.count + count_elements( in, key, sequence ), memory );
+}
 
 /// Reads one element from `in` into the next free item of the sequence at
 /// `value`. A full sequence is an error: the function examines the capacity
-/// before it reads the element. The item starts from its initial state:
-/// records of a repeated field do not merge.
-inline void decode_element( reader& in, wire_type wire, const sequence_desc& sequence, void* value )
+/// before it reads the element. A full span block means that the count of the
+/// elements was too small, thus the input is not valid. The item starts from
+/// its initial state: records of a repeated field do not merge.
+inline void decode_element( reader& in, wire_type wire, const sequence_desc& sequence, void* value, arena* memory )
 {
-	const sequence_view items = view_of( sequence, value );
-	if ( items.count == items.capacity )
-		return in.fail( error::CAPACITY_EXCEEDED );
+	const sequence_view items = decode_view( sequence, value );
+	if ( items.count >= items.capacity )
+		return in.fail( sequence.bind != nullptr ? error::TRUNCATED : error::CAPACITY_EXCEEDED );
 
 	void* item = member_at( items.data, items.count * sequence.element_size );
+	if ( sequence.construct != nullptr )
+		sequence.construct( item );
 	reset_value( *sequence.element, item );
-	decode_value( in, wire, *sequence.element, item );
-	if ( !in.failed() )
+	decode_value( in, wire, *sequence.element, item, memory );
+	if ( in.failed() )
+		return;
+
+	if ( sequence.bind != nullptr )
+		sequence.bind( value, items.data, items.count + 1 );
+	else
 		*items.stored_count = items.count + 1;
 }
 
 /// Reads one record of a repeated field. A scalar element can be a packed
 /// record or a single value, also mixed in one message.
-inline void decode_repeated( reader& in, wire_type wire, const sequence_desc& sequence, void* value )
+inline void decode_repeated( reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory )
 {
+	if ( sequence.reserve != nullptr && !sequence.reserve( in, key, sequence, value, memory ) )
+		return in.fail( error::ARENA_FULL );
+
 	const value_desc& element = *sequence.element;
-	if ( element.kind == field_kind::SCALAR && wire == wire_type::LENGTH_DELIMITED )
+	if ( element.kind == field_kind::SCALAR && key.type == wire_type::LENGTH_DELIMITED )
 	{
 		reader packed( in.read_length_delimited() );
 		while ( !packed.empty() )
-			decode_element( packed, wire_of( element ), sequence, value );
+			decode_element( packed, wire_of( element ), sequence, value, memory );
 		in.absorb( packed );
 	}
-	else if ( wire == wire_of( element ) )
+	else if ( key.type == wire_of( element ) )
 	{
-		decode_element( in, wire, sequence, value );
+		decode_element( in, key.type, sequence, value, memory );
 	}
 	else
 	{
-		in.skip( wire );
+		in.skip( key.type );
 	}
 }
 
-/// Reads the value of one field into `value`. The function skips a field with
-/// the wrong wire type, as an unknown field. A read that fails does not change
-/// a scalar, a string or a bytes field.
-inline void decode_value( reader& in, wire_type wire, const value_desc& type, void* value )
+/// Reads the value of one field that is not repeated into `value`. The function
+/// skips a field with the wrong wire type, as an unknown field. A read that
+/// fails does not change a scalar, a string or a bytes field.
+inline void decode_value( reader& in, wire_type wire, const value_desc& type, void* value, arena* memory )
 {
-	if ( type.kind == field_kind::REPEATED )
-		return decode_repeated( in, wire, *type.sequence, value );
 	if ( wire != wire_of( type ) )
 		return in.skip( wire );
 
@@ -830,8 +979,15 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 	}
 	if ( type.kind == field_kind::OPTIONAL )
 	{
+		// A new value starts from the reset state, as each member of `msg` does.
 		const optional_desc& optional = *type.optional;
-		return decode_value( in, wire, *optional.value, optional.access( value, optional_op::ENGAGE ) );
+		void* held = optional.access( value, optional_op::GET );
+		if ( held == nullptr )
+		{
+			held = optional.access( value, optional_op::ENGAGE );
+			reset_value( *optional.value, held );
+		}
+		return decode_value( in, wire, *optional.value, held, memory );
 	}
 
 	// All other kinds are length-delimited. The bytes are a view into the input.
@@ -872,7 +1028,7 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 		case field_kind::MESSAGE: {
 			// The codec does not reset the message: a second occurrence merges into the first.
 			reader part( bytes );
-			decode_message( part, *type.message, value );
+			decode_message( part, *type.message, value, memory );
 			in.absorb( part );
 			break;
 		}
@@ -902,7 +1058,7 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 /// Reads all fields of `in` into the message at `object`, until the end of
 /// the input or the first error. Does not reset the message: a field that
 /// occurs again changes the value that is there.
-inline void decode_message( reader& in, const message_desc& message, void* object )
+inline void decode_message( reader& in, const message_desc& message, void* object, arena* memory )
 {
 	// Fields usually arrive in ascending order, and a repeated field arrives
 	// many times. The search starts at the entry of the last match.
@@ -921,31 +1077,47 @@ inline void decode_message( reader& in, const message_desc& message, void* objec
 		}
 
 		void* member = member_at( object, field->offset );
+		if ( field->type->kind == field_kind::REPEATED )
+		{
+			decode_repeated( in, key, *field->type->sequence, member, memory );
+			continue;
+		}
 		if ( field->alternative == 0 )
 		{
-			decode_value( in, key.type, *field->type, member );
+			decode_value( in, key.type, *field->type, member, memory );
 			continue;
 		}
 
-		// A different active alternative gives way to a value-initialized one.
-		// The same alternative stays, so a message merges. The codec skips a
-		// field with a wrong wire type and keeps the variant.
+		// A different active alternative gives way to a new one in the reset
+		// state, as each member of `msg` has. The same alternative stays, so a
+		// message merges. The codec skips a field with a wrong wire type and
+		// keeps the variant.
 		const variant_desc& variant = *field->type->variant;
 		const value_desc& alternative = *variant.alternatives[field->alternative];
 		if ( key.type != wire_of( alternative ) )
+		{
 			in.skip( key.type );
-		else
-			decode_value( in, key.type, alternative, variant.access( member, field->alternative, true ) );
+			continue;
+		}
+
+		void* active = variant.access( member, field->alternative, false );
+		if ( active == nullptr )
+		{
+			active = variant.access( member, field->alternative, true );
+			reset_value( alternative, active );
+		}
+		decode_value( in, key.type, alternative, active, memory );
 	}
 }
 
+/// `memory` is null for a message without a `std::span<const T>` repeated field.
 [[nodiscard, gnu::noinline, gnu::noclone]] inline std::expected<std::size_t, error> decode(
-  const message_desc& message, std::span<const std::uint8_t> in, void* object )
+  const message_desc& message, std::span<const std::uint8_t> in, void* object, arena* memory )
 {
 	reset_message( message, object );
 
 	reader source( in );
-	decode_message( source, message, object );
+	decode_message( source, message, object, memory );
 	if ( source.failed() )
 		return std::unexpected( source.status().error() );
 	return in.size();
@@ -972,14 +1144,27 @@ template <typename T>
 }
 
 /// Decodes the proto3 message in `in` into `msg` and returns `in.size()`. Resets
-/// `msg` first. A `pb::span_buffer` keeps its storage. On error, `msg` holds the
-/// fields that `decode` read before the error. A `std::string_view` or a
-/// `std::span` of `msg` points into `in`.
+/// `msg` first. On error, `msg` holds the fields that `decode` read before the
+/// error. A `std::string_view` or a `std::span<const std::uint8_t>` of `msg`
+/// points into `in`. The items of each `std::span<const T>` repeated field are
+/// in one block of `memory`. `in` and `memory` must stay valid while `msg` is
+/// in use. When `memory` is too small, returns `error::ARENA_FULL`. `decode`
+/// does not free the blocks of `memory`.
+template <typename T>
+[[nodiscard]] std::expected<std::size_t, error> decode( std::span<const std::uint8_t> in, T& msg, arena& memory )
+{
+	detail::check_decodable<T>();
+	return detail::decode( detail::message_descriptor<T>::value, in, &msg, &memory );
+}
+
+/// `decode` for a message without a `std::span<const T>` repeated field, also
+/// not in a nested message.
 template <typename T>
 [[nodiscard]] std::expected<std::size_t, error> decode( std::span<const std::uint8_t> in, T& msg )
 {
 	detail::check_decodable<T>();
-	return detail::decode( detail::message_descriptor<T>::value, in, &msg );
+	detail::check_no_arena<T>();
+	return detail::decode( detail::message_descriptor<T>::value, in, &msg, nullptr );
 }
 
 } // namespace pb

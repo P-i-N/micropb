@@ -153,11 +153,11 @@ The `.proto` file is the contract with the PC tools. A change to these rules bre
 
 ## Freestanding
 
-The core uses only `<cstdint>`, `<cstddef>`, `<span>`, `<string_view>`, `<array>`, `<optional>`, `<variant>`, `<expected>`, `<bit>`, `<type_traits>`, `<utility>`, `<algorithm>`, `<cstring>`, `<meta>`. No build in this project shows that it compiles freestanding. This stays unverified until the ARM stage. (Builder's call.)
+The core uses only `<cstdint>`, `<cstddef>`, `<span>`, `<string_view>`, `<array>`, `<optional>`, `<variant>`, `<expected>`, `<bit>`, `<type_traits>`, `<utility>`, `<algorithm>`, `<cstring>`, `<new>`, `<meta>`. No build in this project shows that it compiles freestanding. This stays unverified until the ARM stage. (Builder's call.)
 
 ## Decode semantics
 
-* `decode` resets `msg` before it reads: each field gets its value-initialized state, except that each `pb::repeated` and each `pb::span_buffer` keeps its storage and only sets its count to 0. The decoder resets each new element before it reads into it. (Builder's call.)
+* `decode` resets `msg` before it reads: each field becomes zero or empty, also a field with a default member initializer, except that each `pb::repeated` keeps its storage and only sets its count to 0. The decoder resets each new element before it reads into it. (Builder's call.)
 * `pb::span_buffer` is allowed only where the caller can bind storage before `decode`: a member of the top-level message, or of a plain nested struct member. Inside `std::variant`, `std::optional` or an element of a repeated field it is a compile error. Use `pb::repeated<T, N>` there. (Builder's call.)
 * The decoder accepts all input that the Google C++ runtime accepts, so the PC tools and the device can change field widths independently. (Builder's call.)
     * A known field with the wrong wire type: skipped as an unknown field.
@@ -209,3 +209,16 @@ Each stage is a separate, reviewable change.
 * Internal names and the structure of the field table.
 * How `wire.hpp` represents the reader and writer cursors.
 * The CMake target layout, within the files above.
+
+## Changes: arena spans
+
+`2026-11-20-arena-spans-design.md` changes the public API, the type mapping and the decode semantics of this document:
+
+* `decode( in, msg, arena& memory )` decodes a `std::span<const T>` repeated field: the items of each field are in one block of the `pb::arena`. `decode( in, msg )` is only for a message without such a field, also not in a nested message (rule `decode_needs_arena`).
+* New error `ARENA_FULL`: the arena has no space for the items of a field.
+* `std::span<const T>` as a repeated field decodes, with an arena. `std::array<T, N>` stays encode-only (`decode_encode_only`). A `std::span` with a static extent stays encode-only (`decode_fixed_span`), now also for a repeated field.
+* After `decode`, `msg` points into `in` and into the arena. Both must stay valid while `msg` is in use.
+* A value that `decode` makes for a `std::optional` or a new `oneof` alternative starts from the reset state of "Decode semantics" (zero or empty), as the members of `msg` do. Before, it kept the default member initializers of its value-initialized state.
+* Removed: `pb::span_buffer<T>` and its rules `span_buffer_in_optional`, `span_buffer_in_variant`, `span_buffer_in_repeated`. Use `std::span<const T>` with an arena.
+* The core also uses `<new>` (placement new for the items of a block).
+* A nested message that occurs more than once still merges: its span field gets a new block with the old items and the new items. The old block stays used until `clear()`.
