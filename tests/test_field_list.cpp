@@ -62,6 +62,38 @@ struct tree
 	std::span<const tree> children;
 };
 
+/// Holds a recursive type, but is not on its cycle.
+struct forest
+{
+	tree t;
+};
+
+/// A cycle through a `std::optional`: `opt_node`, `opt_link`, `opt_node`.
+struct opt_node;
+
+struct opt_link
+{
+	std::span<const opt_node> nodes;
+};
+
+struct opt_node
+{
+	std::optional<opt_link> link;
+};
+
+/// A cycle through a `std::variant` alternative: `var_node`, `var_link`, `var_node`.
+struct var_node;
+
+struct var_link
+{
+	std::span<const var_node> nodes;
+};
+
+struct var_node
+{
+	std::variant<std::monostate, var_link> choice;
+};
+
 } // namespace manual
 
 // The lists are in the order of the members, not in the order of the numbers.
@@ -113,6 +145,35 @@ struct pb::fields_of<manual::tree>
                    pb::field_at<decltype( manual::tree::children ), 2, offsetof( manual::tree, children )>>
 {};
 
+template <>
+struct pb::fields_of<manual::forest>
+  : pb::field_list<manual::forest, pb::field_at<decltype( manual::forest::t ), 1, offsetof( manual::forest, t )>>
+{};
+
+template <>
+struct pb::fields_of<manual::opt_link>
+  : pb::field_list<manual::opt_link,
+                   pb::field_at<decltype( manual::opt_link::nodes ), 1, offsetof( manual::opt_link, nodes )>>
+{};
+
+template <>
+struct pb::fields_of<manual::opt_node>
+  : pb::field_list<manual::opt_node,
+                   pb::field_at<decltype( manual::opt_node::link ), 1, offsetof( manual::opt_node, link )>>
+{};
+
+template <>
+struct pb::fields_of<manual::var_link>
+  : pb::field_list<manual::var_link,
+                   pb::field_at<decltype( manual::var_link::nodes ), 1, offsetof( manual::var_link, nodes )>>
+{};
+
+template <>
+struct pb::fields_of<manual::var_node>
+  : pb::field_list<manual::var_node,
+                   pb::field_at<decltype( manual::var_node::choice ), 1, offsetof( manual::var_node, choice ), 1>>
+{};
+
 namespace {
 
 namespace d = pb::detail;
@@ -134,6 +195,9 @@ static_assert( !d::is_recursive<manual::inner>() && !d::is_recursive<manual::mes
                !d::is_recursive<manual::empty>() && !d::is_recursive<manual::fixed>() &&
                !d::is_recursive<manual::constants>() );
 static_assert( d::is_recursive<manual::tree>() );
+static_assert( !d::is_recursive<manual::forest>() );
+static_assert( d::is_recursive<manual::opt_node>() && d::is_recursive<manual::opt_link>() );
+static_assert( d::is_recursive<manual::var_node>() && d::is_recursive<manual::var_link>() );
 
 #if defined( __cpp_impl_reflection )
 // The list that reflection makes from the struct is the same type as the list above.
