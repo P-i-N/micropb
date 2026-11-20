@@ -1050,6 +1050,23 @@ bool test_arena_huge_length()
 	       storage.intact();
 }
 
+/// A span record with a varint longer than 10 bytes keeps `INVALID_VARINT` and takes no block.
+bool test_arena_invalid_varint()
+{
+	constexpr auto varint =
+	  std::to_array<std::uint8_t>( { 0x08, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01 } );
+	constexpr auto length =
+	  std::to_array<std::uint8_t>( { 0x12, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01 } );
+	guarded storage( 512 );
+	pb::arena memory = storage.memory();
+	arena_lists a{};
+	arena_lists b{};
+	const auto ra = decode( bytes_of( varint ), a, memory );
+	const auto rb = decode( bytes_of( length ), b, memory );
+	return !ra && ra.error() == error::INVALID_VARINT && !rb && rb.error() == error::INVALID_VARINT &&
+	       memory.used() == 0 && storage.intact();
+}
+
 /// An error in the third element of a span field: the span has the two items before it, in the arena.
 bool test_arena_error_mid_field()
 {
@@ -1211,7 +1228,8 @@ bool test_arena( std::uint8_t fill )
 	arena_fill = fill;
 	return test_arena_exact() && test_arena_mixed_records() && test_arena_nested_repeated() && test_arena_merge() &&
 	       test_arena_oneof_and_optional() && test_arena_alignment() && test_arena_bad_packed() &&
-	       test_arena_byte_lists() && test_arena_huge_length() && test_arena_error_mid_field() &&
+	       test_arena_byte_lists() && test_arena_huge_length() && test_arena_invalid_varint() &&
+	       test_arena_error_mid_field() &&
 	       test_arena_two_messages() && test_arena_order() && test_arena_wrong_wire_type() &&
 	       test_arena_new_value_reset() && test_arena_new_items() && test_arena_reset() && test_arena_no_storage();
 }

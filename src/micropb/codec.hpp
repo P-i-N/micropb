@@ -129,7 +129,7 @@ using item_constructor = void ( * )( void* item );
 
 /// Makes space in the arena block of a span for the elements of a record (`reserve`).
 using sequence_reserver =
-  bool ( * )( const reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory );
+  bool ( * )( reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory );
 
 enum class sequence_storage : std::uint8_t
 {
@@ -293,7 +293,7 @@ template <typename V>
 ////////////////////////////////////////////////////////////////////////////////
 
 [[nodiscard]] inline bool reserve(
-  const reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory );
+  reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory );
 
 template <typename S>
 [[nodiscard]] consteval sequence_desc describe_sequence()
@@ -899,7 +899,7 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 /// items and for all elements of the field from this record to the end of the
 /// message. `false` when the arena is full.
 [[nodiscard]] inline bool reserve(
-  const reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory )
+  reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory )
 {
 	// Only a span that `decode` did not bind can have more items than its block.
 	const sequence_view items = decode_view( sequence, value );
@@ -907,7 +907,13 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 		return false;
 
 	reader record = in;
-	if ( count_record( record, key.type, sequence ) <= items.capacity - items.count )
+	const std::size_t needed = count_record( record, key.type, sequence );
+	if ( record.failed() )
+	{
+		in.absorb( record );
+		return true;
+	}
+	if ( needed <= items.capacity - items.count )
 		return true;
 	return grow( sequence, value, items, items.count + count_elements( in, key, sequence ), memory );
 }
