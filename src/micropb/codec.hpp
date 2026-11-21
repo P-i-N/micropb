@@ -114,9 +114,6 @@ struct sequence_view
 {
 	void* data;
 	std::size_t count;
-	std::size_t capacity;
-	/// The count that `decode` changes. Null for a type that is encode-only.
-	std::size_t* stored_count;
 };
 
 using sequence_accessor = sequence_view ( * )( void* sequence );
@@ -137,25 +134,32 @@ enum class sequence_storage : std::uint8_t
 	REPEATED,
 	/// `std::array`: the items are at offset 0, the count is `capacity`.
 	ARRAY,
-	/// `std::span<const T>`: `access` gives the items.
+	/// `std::span<const T>`: `span->access` gives the items.
 	ACCESSOR,
+};
+
+/// Callbacks and alignment of a `std::span` sequence. Only span types make one.
+struct span_desc
+{
+	sequence_accessor access;
+	/// `std::span<const T>`: `decode` sets it to a block in the arena. Null for a fixed span.
+	sequence_binder bind;
+	/// `std::span<const T>`: makes each new item in the arena. Null when encode-only.
+	item_constructor construct;
+	/// `std::span<const T>`: `reserve`. Null for a fixed span: then a program
+	/// without a dynamic span field does not contain the count.
+	sequence_reserver reserve;
+	std::uint16_t element_align;
 };
 
 struct sequence_desc
 {
 	const value_desc* element;
-	sequence_accessor access;
-	/// `std::span<const T>`: `decode` sets it to a block in the arena. Null for the other types.
-	sequence_binder bind;
-	/// `std::span<const T>`: makes each new item in the arena. Null for the other types.
-	item_constructor construct;
-	/// `std::span<const T>`: `reserve`. Null for the other types: then a program
-	/// without a span field does not contain the count.
-	sequence_reserver reserve;
+	/// Non-null only for `sequence_storage::ACCESSOR`.
+	const span_desc* span;
 	std::uint32_t element_size;
 	std::uint32_t capacity;
 	std::uint16_t count_offset;
-	std::uint16_t element_align;
 	sequence_storage storage;
 };
 
@@ -223,7 +227,7 @@ template <typename S>
 {
 	S& items = *static_cast<S*>( sequence );
 	const void* data = items.data();
-	return { const_cast<void*>( data ), items.size(), items.size(), nullptr };
+	return { const_cast<void*>( data ), items.size() };
 }
 
 /// Binder of `std::span<const T>`.
@@ -261,25 +265,31 @@ template <typename O>
 	return value ? &*value : nullptr;
 }
 
-/// The address of alternative `I` of `value` when it is active, else null.
-/// With `select`, makes it active first.
+/// Makes alternative `I` of `value` active and gives its address. An
+/// alternative that is `const` or has a `const` member is encode-only: null.
 template <std::size_t I, typename V>
-[[nodiscard]] void* alternative_at( V& value, bool select )
+[[nodiscard]] void* emplace_alternative( V& value )
 {
-	// An alternative that is `const` or has a `const` member is encode-only: no `emplace`.
-	if ( select && value.index() != I )
-	{
-		if constexpr ( !std::is_const_v<std::variant_alternative_t<I, V>> && requires { value.template emplace<I>(); } )
-			value.template emplace<I>();
-	}
-	return const_cast<void*>( static_cast<const void*>( std::get_if<I>( &value ) ) );
+	if constexpr ( !std::is_const_v<std::variant_alternative_t<I, V>> && requires { value.template emplace<I>(); } )
+		return &value.template emplace<I>();
+	return nullptr;
 }
 
 template <typename V, std::size_t... I>
 [[nodiscard]] void* access_alternative( V& value, std::size_t index, bool select, std::index_sequence<I...> )
 {
 	void* result = nullptr;
-	static_cast<void>( ( ( index == I && ( result = alternative_at<I>( value, select ), true ) ) || ... ) );
+	if ( value.index() == index )
+	{
+		static_cast<void>(
+		  ( ( index == I && ( result = const_cast<void*>( static_cast<const void*>( std::get_if<I>( &value ) ) ), true ) ) ||
+		    ... ) );
+		return result;
+	}
+	if ( !select )
+		return nullptr;
+
+	static_cast<void>( ( ( index == I && ( result = emplace_alternative<I>( value ), true ) ) || ... ) );
 	return result;
 }
 
@@ -296,42 +306,55 @@ template <typename V>
   reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory );
 
 template <typename S>
-[[nodiscard]] consteval sequence_desc describe_sequence()
+[[nodiscard]] consteval span_desc describe_span()
 {
 	using element = element_t<S>;
-	constexpr const value_desc* item = &value_descriptor<element>::value;
-	constexpr std::uint32_t item_size = sizeof( element );
-	constexpr auto capacity = static_cast<std::uint32_t>( sequence_traits<S>::capacity );
 	constexpr auto align = static_cast<std::uint16_t>( alignof( element ) );
-
-	if constexpr ( is_repeated<S> )
-	{
-		static_assert( sequence_access::items_offset<S> == 0 );
-		static_assert( sequence_access::count_offset<S> <= max_offset,
-		               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
-		return { item,     nullptr,
-		         nullptr,  nullptr,
-		         nullptr,  item_size,
-		         capacity, static_cast<std::uint16_t>( sequence_access::count_offset<S> ),
-		         align,    sequence_storage::REPEATED };
-	}
-	else if constexpr ( is_std_array<S> )
-	{
-		return { item, nullptr, nullptr, nullptr, nullptr, item_size, capacity, 0, align, sequence_storage::ARRAY };
-	}
-	else if constexpr ( is_std_span<S> && !is_fixed_span<S> )
+	if constexpr ( !is_fixed_span<S> )
 	{
 		// An element without a default constructor, for example with a `const`
 		// member, is encode-only (`decode_const_member`): it gets no constructor.
 		item_constructor construct = nullptr;
 		if constexpr ( std::is_default_constructible_v<element> )
 			construct = construct_item<element>;
-		return { item,  access_sequence<S>,        bind_span<S>, construct, reserve, item_size, 0, 0,
-		         align, sequence_storage::ACCESSOR };
+		return { access_sequence<S>, bind_span<S>, construct, reserve, align };
 	}
 	else
 	{
-		return { item, access_sequence<S>, nullptr, nullptr, nullptr, item_size, 0, 0, align, sequence_storage::ACCESSOR };
+		return { access_sequence<S>, nullptr, nullptr, nullptr, align };
+	}
+}
+
+template <typename S>
+inline constexpr span_desc span_descriptor = describe_span<S>();
+
+template <typename S>
+[[nodiscard]] consteval sequence_desc describe_sequence()
+{
+	using element = element_t<S>;
+	constexpr const value_desc* item = &value_descriptor<element>::value;
+	constexpr std::uint32_t item_size = sizeof( element );
+	constexpr auto capacity = static_cast<std::uint32_t>( sequence_traits<S>::capacity );
+
+	if constexpr ( is_repeated<S> )
+	{
+		static_assert( sequence_access::items_offset<S> == 0 );
+		static_assert( sequence_access::count_offset<S> <= max_offset,
+		               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
+		return { item,
+		         nullptr,
+		         item_size,
+		         capacity,
+		         static_cast<std::uint16_t>( sequence_access::count_offset<S> ),
+		         sequence_storage::REPEATED };
+	}
+	else if constexpr ( is_std_array<S> )
+	{
+		return { item, nullptr, item_size, capacity, 0, sequence_storage::ARRAY };
+	}
+	else
+	{
+		return { item, &span_descriptor<S>, item_size, 0, 0, sequence_storage::ACCESSOR };
 	}
 }
 
@@ -464,20 +487,22 @@ constexpr message_desc message_descriptor<T>::value = describe_message<T>();
 	return wire_type::LENGTH_DELIMITED;
 }
 
+[[nodiscard]] inline std::size_t* repeated_count( const sequence_desc& sequence, void* object )
+{
+	return static_cast<std::size_t*>( member_at( object, sequence.count_offset ) );
+}
+
 /// The items of the sequence at `object`. The interpreter writes through the
 /// result only when it decodes.
 [[nodiscard]] inline sequence_view view_of( const sequence_desc& sequence, void* object )
 {
 	switch ( sequence.storage )
 	{
-		case sequence_storage::REPEATED: {
-			auto* count = static_cast<std::size_t*>( member_at( object, sequence.count_offset ) );
-			return { object, *count, sequence.capacity, count };
-		}
-		case sequence_storage::ARRAY: return { object, sequence.capacity, sequence.capacity, nullptr };
+		case sequence_storage::REPEATED: return { object, *repeated_count( sequence, object ) };
+		case sequence_storage::ARRAY: return { object, sequence.capacity };
 		case sequence_storage::ACCESSOR: break;
 	}
-	return sequence.access( object );
+	return sequence.span->access( object );
 }
 
 /// Value of the scalar at `value` as the wire carries it: the varint value, or
@@ -783,10 +808,10 @@ inline void reset_value( const value_desc& type, void* value )
 			}
 			[[fallthrough]];
 		case field_kind::REPEATED:
-			if ( type.sequence->bind != nullptr )
-				type.sequence->bind( value, nullptr, 0 );
-			else if ( std::size_t* count = view_of( *type.sequence, value ).stored_count )
-				*count = 0;
+			if ( type.sequence->span != nullptr && type.sequence->span->bind != nullptr )
+				type.sequence->span->bind( value, nullptr, 0 );
+			else if ( type.sequence->storage == sequence_storage::REPEATED )
+				*repeated_count( *type.sequence, value ) = 0;
 			break;
 		case field_kind::MESSAGE: reset_message( *type.message, value ); break;
 		case field_kind::OPTIONAL: static_cast<void>( type.optional->access( value, optional_op::RESET ) ); break;
@@ -819,14 +844,13 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 	return capacity;
 }
 
-/// The items of the sequence at `value` for `decode`. The capacity of a span is
+/// Capacity of the sequence at `items` for `decode`. The capacity of a span is
 /// the capacity of its arena block.
-[[nodiscard]] inline sequence_view decode_view( const sequence_desc& sequence, void* value )
+[[nodiscard]] inline std::size_t decode_capacity( const sequence_desc& sequence, const sequence_view& items )
 {
-	sequence_view items = view_of( sequence, value );
-	if ( sequence.bind != nullptr )
-		items.capacity = block_capacity( items.data );
-	return items;
+	if ( sequence.span != nullptr && sequence.span->bind != nullptr )
+		return block_capacity( items.data );
+	return sequence.capacity;
 }
 
 /// Elements of a repeated field in the value of one record, which the function
@@ -876,7 +900,7 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
   const sequence_desc& sequence, void* value, const sequence_view& items, std::size_t capacity, arena* memory )
 {
 	// The block has `header` bytes with the capacity at their end, then the items.
-	const std::size_t alignment = std::max<std::size_t>( sequence.element_align, alignof( std::size_t ) );
+	const std::size_t alignment = std::max<std::size_t>( sequence.span->element_align, alignof( std::size_t ) );
 	const std::size_t header = ( sizeof( std::size_t ) + alignment - 1 ) & ~( alignment - 1 );
 	if ( memory == nullptr || capacity > ( std::size_t( -1 ) - header ) / sequence.element_size )
 		return false;
@@ -890,7 +914,7 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 	// `memcpy` makes the objects in the block: each element type is implicit-lifetime.
 	if ( items.count != 0 )
 		std::memcpy( data, items.data, items.count * sequence.element_size );
-	sequence.bind( value, data, items.count );
+	sequence.span->bind( value, data, items.count );
 	return true;
 }
 
@@ -902,8 +926,9 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
   reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory )
 {
 	// Only a span that `decode` did not bind can have more items than its block.
-	const sequence_view items = decode_view( sequence, value );
-	if ( items.count > items.capacity )
+	const sequence_view items = view_of( sequence, value );
+	const std::size_t capacity = decode_capacity( sequence, items );
+	if ( items.count > capacity )
 		return false;
 
 	reader record = in;
@@ -913,7 +938,7 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 		in.absorb( record );
 		return true;
 	}
-	if ( needed <= items.capacity - items.count )
+	if ( needed <= capacity - items.count )
 		return true;
 	return grow( sequence, value, items, items.count + count_elements( in, key, sequence ), memory );
 }
@@ -925,29 +950,31 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 /// its initial state: records of a repeated field do not merge.
 inline void decode_element( reader& in, wire_type wire, const sequence_desc& sequence, void* value, arena* memory )
 {
-	const sequence_view items = decode_view( sequence, value );
-	if ( items.count >= items.capacity )
-		return in.fail( sequence.bind != nullptr ? error::TRUNCATED : error::CAPACITY_EXCEEDED );
+	const sequence_view items = view_of( sequence, value );
+	const bool is_span = sequence.span != nullptr && sequence.span->bind != nullptr;
+	if ( items.count >= decode_capacity( sequence, items ) )
+		return in.fail( is_span ? error::TRUNCATED : error::CAPACITY_EXCEEDED );
 
 	void* item = member_at( items.data, items.count * sequence.element_size );
-	if ( sequence.construct != nullptr )
-		sequence.construct( item );
+	if ( sequence.span != nullptr && sequence.span->construct != nullptr )
+		sequence.span->construct( item );
 	reset_value( *sequence.element, item );
 	decode_value( in, wire, *sequence.element, item, memory );
 	if ( in.failed() )
 		return;
 
-	if ( sequence.bind != nullptr )
-		sequence.bind( value, items.data, items.count + 1 );
+	if ( is_span )
+		sequence.span->bind( value, items.data, items.count + 1 );
 	else
-		*items.stored_count = items.count + 1;
+		*repeated_count( sequence, value ) = items.count + 1;
 }
 
 /// Reads one record of a repeated field. A scalar element can be a packed
 /// record or a single value, also mixed in one message.
 inline void decode_repeated( reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory )
 {
-	if ( sequence.reserve != nullptr && !sequence.reserve( in, key, sequence, value, memory ) )
+	if ( sequence.span != nullptr && sequence.span->reserve != nullptr &&
+	     !sequence.span->reserve( in, key, sequence, value, memory ) )
 		return in.fail( error::ARENA_FULL );
 
 	const value_desc& element = *sequence.element;
@@ -1015,12 +1042,11 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 				break;
 			}
 
-			const sequence_view items = view_of( *type.sequence, value );
-			if ( bytes.size() > items.capacity )
+			if ( bytes.size() > type.sequence->capacity )
 				return in.fail( error::CAPACITY_EXCEEDED );
 			if ( !bytes.empty() )
-				std::memcpy( items.data, bytes.data(), bytes.size() );
-			*items.stored_count = bytes.size();
+				std::memcpy( value, bytes.data(), bytes.size() );
+			*repeated_count( *type.sequence, value ) = bytes.size();
 			break;
 		}
 		case field_kind::FIXED_BYTES:

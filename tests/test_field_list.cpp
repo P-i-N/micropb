@@ -330,7 +330,7 @@ bool test_const_span_element()
 	using items = decltype( manual::const_items::items );
 	const d::sequence_desc& desc = *d::value_descriptor<items>::value.sequence;
 	const manual::const_item values[2]{ { 1 }, { 2 } };
-	return desc.construct == nullptr &&
+	return desc.span->construct == nullptr &&
 	       encodes_to( manual::const_items{ values },
 	                   std::array<std::uint8_t, 8>{ 0x0a, 0x02, 0x08, 0x01, 0x0a, 0x02, 0x08, 0x02 } );
 }

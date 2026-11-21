@@ -174,8 +174,9 @@ bool test_sequence_accessor()
 	constexpr std::array<std::int32_t, 3> items{ 1, 2, 3 };
 	std::span<const std::int32_t> view( items );
 	const d::sequence_desc& view_desc = *d::value_descriptor<std::span<const std::int32_t>>::value.sequence;
-	const d::sequence_view a = view_desc.access( &view );
-	if ( a.count != 3 || a.capacity != 3 || a.data != items.data() || a.stored_count != nullptr )
+	const d::span_desc& span = *view_desc.span;
+	const d::sequence_view a = span.access( &view );
+	if ( a.count != 3 || a.data != items.data() )
 		return false;
 
 	if ( view_desc.element_size != 4 || view_desc.storage != d::sequence_storage::ACCESSOR )
@@ -183,13 +184,11 @@ bool test_sequence_accessor()
 
 	// Only a `std::span<const T>` has a binder: `decode` sets it to a block in the arena.
 	std::array<std::int32_t, 2> block{ 5, 6 };
-	view_desc.bind( &view, block.data(), 2 );
-	return view.data() == block.data() && view.size() == 2 && view_desc.element_align == alignof( std::int32_t ) &&
-	       view_desc.construct == &d::construct_item<std::int32_t> &&
-	       d::value_descriptor<pb::repeated<float, 4>>::value.sequence->bind == nullptr &&
-	       view_desc.reserve == &d::reserve &&
-	       d::value_descriptor<pb::repeated<float, 4>>::value.sequence->reserve == nullptr &&
-	       d::value_descriptor<std::array<float, 2>>::value.sequence->reserve == nullptr;
+	span.bind( &view, block.data(), 2 );
+	return view.data() == block.data() && view.size() == 2 && span.element_align == alignof( std::int32_t ) &&
+	       span.construct == &d::construct_item<std::int32_t> && span.reserve == &d::reserve &&
+	       d::value_descriptor<pb::repeated<float, 4>>::value.sequence->span == nullptr &&
+	       d::value_descriptor<std::array<float, 2>>::value.sequence->span == nullptr;
 }
 
 /// A span with more items than the capacity of its block fails closed: the count takes no block
