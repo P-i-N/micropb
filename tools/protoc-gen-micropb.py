@@ -520,7 +520,7 @@ class Header:
                 text = self.field_type(message, field, member_names)
                 if field.proto3_optional:
                     text = f"std::optional<{text}>"
-                lines.append(f"    {text} {ident(field.name)};")
+                lines.append(f"    {text} {ident(field.name)}{{}};")
                 entries.append((ident(field.name), field.number, 0, ENCODINGS.get(field.type)))
             elif index not in done:
                 done.add(index)
@@ -531,7 +531,7 @@ class Header:
                     if types.count(text) > 1:
                         raise self.error(f"{message.proto_name}.{name}: a oneof cannot have two members "
                                          f"of the type {text}")
-                lines.append(f"    std::variant<std::monostate, {', '.join(types)}> {ident(name)};")
+                lines.append(f"    std::variant<std::monostate, {', '.join(types)}> {ident(name)}{{}};")
                 entries += [(ident(name), other.number, position, ENCODINGS.get(other.type))
                             for position, other in enumerate(group, 1)]
 

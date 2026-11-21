@@ -14,8 +14,8 @@ enum class Unit : int32_t {
 };
 
 struct Point {
-    int32_t x;
-    int32_t y;
+    int32_t x{};
+    int32_t y{};
 };
 
 } // namespace shared::types

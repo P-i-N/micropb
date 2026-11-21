@@ -210,6 +210,21 @@ bool test_frame_decode()
 	       frame.origin.y == 4 && frame.unit == shared::types::Unit::METER && frame.mode == features::RxMode::VARIABLE;
 }
 
+/// Unbraced declarations (`T msg;`) initialize every generated field to its proto3 default.
+bool test_default_initialization()
+{
+	gen::scalars s;
+	gen::text t;
+	features::Calibration cal;
+	features::Frame f;
+	return encodes_to( s, vectors::scalars_zero ) && s.c == gen::color::NONE && t.name.empty() && t.data.empty() &&
+	       t.mac == std::array<uint8_t, 6>{} && cal.gains == std::array<float, 4>{} &&
+	       cal.id == std::array<uint8_t, 6>{} && f.device.class_ == 0 &&
+	       f.device.state == features::Device_State::IDLE && !f.device.token.has_value() && !f.device.spare.has_value() &&
+	       f.device.slots.empty() && std::holds_alternative<std::monostate>( f.device.event ) && !f.device.ready &&
+	       f.unit == shared::types::Unit::NONE && f.mode == features::RxMode::FIXED;
+}
+
 /// `detail.proto` has names that the namespace `pb` also has. `tag { error: 5 } repeated { error: 1 }`
 bool test_names_of_the_library()
 {
@@ -224,8 +239,8 @@ bool test_names_of_the_library()
 
 int main()
 {
-	const bool ok = test_reference_vectors() && test_reference_values() && test_field_numbers() && test_fixed_arrays() &&
-	                test_views() && test_views_decode() && test_frame_encode() && test_frame_decode() &&
-	                test_names_of_the_library();
+	const bool ok = test_default_initialization() && test_reference_vectors() && test_reference_values() &&
+	                test_field_numbers() && test_fixed_arrays() && test_views() && test_views_decode() &&
+	                test_frame_encode() && test_frame_decode() && test_names_of_the_library();
 	return ok ? 0 : 1;
 }

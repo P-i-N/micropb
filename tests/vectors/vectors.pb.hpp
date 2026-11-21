@@ -21,62 +21,62 @@ enum class color : int32_t {
 };
 
 struct scalars {
-    int32_t i32;
-    int64_t i64;
-    uint32_t u32;
-    uint64_t u64;
-    int32_t s32;
-    int64_t s64;
-    bool flag;
-    float f;
-    double d;
-    uint32_t fx32;
-    uint64_t fx64;
-    int32_t sfx32;
-    int64_t sfx64;
-    color c;
-    int8_t i8;
-    uint16_t u16;
+    int32_t i32{};
+    int64_t i64{};
+    uint32_t u32{};
+    uint64_t u64{};
+    int32_t s32{};
+    int64_t s64{};
+    bool flag{};
+    float f{};
+    double d{};
+    uint32_t fx32{};
+    uint64_t fx64{};
+    int32_t sfx32{};
+    int64_t sfx64{};
+    color c{};
+    int8_t i8{};
+    uint16_t u16{};
 };
 
 struct text {
-    std::string_view name;
-    std::span<const uint8_t> data;
-    std::array<uint8_t, 6> mac;
+    std::string_view name{};
+    std::span<const uint8_t> data{};
+    std::array<uint8_t, 6> mac{};
 };
 
 struct inner {
-    int32_t x;
-    std::string_view label;
+    int32_t x{};
+    std::string_view label{};
 };
 
 struct outer {
-    inner child;
-    std::optional<int32_t> maybe;
-    std::optional<inner> maybe_child;
-    int32_t gap;
+    inner child{};
+    std::optional<int32_t> maybe{};
+    std::optional<inner> maybe_child{};
+    int32_t gap{};
 };
 
 struct lists {
-    pb::repeated<int32_t, 8> ints;
-    pb::repeated<float, 8> floats;
-    pb::repeated<std::string_view, 8> names;
-    pb::repeated<inner, 8> items;
-    pb::repeated<int64_t, 8> zz;
+    pb::repeated<int32_t, 8> ints{};
+    pb::repeated<float, 8> floats{};
+    pb::repeated<std::string_view, 8> names{};
+    pb::repeated<inner, 8> items{};
+    pb::repeated<int64_t, 8> zz{};
 };
 
 struct pose {
-    pb::repeated<float, 3> pos;
-    pb::repeated<float, 4> rot;
+    pb::repeated<float, 3> pos{};
+    pb::repeated<float, 4> rot{};
 };
 
 struct ping {
-    uint32_t seq;
+    uint32_t seq{};
 };
 
 struct envelope {
-    uint32_t id;
-    std::variant<std::monostate, pose, ping, text> payload;
+    uint32_t id{};
+    std::variant<std::monostate, pose, ping, text> payload{};
 };
 
 } // namespace micropb::test

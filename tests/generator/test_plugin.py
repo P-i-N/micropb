@@ -135,15 +135,15 @@ class CoreTest(unittest.TestCase):
             };
 
             struct Inner {
-                int32_t x;
+                int32_t x{};
             };
 
             struct Outer {
-                Inner child;
-                Mode mode;
-                std::string_view name;
-                std::span<const uint8_t> data;
-                int32_t delta;
+                Inner child{};
+                Mode mode{};
+                std::string_view name{};
+                std::span<const uint8_t> data{};
+                int32_t delta{};
             };
 
             } // namespace app::link
@@ -170,11 +170,11 @@ class CoreTest(unittest.TestCase):
               float h = 8; double i = 9; fixed32 j = 10; fixed64 k = 11; sfixed32 l = 12; sfixed64 n = 13;
             }
             """)
-        members = [line.strip() for line in text.split("struct m {\n")[1].split("};")[0].splitlines()]
+        members = [line.strip() for line in text.split("struct m {\n")[1].split("\n};")[0].splitlines()]
         self.assertEqual(members, [
-            "int32_t a;", "int64_t b;", "uint32_t c;", "uint64_t d;", "int32_t e;",
-            "int64_t f;", "bool g;", "float h;", "double i;", "uint32_t j;", "uint64_t k;",
-            "int32_t l;", "int64_t n;"])
+            "int32_t a{};", "int64_t b{};", "uint32_t c{};", "uint64_t d{};", "int32_t e{};",
+            "int64_t f{};", "bool g{};", "float h{};", "double i{};", "uint32_t j{};", "uint64_t k{};",
+            "int32_t l{};", "int64_t n{};"])
         self.assertEqual(field_list(text, "m"), [
             "a = 1", "b = 2", "c = 3", "d = 4", "e = 5:ZIGZAG", "f = 6:ZIGZAG", "g = 7",
             "h = 8", "i = 9", "j = 10:FIXED", "k = 11:FIXED", "l = 12:FIXED", "n = 13:FIXED"])
@@ -182,7 +182,7 @@ class CoreTest(unittest.TestCase):
     def test_no_package_has_no_namespace(self):
         text = header("message m { bool a = 1; }")
         self.assertNotIn("namespace", text)
-        self.assertIn("\n\nstruct m {\n    bool a;\n};\n\n// Field lists", text)
+        self.assertIn("\n\nstruct m {\n    bool a{};\n};\n\n// Field lists", text)
         self.assertEqual(field_list(text, "m"), ["a = 1"])
 
     def test_includes_only_what_the_header_uses(self):
@@ -224,7 +224,7 @@ class CoreTest(unittest.TestCase):
 
 def members(text, name):
     """The member lines of the struct `name` in the header `text`."""
-    return [line.strip() for line in text.split(f"struct {name} {{\n")[1].split("};")[0].splitlines()]
+    return [line.strip() for line in text.split(f"struct {name} {{\n")[1].split("\n};")[0].splitlines()]
 
 
 def field_list(text, name):
@@ -252,64 +252,64 @@ def definitions(text):
 class OptionsTest(unittest.TestCase):
     def test_max_count(self):
         text = header("message m { repeated int32 a = 1; }", "m.a max_count:4\n")
-        self.assertEqual(members(text, "m"), ["pb::repeated<int32_t, 4> a;"])
+        self.assertEqual(members(text, "m"), ["pb::repeated<int32_t, 4> a{};"])
 
     def test_fixed_count(self):
         text = header("message m { repeated float a = 1; }", "m.a max_count:3 fixed_count:true\n")
-        self.assertEqual(members(text, "m"), ["std::array<float, 3> a;"])
+        self.assertEqual(members(text, "m"), ["std::array<float, 3> a{};"])
         self.assertIn("#include <array>\n", text)
 
     def test_fixed_count_false(self):
         text = header("message m { repeated float a = 1; }", "m.a max_count:3 fixed_count:false\n")
-        self.assertEqual(members(text, "m"), ["pb::repeated<float, 3> a;"])
+        self.assertEqual(members(text, "m"), ["pb::repeated<float, 3> a{};"])
 
     def test_max_size_and_fixed_length(self):
         text = header("message m { bytes a = 1; bytes b = 2; bytes c = 3; }",
                       "m.a max_size:16\nm.b max_size:6 fixed_length:true\n")
         self.assertEqual(members(text, "m"), [
-            "pb::bytes<16> a;", "std::array<uint8_t, 6> b;", "std::span<const uint8_t> c;"])
+            "pb::bytes<16> a{};", "std::array<uint8_t, 6> b{};", "std::span<const uint8_t> c{};"])
 
     def test_string_max_length_and_max_size(self):
         text = header("message m { string a = 1; string b = 2; string c = 3; string d = 4; }",
                       "m.a max_length:15\nm.b max_size:16\nm.c max_size:1\n")
         self.assertEqual(members(text, "m"), [
-            "pb::string<15> a;", "pb::string<15> b;", "pb::string<0> c;", "std::string_view d;"])
+            "pb::string<15> a{};", "pb::string<15> b{};", "pb::string<0> c{};", "std::string_view d{};"])
 
     def test_string_max_length_and_max_size_override_across_lines(self):
         text = header("message m { string a = 1; string b = 2; }",
                       "* max_size:32\nm.a max_length:10\n")
-        self.assertEqual(members(text, "m"), ["pb::string<10> a;", "pb::string<31> b;"])
+        self.assertEqual(members(text, "m"), ["pb::string<10> a{};", "pb::string<31> b{};"])
         text = header("message m { string a = 1; }", "m.a max_length:10\n* max_size:32\n")
-        self.assertEqual(members(text, "m"), ["pb::string<31> a;"])
+        self.assertEqual(members(text, "m"), ["pb::string<31> a{};"])
 
     def test_repeated_sized_bytes_and_strings(self):
         text = header("message m { repeated bytes a = 1; repeated string b = 2; }",
                       "m.a max_count:2 max_size:8\nm.b max_count:3 max_length:12\n")
         self.assertEqual(members(text, "m"), [
-            "pb::repeated<pb::bytes<8>, 2> a;", "pb::repeated<pb::string<12>, 3> b;"])
+            "pb::repeated<pb::bytes<8>, 2> a{};", "pb::repeated<pb::string<12>, 3> b{};"])
 
     def test_int_size(self):
         text = header("message m { int32 a = 1; uint32 b = 2; int64 c = 3; uint64 d = 4; }",
                       "m.a int_size:IS_8\nm.b int_size:IS_16\nm.c int_size:IS_32\nm.d int_size:IS_64\n")
         self.assertEqual(members(text, "m"),
-                         ["int8_t a;", "uint16_t b;", "int32_t c;", "uint64_t d;"])
+                         ["int8_t a{};", "uint16_t b{};", "int32_t c{};", "uint64_t d{};"])
 
     def test_int_size_on_sint(self):
         text = header("message m { sint32 a = 1; sint32 b = 2; sint64 c = 3; sint32 d = 4; sint64 e = 5; }",
                       "m.a int_size:IS_8\n" "m.b int_size:IS_16\n" "m.c int_size:IS_32\n" "m.d int_size:IS_32\n" "m.e int_size:IS_64\n")
         self.assertEqual(members(text, "m"), [
-            "int8_t a;", "int16_t b;", "int32_t c;", "int32_t d;", "int64_t e;"])
+            "int8_t a{};", "int16_t b{};", "int32_t c{};", "int32_t d{};", "int64_t e{};"])
         self.assertEqual(field_list(text, "m"), [
             "a = 1:ZIGZAG", "b = 2:ZIGZAG", "c = 3:ZIGZAG", "d = 4:ZIGZAG", "e = 5:ZIGZAG"])
 
     def test_int_size_on_repeated_sint(self):
         text = header("message m { repeated sint32 a = 1; }", "m.a max_count:4 int_size:IS_8\n")
-        self.assertEqual(members(text, "m"), ["pb::repeated<int8_t, 4> a;"])
+        self.assertEqual(members(text, "m"), ["pb::repeated<int8_t, 4> a{};"])
         self.assertEqual(field_list(text, "m"), ["a = 1:ZIGZAG"])
 
     def test_int_size_on_repeated_field(self):
         text = header("message m { repeated int32 a = 1; }", "m.a max_count:4 int_size:IS_16\n")
-        self.assertEqual(members(text, "m"), ["pb::repeated<int16_t, 4> a;"])
+        self.assertEqual(members(text, "m"), ["pb::repeated<int16_t, 4> a{};"])
 
     def test_repeated_element_types(self):
         text = header("""
@@ -318,8 +318,8 @@ class OptionsTest(unittest.TestCase):
             message m { repeated string a = 1; repeated inner b = 2; repeated kind c = 3; repeated bytes d = 4; }
             """, "m.* max_count:2\n")
         self.assertEqual(members(text, "m"), [
-            "pb::repeated<std::string_view, 2> a;", "pb::repeated<inner, 2> b;", "pb::repeated<kind, 2> c;",
-            "pb::repeated<std::span<const uint8_t>, 2> d;"])
+            "pb::repeated<std::string_view, 2> a{};", "pb::repeated<inner, 2> b{};", "pb::repeated<kind, 2> c{};",
+            "pb::repeated<std::span<const uint8_t>, 2> d{};"])
 
     def test_pointer_repeated(self):
         text = header("""
@@ -331,21 +331,21 @@ class OptionsTest(unittest.TestCase):
             }
             """, "m.* type:FT_POINTER\nm.f int_size:IS_16\n")
         self.assertEqual(members(text, "m"), [
-            "std::span<const int32_t> a;", "std::span<const inner> b;", "std::span<const kind> c;",
-            "std::span<const std::string_view> d;", "std::span<const std::span<const uint8_t>> e;",
-            "std::span<const int16_t> f;"])
+            "std::span<const int32_t> a{};", "std::span<const inner> b{};", "std::span<const kind> c{};",
+            "std::span<const std::string_view> d{};", "std::span<const std::span<const uint8_t>> e{};",
+            "std::span<const int16_t> f{};"])
         self.assertEqual(field_list(text, "m"), ["a = 1", "b = 2", "c = 3", "d = 4", "e = 5", "f = 6:ZIGZAG"])
 
     def test_pointer_bytes_and_string(self):
         text = header("message m { bytes a = 1; string b = 2; bytes c = 3; string d = 4; }",
                       "m.* max_size:8\nm.a type:FT_POINTER\nm.b type:FT_POINTER\n")
         self.assertEqual(members(text, "m"), [
-            "std::span<const uint8_t> a;", "std::string_view b;", "pb::bytes<8> c;", "pb::string<7> d;"])
+            "std::span<const uint8_t> a{};", "std::string_view b{};", "pb::bytes<8> c{};", "pb::string<7> d{};"])
 
     def test_type_static_and_default(self):
         text = header("message m { repeated int32 a = 1; repeated int32 b = 2; }",
                       "m.* type:FT_POINTER\nm.a max_count:2 type:FT_STATIC\nm.b max_count:3 type:FT_DEFAULT\n")
-        self.assertEqual(members(text, "m"), ["pb::repeated<int32_t, 2> a;", "pb::repeated<int32_t, 3> b;"])
+        self.assertEqual(members(text, "m"), ["pb::repeated<int32_t, 2> a{};", "pb::repeated<int32_t, 3> b{};"])
 
     def test_pointer_on_a_repeated_unsigned_byte_is_an_error(self):
         self.assertIn("a.proto: m.a: int_size:IS_8 on a repeated unsigned field gives a bytes field",
@@ -354,43 +354,43 @@ class OptionsTest(unittest.TestCase):
     def test_wildcards(self):
         proto = "message m { repeated int32 a = 1; repeated int32 b = 2; }"
         self.assertEqual(members(header(proto, "* max_count:8\n"), "m"),
-                         ["pb::repeated<int32_t, 8> a;", "pb::repeated<int32_t, 8> b;"])
+                         ["pb::repeated<int32_t, 8> a{};", "pb::repeated<int32_t, 8> b{};"])
         self.assertEqual(members(header(proto, "m.? max_count:5\n"), "m"),
-                         ["pb::repeated<int32_t, 5> a;", "pb::repeated<int32_t, 5> b;"])
+                         ["pb::repeated<int32_t, 5> a{};", "pb::repeated<int32_t, 5> b{};"])
 
     def test_last_line_wins(self):
         proto = "message m { repeated int32 a = 1; repeated int32 b = 2; }"
         self.assertEqual(members(header(proto, "* max_count:8\nm.a max_count:2\n"), "m"),
-                         ["pb::repeated<int32_t, 2> a;", "pb::repeated<int32_t, 8> b;"])
+                         ["pb::repeated<int32_t, 2> a{};", "pb::repeated<int32_t, 8> b{};"])
         self.assertEqual(members(header(proto, "m.a max_count:2\n* max_count:8\n"), "m"),
-                         ["pb::repeated<int32_t, 8> a;", "pb::repeated<int32_t, 8> b;"])
+                         ["pb::repeated<int32_t, 8> a{};", "pb::repeated<int32_t, 8> b{};"])
 
     def test_options_of_different_lines_merge(self):
         text = header("message m { repeated int32 a = 1; }", "* max_count:8\nm.a fixed_count:true\n")
-        self.assertEqual(members(text, "m"), ["std::array<int32_t, 8> a;"])
+        self.assertEqual(members(text, "m"), ["std::array<int32_t, 8> a{};"])
 
     def test_name_with_and_without_package(self):
         proto = "package p.q; message m { repeated int32 a = 1; repeated int32 b = 2; }"
         text = header(proto, "p.q.m.a max_count:2\nm.b max_count:3\n")
-        self.assertEqual(members(text, "m"), ["pb::repeated<int32_t, 2> a;", "pb::repeated<int32_t, 3> b;"])
+        self.assertEqual(members(text, "m"), ["pb::repeated<int32_t, 2> a{};", "pb::repeated<int32_t, 3> b{};"])
 
     def test_comments_blank_lines_and_spaces(self):
         text = header("message m { repeated int32 a = 1; repeated int32 b = 2; }",
                       "# a comment\n\n// one more\nm.a   max_count: 4   # at the end\n\tm.b max_count:5 // end\n")
-        self.assertEqual(members(text, "m"), ["pb::repeated<int32_t, 4> a;", "pb::repeated<int32_t, 5> b;"])
+        self.assertEqual(members(text, "m"), ["pb::repeated<int32_t, 4> a{};", "pb::repeated<int32_t, 5> b{};"])
 
     def test_options_file_next_to_a_proto_in_a_sub_folder(self):
         result = run({"sub/b.proto": 'syntax = "proto3"; message m { repeated int32 a = 1; }',
                       "sub/b.options": "m.a max_count:7\n"})
         self.assertEqual(result.rc, 0, result.stderr)
-        self.assertEqual(members(result.headers["sub/b.pb.hpp"], "m"), ["pb::repeated<int32_t, 7> a;"])
+        self.assertEqual(members(result.headers["sub/b.pb.hpp"], "m"), ["pb::repeated<int32_t, 7> a{};"])
 
     def test_options_dir_parameter(self):
         result = run({"proto/a.proto": 'syntax = "proto3"; message m { repeated int32 a = 1; }',
                       "opts/a.options": "m.a max_count:9\n"},
                      "-Iproto", "--micropb_opt=options_dir=opts", protos=["proto/a.proto"])
         self.assertEqual(result.rc, 0, result.stderr)
-        self.assertEqual(members(result.headers["a.pb.hpp"], "m"), ["pb::repeated<int32_t, 9> a;"])
+        self.assertEqual(members(result.headers["a.pb.hpp"], "m"), ["pb::repeated<int32_t, 9> a{};"])
 
     def test_enum_intsize(self):
         for size, name in (("IS_8", "int8_t"), ("IS_16", "int16_t"), ("IS_32", "int32_t")):
@@ -418,7 +418,7 @@ class OptionsTest(unittest.TestCase):
 class StructureTest(unittest.TestCase):
     def test_optional(self):
         text = header("message inner { int32 x = 1; } message m { optional int32 a = 1; optional inner b = 2; }")
-        self.assertEqual(members(text, "m"), ["std::optional<int32_t> a;", "std::optional<inner> b;"])
+        self.assertEqual(members(text, "m"), ["std::optional<int32_t> a{};", "std::optional<inner> b{};"])
         self.assertIn("#include <optional>\n", text)
 
     def test_oneof_with_consecutive_numbers(self):
@@ -428,7 +428,7 @@ class StructureTest(unittest.TestCase):
             message m { uint32 id = 1; oneof payload { a first = 2; b second = 3; } bool last = 4; }
             """)
         self.assertEqual(members(text, "m"),
-                         ["uint32_t id;", "std::variant<std::monostate, a, b> payload;", "bool last;"])
+                         ["uint32_t id{};", "std::variant<std::monostate, a, b> payload{};", "bool last{};"])
         self.assertEqual(field_list(text, "m"), ["id = 1", "payload = 2/1", "payload = 3/2", "last = 4"])
         self.assertIn("#include <variant>\n", text)
 
@@ -437,19 +437,19 @@ class StructureTest(unittest.TestCase):
             message m { uint32 id = 1; oneof payload { int32 first = 5; string second = 7; } bool last = 8; }
             """)
         self.assertEqual(members(text, "m"), [
-            "uint32_t id;", "std::variant<std::monostate, int32_t, std::string_view> payload;", "bool last;"])
+            "uint32_t id{};", "std::variant<std::monostate, int32_t, std::string_view> payload{};", "bool last{};"])
         self.assertEqual(field_list(text, "m"), ["id = 1", "payload = 5/1", "payload = 7/2", "last = 8"])
 
     def test_oneof_next_to_an_optional_field(self):
         text = header("message m { optional bool a = 1; oneof v { int32 b = 2; bool c = 3; } optional bool d = 4; }")
         self.assertEqual(members(text, "m"), [
-            "std::optional<bool> a;", "std::variant<std::monostate, int32_t, bool> v;", "std::optional<bool> d;"])
+            "std::optional<bool> a{};", "std::variant<std::monostate, int32_t, bool> v{};", "std::optional<bool> d{};"])
         self.assertEqual(field_list(text, "m"), ["a = 1", "v = 2/1", "v = 3/2", "d = 4"])
 
     def test_field_numbers_are_in_the_field_list(self):
         text = header("message m { int32 a = 3; int32 b = 4; int32 c = 10; int32 d = 11; int32 e = 5; }")
         self.assertEqual(members(text, "m"), [
-            "int32_t a;", "int32_t b;", "int32_t c;", "int32_t d;", "int32_t e;"])
+            "int32_t a{};", "int32_t b{};", "int32_t c{};", "int32_t d{};", "int32_t e{};"])
         self.assertEqual(field_list(text, "m"), ["a = 3", "b = 4", "c = 10", "d = 11", "e = 5"])
         self.assertNotIn("[[", text)  # an annotation is C++26
 
@@ -464,11 +464,11 @@ class StructureTest(unittest.TestCase):
             """)
         self.assertEqual(definitions(text), ["Outer_Kind", "Outer_Inner_Deep", "Outer_Inner", "Outer"])
         self.assertIn("enum class Outer_Kind : int32_t {\n    A = 0,\n    B = 1,\n};", text)
-        self.assertEqual(members(text, "Outer"), ["Outer_Inner inner;", "Outer_Kind kind;"])
+        self.assertEqual(members(text, "Outer"), ["Outer_Inner inner{};", "Outer_Kind kind{};"])
         self.assertEqual(field_list(text, "Outer"), ["inner = 1", "kind = 2"])
         self.assertEqual(field_list(text, "Outer_Inner"), ["deep = 1"])
         self.assertEqual(field_list(text, "Outer_Inner_Deep"), ["x = 1"])
-        self.assertEqual(members(text, "Outer_Inner"), ["Outer_Inner_Deep deep;"])
+        self.assertEqual(members(text, "Outer_Inner"), ["Outer_Inner_Deep deep{};"])
 
     def test_a_struct_comes_after_the_structs_that_it_contains(self):
         text = header("""
@@ -502,7 +502,7 @@ class StructureTest(unittest.TestCase):
                 """})
         self.assertEqual(result.rc, 0, result.stderr)
         text = result.headers["a.pb.hpp"]
-        self.assertEqual(members(text, "m"), ["::lib::types::point p;", "::lib::types::kind k;", "int32_t d;"])
+        self.assertEqual(members(text, "m"), ["::lib::types::point p{};", "::lib::types::kind k{};", "int32_t d{};"])
         self.assertEqual(includes(text), ["<stddef.h>", "<stdint.h>", "<micropb/types.hpp>", '"lib/b.pb.hpp"'])
         self.assertIn('#include <micropb/types.hpp>\n\n#include "lib/b.pb.hpp"\n\nnamespace app {', text)
         self.assertEqual(field_list(text, "app::m"), ["p = 1", "k = 2", "d = 3:ZIGZAG"])
@@ -514,7 +514,7 @@ class StructureTest(unittest.TestCase):
             "a.proto": 'syntax = "proto3"; package app; import "b.proto"; message m { point p = 1; }',
             "b.proto": 'syntax = "proto3"; package app; message point { int32 x = 1; }'})
         self.assertEqual(result.rc, 0, result.stderr)
-        self.assertEqual(members(result.headers["a.pb.hpp"], "m"), ["point p;"])
+        self.assertEqual(members(result.headers["a.pb.hpp"], "m"), ["point p{};"])
         self.assertEqual(includes(result.headers["a.pb.hpp"]), ["<stddef.h>", "<micropb/types.hpp>", '"b.pb.hpp"'])
 
     def test_import_that_is_not_used_gives_no_include(self):
@@ -530,15 +530,15 @@ class StructureTest(unittest.TestCase):
             message union { int32 class = 1; bool default = 2; mode namespace = 3; }
             """)
         self.assertIn("    auto_ = 0,\n    MANUAL = 1,\n", text)
-        self.assertEqual(members(text, "union_"), ["int32_t class_;", "bool default_;", "mode namespace_;"])
+        self.assertEqual(members(text, "union_"), ["int32_t class_{};", "bool default_{};", "mode namespace_{};"])
         self.assertEqual(field_list(text, "union_"), ["class_ = 1", "default_ = 2", "namespace_ = 3"])
 
     def test_field_name_equal_to_a_type_name(self):
         text = header("package p; message inner { int32 x = 1; } message m { inner inner = 1; inner other = 2; }")
-        self.assertEqual(members(text, "m"), ["::p::inner inner;", "::p::inner other;"])
+        self.assertEqual(members(text, "m"), ["::p::inner inner{};", "::p::inner other{};"])
         self.assertEqual(field_list(text, "p::m"), ["inner = 1", "other = 2"])
         text = header("message inner { int32 x = 1; } message m { inner inner = 1; }")
-        self.assertEqual(members(text, "m"), ["::inner inner;"])
+        self.assertEqual(members(text, "m"), ["::inner inner{};"])
 
     def test_cstdint_is_not_included_for_a_name_that_contains_int(self):
         self.assertNotIn("<stdint.h>", includes(header("message point { bool int_flag = 1; }")))
@@ -562,7 +562,7 @@ class StructureTest(unittest.TestCase):
                 message m { bool a = 1 [(unit) = 3]; }
                 """}, protos=["a.proto"])
         self.assertEqual((result.rc, result.stderr), (0, ""))
-        self.assertEqual(members(result.headers["a.pb.hpp"], "m"), ["bool a;"])
+        self.assertEqual(members(result.headers["a.pb.hpp"], "m"), ["bool a{};"])
         self.assertNotIn('#include "', result.headers["a.pb.hpp"])
 
 
@@ -580,12 +580,12 @@ class NameTest(unittest.TestCase):
             "a.proto": 'syntax = "proto3"; package q; import "b.proto"; message m { new.std.t a = 1; }',
             "b.proto": 'syntax = "proto3"; package new.std; message t { int32 x = 1; }'})
         self.assertEqual(result.rc, 0, result.stderr)
-        self.assertEqual(members(result.headers["a.pb.hpp"], "m"), ["::new_::std_::t a;"])
+        self.assertEqual(members(result.headers["a.pb.hpp"], "m"), ["::new_::std_::t a{};"])
 
     def test_types_named_as_the_namespaces_of_the_library(self):
         text = header("message std { bool a = 1; } message pb { std s = 1; sint32 b = 2; }")
         self.assertEqual(definitions(text), ["std_", "pb_"])
-        self.assertEqual(members(text, "pb_"), ["std_ s;", "int32_t b;"])
+        self.assertEqual(members(text, "pb_"), ["std_ s{};", "int32_t b{};"])
 
     def test_names_of_common_macros_get_a_suffix(self):
         text = header("""
@@ -593,25 +593,25 @@ class NameTest(unittest.TestCase):
             message status { int32 errno = 1; bool stdin = 2; Kind NULL = 3; bool uint32_t = 4; }
             """)
         self.assertIn("    ZERO = 0,\n    NULL_ = 1,\n    EOF_ = 2,\n", text)
-        self.assertEqual(members(text, "status"), ["int32_t errno_;", "bool stdin_;", "Kind NULL_;", "bool uint32_t_;"])
+        self.assertEqual(members(text, "status"), ["int32_t errno_{};", "bool stdin_{};", "Kind NULL_{};", "bool uint32_t_{};"])
         self.assertEqual(field_list(text, "status"), ["errno_ = 1", "stdin_ = 2", "NULL_ = 3", "uint32_t_ = 4"])
 
     def test_oneof_name_equal_to_a_type_name(self):
         text = header("message payload { int32 x = 1; } message m { oneof payload { payload p = 1; int32 q = 2; } }")
-        self.assertEqual(members(text, "m"), ["std::variant<std::monostate, ::payload, int32_t> payload;"])
+        self.assertEqual(members(text, "m"), ["std::variant<std::monostate, ::payload, int32_t> payload{};"])
 
     def test_oneof_member_type_equal_to_a_field_name(self):
         text = header("enum mode { MODE_A = 0; } message m { mode mode = 1; oneof v { mode x = 4; int32 y = 5; } }")
-        self.assertEqual(members(text, "m"), ["::mode mode;", "std::variant<std::monostate, ::mode, int32_t> v;"])
+        self.assertEqual(members(text, "m"), ["::mode mode{};", "std::variant<std::monostate, ::mode, int32_t> v{};"])
 
     def test_oneof_with_a_keyword_name(self):
         text = header("message m { oneof union { int32 a = 1; bool b = 2; } }")
-        self.assertEqual(members(text, "m"), ["std::variant<std::monostate, int32_t, bool> union_;"])
+        self.assertEqual(members(text, "m"), ["std::variant<std::monostate, int32_t, bool> union_{};"])
         self.assertEqual(field_list(text, "m"), ["union_ = 1/1", "union_ = 2/2"])
 
     def test_keyword_field_name_equal_to_a_type_name_after_the_suffix(self):
         text = header("message class_ { int32 x = 1; } message m { class_ class = 1; }")
-        self.assertEqual(members(text, "m"), ["::class_ class_;"])
+        self.assertEqual(members(text, "m"), ["::class_ class_{};"])
 
     def test_enum_prefix_ignores_case(self):
         self.assertIn("    idle = 0,\n    run = 1,\n", header("enum mode { mode_idle = 0; mode_run = 1; }"))
@@ -630,7 +630,7 @@ class NumberTest(unittest.TestCase):
 
     def test_oneof_with_descending_numbers(self):
         text = header("message m { oneof w { bool d = 9; float e = 4; } int32 last = 1; }")
-        self.assertEqual(members(text, "m"), ["std::variant<std::monostate, bool, float> w;", "int32_t last;"])
+        self.assertEqual(members(text, "m"), ["std::variant<std::monostate, bool, float> w{};", "int32_t last{};"])
         self.assertEqual(field_list(text, "m"), ["w = 9/1", "w = 4/2", "last = 1"])
 
     def test_optional_field_after_a_gap(self):
@@ -652,19 +652,19 @@ class PackageTest(unittest.TestCase):
 
     def test_type_of_a_sub_package(self):
         lines, _ = self.members_of('package a; import "ab.proto"; message m { a.b.t x = 1; }')
-        self.assertEqual(lines, ["::a::b::t x;"])
+        self.assertEqual(lines, ["::a::b::t x{};"])
 
     def test_type_of_a_parent_package(self):
         lines, _ = self.members_of('package a.b.c; import "a.proto"; import "ab.proto"; message m { a.t x = 1; a.b.t y = 2; }')
-        self.assertEqual(lines, ["::a::t x;", "::a::b::t y;"])
+        self.assertEqual(lines, ["::a::t x{};", "::a::b::t y{};"])
 
     def test_file_without_package_uses_a_type_with_package(self):
         lines, _ = self.members_of('import "a.proto"; message m { a.t x = 1; }')
-        self.assertEqual(lines, ["::a::t x;"])
+        self.assertEqual(lines, ["::a::t x{};"])
 
     def test_file_with_package_uses_a_type_without_package(self):
         lines, _ = self.members_of('package a; import "top.proto"; message m { top x = 1; }')
-        self.assertEqual(lines, ["::top x;"])
+        self.assertEqual(lines, ["::top x{};"])
 
     def test_each_used_import_gives_an_include(self):
         _, headers = self.members_of('import "top.proto"; import "ab.proto"; import "a.proto"; '
@@ -688,12 +688,12 @@ class ErrorTest(unittest.TestCase):
 
     def test_repeated_without_max_count(self):
         text = header("package p; message m { repeated int32 a = 1; }")
-        self.assertIn("std::span<const int32_t> a;", text)
+        self.assertIn("std::span<const int32_t> a{};", text)
 
     def test_repeated_message_without_max_count(self):
         text = header("package p; message n { int32 x = 1; } message m { repeated n a = 1; repeated bytes b = 2; }")
         self.assertEqual(members(text, "m"),
-                         ["std::span<const n> a;", "std::span<const std::span<const uint8_t>> b;"])
+                         ["std::span<const n> a{};", "std::span<const std::span<const uint8_t>> b{};"])
 
     def test_fixed_count_without_max_count(self):
         self.assertIn("a.proto: m.a: fixed_count needs max_count",
@@ -801,7 +801,7 @@ class WarningTest(unittest.TestCase):
     def test_unknown_option(self):
         stderr, text = self.warnings("message m { repeated int32 a = 1; }", "m.a max_count:4 anonymous_oneof:true\n")
         self.assertIn("a.options:1: warning: the unknown option 'anonymous_oneof' is ignored", stderr)
-        self.assertEqual(members(text, "m"), ["pb::repeated<int32_t, 4> a;"])
+        self.assertEqual(members(text, "m"), ["pb::repeated<int32_t, 4> a{};"])
 
     def test_option_that_does_not_apply(self):
         stderr, text = self.warnings("package p; message m { string name = 1; int32 a = 2; fixed32 b = 3; bytes c = 4; }",
@@ -811,14 +811,14 @@ class WarningTest(unittest.TestCase):
         self.assertIn("a.options:4: warning: int_size does not apply to p.m.b", stderr)
         self.assertIn("a.options:5: warning: max_length does not apply to p.m.c", stderr)
         self.assertEqual(members(text, "m"),
-                         ["std::string_view name;", "int32_t a;", "uint32_t b;", "std::span<const uint8_t> c;"])
+                         ["std::string_view name{};", "int32_t a{};", "uint32_t b{};", "std::span<const uint8_t> c{};"])
 
     def test_int_size_does_not_apply_to_fixed_and_enum_fields(self):
         stderr, text = self.warnings("enum e { E_A = 0; } message m { sfixed32 a = 1; e b = 2; fixed64 c = 3; }",
                                      "m.a int_size:IS_8\nm.b int_size:IS_16\nm.c int_size:IS_32\n")
         for name in "abc":
             self.assertIn(f"warning: int_size does not apply to m.{name}", stderr)
-        self.assertEqual(members(text, "m"), ["int32_t a;", "e b;", "uint64_t c;"])
+        self.assertEqual(members(text, "m"), ["int32_t a{};", "e b{};", "uint64_t c{};"])
 
     def test_pointer_ignores_the_sizes(self):
         stderr, text = self.warnings("message m { repeated int32 a = 1; bytes b = 2; string c = 3; }",
@@ -830,12 +830,12 @@ class WarningTest(unittest.TestCase):
         self.assertIn("a.options:2: warning: max_size does not apply to m.b", stderr)
         self.assertIn("a.options:3: warning: max_length does not apply to m.c", stderr)
         self.assertEqual(members(text, "m"),
-                         ["std::span<const int32_t> a;", "std::span<const uint8_t> b;", "std::string_view c;"])
+                         ["std::span<const int32_t> a{};", "std::span<const uint8_t> b{};", "std::string_view c{};"])
 
     def test_type_does_not_apply_to_a_scalar(self):
         stderr, text = self.warnings("message m { int32 a = 1; }", "m.a type:FT_POINTER\n")
         self.assertIn("a.options:1: warning: type does not apply to m.a", stderr)
-        self.assertEqual(members(text, "m"), ["int32_t a;"])
+        self.assertEqual(members(text, "m"), ["int32_t a{};"])
 
     def test_wildcard_rule_gives_no_warning(self):
         stderr, _ = self.warnings("message m { string name = 1; int32 a = 2; repeated int32 b = 3; bytes c = 4; }",
@@ -849,12 +849,12 @@ class WarningTest(unittest.TestCase):
     def test_question_mark_is_a_wildcard(self):
         stderr, text = self.warnings("message m { string s = 1; repeated int32 a = 2; }", "m.? max_count:5\n")
         self.assertEqual(stderr, "")
-        self.assertEqual(members(text, "m"), ["std::string_view s;", "pb::repeated<int32_t, 5> a;"])
+        self.assertEqual(members(text, "m"), ["std::string_view s{};", "pb::repeated<int32_t, 5> a{};"])
 
     def test_options_file_with_a_byte_order_mark(self):
         stderr, text = self.warnings("message m { repeated int32 a = 1; }", "\ufeffm.a max_count:4\n")
         self.assertEqual(stderr, "")
-        self.assertEqual(members(text, "m"), ["pb::repeated<int32_t, 4> a;"])
+        self.assertEqual(members(text, "m"), ["pb::repeated<int32_t, 4> a{};"])
 
     def test_warnings_are_printed_also_when_an_error_follows(self):
         proto = PROTO3 + "message m { repeated int32 a = 1; bytes b = 2; }"
@@ -869,7 +869,7 @@ class WarningTest(unittest.TestCase):
         result = run({"a.proto": PROTO3 + "message m { repeated int32 a = 1; }", "a.options": "m.a max_count:1\n",
                       "opts/a.options": "m.a max_count:2\n"}, "--micropb_opt=options_dir=opts")
         self.assertEqual(result.rc, 0, result.stderr)
-        self.assertEqual(members(result.headers["a.pb.hpp"], "m"), ["pb::repeated<int32_t, 1> a;"])
+        self.assertEqual(members(result.headers["a.pb.hpp"], "m"), ["pb::repeated<int32_t, 1> a{};"])
 
     def test_no_warning_without_a_reason(self):
         stderr, _ = self.warnings("message m { repeated int32 a = 1; bytes b = 2; }",

@@ -26,54 +26,54 @@ enum class Device_State : int8_t {
 };
 
 struct limits {
-    int32_t low;
-    int32_t high;
+    int32_t low{};
+    int32_t high{};
 };
 
 struct Device_Slot {
-    uint32_t index;
-    pb::bytes<16> key;
+    uint32_t index{};
+    pb::bytes<16> key{};
 };
 
 struct Device {
-    int32_t class_;
-    Device_State state;
-    ::features::limits limits;
-    ::features::limits backup;
-    uint32_t serial;
-    int16_t offset;
-    std::optional<pb::bytes<8>> token;
-    std::optional<Device_Slot> spare;
-    pb::repeated<Device_Slot, 2> slots;
-    pb::repeated<Device_State, 3> history;
-    pb::repeated<int8_t, 4> trims;
-    int16_t trim_delta;
-    pb::repeated<int16_t, 3> history_delta;
-    std::variant<std::monostate, uint32_t, std::string_view, Device_Slot> event;
-    bool ready;
+    int32_t class_{};
+    Device_State state{};
+    ::features::limits limits{};
+    ::features::limits backup{};
+    uint32_t serial{};
+    int16_t offset{};
+    std::optional<pb::bytes<8>> token{};
+    std::optional<Device_Slot> spare{};
+    pb::repeated<Device_Slot, 2> slots{};
+    pb::repeated<Device_State, 3> history{};
+    pb::repeated<int8_t, 4> trims{};
+    int16_t trim_delta{};
+    pb::repeated<int16_t, 3> history_delta{};
+    std::variant<std::monostate, uint32_t, std::string_view, Device_Slot> event{};
+    bool ready{};
 };
 
 struct Frame {
-    Device device;
-    Device_Slot slot;
-    ::shared::types::Point origin;
-    ::shared::types::Unit unit;
-    RxMode mode;
+    Device device{};
+    Device_Slot slot{};
+    ::shared::types::Point origin{};
+    ::shared::types::Unit unit{};
+    RxMode mode{};
 };
 
 struct Calibration {
-    std::array<float, 4> gains;
-    std::array<uint8_t, 6> id;
+    std::array<float, 4> gains{};
+    std::array<uint8_t, 6> id{};
 };
 
 struct Batch {
-    std::span<const Device_Slot> slots;
-    std::span<const int16_t> deltas;
-    std::span<const uint8_t> blob;
+    std::span<const Device_Slot> slots{};
+    std::span<const int16_t> deltas{};
+    std::span<const uint8_t> blob{};
 };
 
 struct Report {
-    std::variant<std::monostate, uint32_t, Batch> body;
+    std::variant<std::monostate, uint32_t, Batch> body{};
 };
 
 } // namespace features
