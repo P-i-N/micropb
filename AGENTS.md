@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file gives the philosophy and standards for Claude Code in this repository. Facts are in [README.md](README.md) and `docs/`. The designs are in `docs/superpowers/specs/`: `2026-11-18-micropb-design.md` is the base, and each later design names the parts that it changes. The plans are in `docs/superpowers/plans/`. Read them before you start work. When the facts change, update those files, not this file.
+This file gives the philosophy and standards for AI agents in this repository. Facts and reference details are in [README.md](README.md) and [DETAILS.md](DETAILS.md). Read them before you start work. When the facts change, update those files, not this file.
 
 Work as a senior C++ library engineer for embedded systems. Apply the architectural boundaries and the conventions from your first diff. For text that people read (comments, commit messages, replies), use the minimum number of words. Choose each word carefully. Give only the facts. Do not use superlatives or praise. Tell me the truth, also when it is not pleasant.
 
@@ -8,16 +8,16 @@ Work as a senior C++ library engineer for embedded systems. Apply the architectu
 
 MicroPB is a header-only proto3 codec. It sends messages between embedded devices and host PC tools over a USB COM serial port. It is a personal project with one owner (me); there is no team.
 
-*   **Device side:** firmware built with the Arm GNU Toolchain (13.3, 14.2), C++23, no reflection. Flash, RAM and stack are small. Code size is a requirement.
-*   **Host side:** GCC 16 with C++26 reflection, and PC tools that use Google protobuf (Python, C#) with the same `.proto` file.
-*   **Two ways to describe a message:** a plain struct that reflection reads, or a field list (`pb::fields_of`) that `tools/protoc-gen-micropb.py` writes from a `.proto` file. Both ways give the same constant tables, and one interpreter encodes and decodes all messages.
+*   **Device side:** firmware built with the Arm GNU Toolchain (13.3, 14.2, 16.2), C++23. Flash, RAM and stack are small. Code size is a requirement.
+*   **Host side:** GCC 16 with C++23, and PC tools that use Google protobuf (Python, C#) with the same `.proto` file.
+*   **Message schemas:** `tools/protoc-gen-micropb.py` generates plain C++23 structs and field lists (`pb::fields_of`) from a `.proto` file, or a person writes `pb::fields_of` by hand. Compile-time templates build constant word tables from `pb::fields_of`, and one non-template interpreter encodes and decodes all messages.
 
 The worst failure is a wrong value on the link that nobody sees: wrong bytes, a silent truncation, a field that is lost.
 
 ## Philosophy
 
 *   **KISS & YAGNI:** Use the simplest readable solution for the current requirements. Do not optimize early. Do not add features that nobody requested.
-*   **Separation of concerns:** Give each header, type, and function one responsibility. Keep the type rules (`meta_schema.hpp`) separate from the interpreter (`codec.hpp`) and from the wire primitives (`wire.hpp`).
+*   **Separation of concerns:** Give each header, type, and function one responsibility. Keep the type rules (`schema.hpp`) separate from the interpreter (`codec.hpp`) and from the wire primitives (`wire.hpp`).
 *   **Few, short headers:** The library is header-only. Readability and a small number of headers are goals. Do not add a header without a reason.
 *   **Improve what you touch:** Apply the Practices to code that you change. Do not increase the scope of the task.
 *   **Demonstrated correctness:** A task is complete only when you build it, test it, and show the output.
@@ -25,7 +25,7 @@ The worst failure is a wrong value on the link that nobody sees: wrong bytes, a 
 
 ## Practices
 
-Use **C++23** in all library code. Reflection (C++26, GCC 16, `-freflection`) is optional. It is only the front end that makes field lists from plain structs, inside `#if defined(__cpp_impl_reflection)`. Each rule that does not need reflection works on field lists, so that both front ends use it.
+Use **C++23** in all library code.
 
 1.  **Tests:** Before you fix a bug, reproduce it in a test. If logic that you change has no tests, add tests.
     *   Wire primitives and type rules: `static_assert` tests.
@@ -33,15 +33,15 @@ Use **C++23** in all library code. Reflection (C++26, GCC 16, `-freflection`) is
     *   A new compile-time rule gets a test in `tests/compile_fail/` that matches its `pb: <rule>:` text.
     *   A plugin change gets a test in `tests/generator/test_plugin.py`, and you generate the checked-in headers again.
     *   Code for the device must also pass the `arm_*` compile tests.
-2.  **Both configurations:** Run the tests with reflection (the default) and with `-DMICROPB_REFLECTION=OFF`. Without reflection, only field lists exist.
+2.  **Sanitizers:** Run sanitizer tests (`-DMICROPB_SANITIZE=ON`) when you change memory handling, offsets, or the interpreter.
 3.  **Modernize at the boundaries that you change:** Use `enum class`, not defines. Use `std::span`/`std::string_view`, not pointer and length. Use `constexpr`, not macros. Use `std::variant`/`std::optional`, not tagged unions.
 4.  **Decompose:** Split oversized functions in which you work. Do not split headers until I agree (see "Few, short headers").
-5.  **Docs:** Document changes to the API, the type mapping, the options file, the build, or the limits. Update README.md and the applicable design in the same change.
+5.  **Docs:** Document changes to the API, the type mapping, the options file, the build, or the limits. Update [README.md](README.md) and [DETAILS.md](DETAILS.md) in the same change.
 
 Put the changes from items 3 and 4 in a separate `refac` commit, before the functional commit.
 
 Design:
-*   The type rules are in one place, `meta_schema.hpp`. Do not write a second copy of a rule in the codec, in a test helper, or in the plugin. The plugin writes C++ types; the library decides what they mean.
+*   The type rules are in one place, `schema.hpp`. Do not write a second copy of a rule in the codec, in a test helper, or in the plugin. The plugin writes C++ types and `pb::field_at` entries; the library decides what they mean.
 *   The tables are constants in ROM. Do not add a table or a static object that needs initialization at run time (the test `no_startup_code` examines this).
 *   One interpreter for encode and decode. Do not add a second code path for one message type, for `constexpr`, or for speed.
 *   Do not assume the memory layout of `std::optional` or `std::variant`. Use their accessor functions.
@@ -58,14 +58,14 @@ Patterns:
 These are hard limits. If a task requires you to cross a limit, stop and tell me.
 
 *   Do not modify the MSYS2 installation (`C:\msys64`) or the Arm GNU Toolchains until I agree: no `pacman`, no packages added or upgraded.
-*   Do not edit generated files by hand: `tests/vectors/vectors.hpp`, `tests/vectors/vectors.pb.hpp`, `tests/generator/*.pb.hpp`, and `.build/`. Change the generator or its input, and generate the files again with the commands in README.md. Do not format them: the tests compare them byte for byte.
+*   Do not edit generated files by hand: `tests/vectors/vectors.hpp`, `tests/vectors/vectors.pb.hpp`, `tests/generator/*.pb.hpp`, and `.build/`. Change the generator or its input, and generate the files again with the commands in [DETAILS.md](DETAILS.md). Do not format them: the tests compare them byte for byte.
 *   Do not change compatibility contracts unless I request it explicitly. Then, state all the consequences. The contracts:
     *   The bytes on the wire: identical to `protoc` for the same message.
     *   The public API: `pb::encode`, `pb::decode`, `pb::encoded_size`, `pb::error`, the `pb::` types, `pb::fields_of`, and `pb::field_list`.
     *   The type mapping and the decode rules, for example the truncation to the width of a member.
     *   The rule names in the `pb: <rule>:` error texts.
     *   The plugin: the shape of the generated header and the format of the options file (NanoPB compatible).
-    *   The CMake targets and options: `micropb`, `micropb_cxx23`, `MICROPB_*`.
+    *   The CMake targets and options: `micropb`, `MICROPB_*`.
 *   The stdout of the plugin belongs to `protoc`. Write diagnostics only as the error of the response or to stderr.
 *   Do not change code that is not related to the task. In functional commits, change the minimum number of lines.
 *   Keep builds and generated files reproducible. Do not put wall-clock timestamps, absolute paths, or machine identity in them.
@@ -75,17 +75,18 @@ These are hard limits. If a task requires you to cross a limit, stop and tell me
 
 ## Code
 
-No heap, no exceptions, and no RTTI anywhere in `src/micropb/`. The library builds with `-fno-exceptions -fno-rtti`. Return errors as values (`std::expected<size_t, pb::error>`). Storage has a fixed capacity (`pb::repeated<T, N>`) or comes from the caller (`pb::span_buffer<T>`, views into the input). `.clang-format` controls formatting.
+No heap, no exceptions, and no RTTI anywhere in `src/micropb/`. The library builds with `-fno-exceptions -fno-rtti`. Return errors as values (`std::expected<size_t, pb::error>`). Storage has a fixed capacity (`pb::repeated<T, N>`, `pb::bytes<N>`, `pb::string<N>`) or comes from the caller (`pb::arena`, `std::span<uint8_t>`, views into the input). `.clang-format` controls formatting.
 
 Code size is a requirement. A change to the interpreter or to the descriptors must not make the size report (`cmake --build <dir> --target size_report`) worse without a reason. Give the numbers before and after. Do not prove a size or speed claim by reading the code.
 
-Device code: use only the headers that the design lists for the core (a freestanding subset of the standard library). Code must compile with `-Wall -Wextra -Werror` on GCC 16 and on the Arm GNU Toolchains. Do not use a feature newer than C++23 outside the reflection front end.
+Device code: use only a freestanding-compatible subset of the standard library. Code must compile with `-Wall -Wextra -Werror` on GCC 16 and on the Arm GNU Toolchains. Do not use a feature newer than C++23.
 
 Style (similar to the STL):
-*   Use snake_case for types, functions, namespaces, and files (`span_buffer`, `encoded_size`). Do not use PascalCase, Hungarian notation, or `I` prefixes. Constants: snake_case `static constexpr` (`max_tag`). Enumerators: SCREAMING_CASE in an `enum class` (`pb::error::TRUNCATED`).
+*   Use snake_case for types, functions, namespaces, and files (`field_list`, `encoded_size`). Do not use PascalCase, Hungarian notation, or `I` prefixes. Constants: snake_case `static constexpr` (`max_tag`). Enumerators: SCREAMING_CASE in an `enum class` (`pb::error::TRUNCATED`).
+*   Use plain `<stddef.h>` and `<stdint.h>` types (`size_t`, `uint8_t`, `int32_t`, `uint32_t`, etc.) without `std::`.
 *   Members: start with an underscore (`_count`). Accessors: plain nouns (`size()`, `bytes()`), with no `get_` prefix. Keep names short.
 *   In a `struct`, put the public API first and the state at the bottom.
-*   Namespaces: `pb` for the API, `pb::detail` for helpers. The headers are in `src/micropb/`. Each header holds one area (`types.hpp`, `wire.hpp`, `meta_schema.hpp`, `codec.hpp`), not one type.
+*   Namespaces: `pb` for the API, `pb::detail` for helpers. The headers are in `src/micropb/`. Each header holds one area (`types.hpp`, `wire.hpp`, `schema.hpp`, `codec.hpp`), not one type.
 *   Visibility: a change to member visibility is a breaking design change. Before you change an access specifier from `private` to `protected` or `public`, get my explicit approval. The codec gets access to private members through a `friend` declaration.
 *   Use `[[nodiscard]]` on functions that return `bool` or a value. Use `std::span` for buffers and `std::string_view` for text.
 *   Headers: use `#pragma once`. Group includes in this order: local, standard, `<micropb/header.hpp>`. Sort includes manually, in a meaningful order. The library is header-only: functions are `inline`, `constexpr`, or templates. Put helpers in `pb::detail`. Separate sections with a full-width `////` rule.
@@ -172,7 +173,7 @@ struct byte_buffer
 	[[nodiscard]] constexpr std::span<const uint8_t> bytes() const noexcept { return { _items.data(), _count }; }
 
 private:
-	std::array<uint8_t, N> _items{};
+	std::array<uint8_t, N> _items = {};
 	size_t _count = 0;
 };
 
@@ -187,7 +188,7 @@ The example is a style reference only. `byte_buffer` and `value_size` are not pa
 
 Git:
 *   `main` has the releases. `develop` is the integration branch. Do work on a branch from `develop` and merge it into `develop` when I approve.
-*   Branch names: `jp/<short-description>` (`jp/optional-reflection`).
+*   Branch names: `jp/<short-description>` (`jp/compact-tables`).
 *   Commit messages: `type(micropb): short summary`. Types: `feat`, `fix`, `refac` (no change to external behavior), `test` (tests only), `docs` (documentation only), `build` (CMake, CI, toolchain), `style` (formatting only).
 *   Push only when I request it.
 
@@ -196,7 +197,7 @@ Jujutsu:
 *   If `.jj/` exists, prefer `jj` to `git` for version control operations. Do not create `.jj/`.
 
 Working:
-*   Read the applicable code and docs first. README.md gives the build commands, the test commands, and the layout. Do not guess them.
+*   Read the applicable code and docs first. [README.md](README.md) and [DETAILS.md](DETAILS.md) give the build commands, the test commands, and the layout. Do not guess them.
 *   On Windows, the build uses GCC 16 from MSYS2 UCRT64 (`C:\msys64\ucrt64\bin` first in `PATH`). With that folder first, `python` is the MSYS2 Python; the plugin and its tests also run with it.
 *   Support claims with evidence: cite `path:line`, quote the build/test output, and show the test failure before the fix and the pass after it.
 *   For a wire-format claim, compare with `protoc` (`protoc --encode` or `--decode`). Do not compute protobuf bytes by hand and give them as fact.
