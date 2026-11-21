@@ -80,7 +80,7 @@ template <typename T>
 | `std::span<const uint8_t, N>` | — | `bytes` | Encode-only fixed-extent view. |
 | Aggregate `struct` | — | `message` | Nested message. |
 | `std::optional<T>` | *(element encoding)* | `optional T` | Explicit presence. |
-| `std::variant<std::monostate, A, B, ...>` | *(per-alternative encoding)* | `oneof` | Each alternative must have a distinct C++ type. |
+| `std::variant<std::monostate, A, B, ...>` | *(per-alternative encoding)* | `oneof` | Index `0` is `std::monostate` (unset); alternatives `1..K` may share a C++ type (see [`oneof` fields](#oneof-fields-and-duplicate-alternative-types)). |
 | `pb::repeated<T, N>` | *(element encoding)* | `repeated T` | Fixed capacity `N` inside the struct (`push_back()`, `data()`, `span()`, range-`for`, `==`). |
 | `std::span<const T>` | *(element encoding)* | `repeated T` | Variable length; decodes into caller scratch memory / `pb::arena`. |
 | `std::array<T, N>` (`T` not `uint8_t`) | *(element encoding)* | `repeated T` | Encode-only fixed array of `N` elements. |
@@ -97,6 +97,49 @@ Plain `char`, `wchar_t`, `char8_t`, `char16_t`, `char32_t`, `__int128`, pointers
 | `std::optional<T>` | Engaged (including zero or empty values) |
 | `std::variant` | An alternative other than `std::monostate` is active |
 | Repeated field | Element count is at least 1 (scalars are always packed) |
+
+### `oneof` fields and duplicate alternative types
+
+A `oneof` maps to `std::variant<std::monostate, A, B, ...>`, where index `0` is `std::monostate` (no field set) and `1..K` correspond to the `oneof` alternatives in declaration order. `protoc-gen-micropb` emits 1-based `static constexpr size_t <oneof>_<field>` constants above each `std::variant` member (zero struct size or Flash cost).
+
+* **Distinct alternative types** (`oneof detail { uint32 uptime_s = 8; string fault = 9; }`): you can use either type-based access (`tx.detail = uint32_t{ 3600 }`, `std::get_if<uint32_t>( &rx.detail )`) or index-based access.
+* **Repeated alternative types** (`oneof msg { string err = 2; string info = 3; string html = 4; }`, or `int32` and `sint32` in the same `oneof`): standard C++ allows repeated types in `std::variant`, and the codec dispatches strictly by 1-based index. Type-based assignment and `std::get_if<T>` do not compile when `T` appears more than once; use `emplace<Index>`, `std::in_place_index<Index>`, `index()`, and `std::get_if<Index>`:
+
+```cpp
+// message Log {
+//   uint32 id = 1;
+//   oneof msg { string err = 2; string info = 3; string html = 4; }
+// }
+struct Log
+{
+	uint32_t id = 0;
+	static constexpr size_t msg_err = 1;
+	static constexpr size_t msg_info = 2;
+	static constexpr size_t msg_html = 3;
+	std::variant<std::monostate, std::string_view, std::string_view, std::string_view> msg = {};
+};
+
+void handle_log( std::span<uint8_t> wire )
+{
+	// Construct in place (const-friendly) or assign with emplace<Index>:
+	const Log tx{
+		.id = 7,
+		.msg{ std::in_place_index<Log::msg_err>, "timeout" },
+	};
+	const auto written = pb::encode( tx, wire );
+	if ( !written )
+		return;
+
+	Log rx;
+	if ( !pb::decode( wire.first( *written ), rx ) )
+		return;
+
+	if ( const auto* err = std::get_if<Log::msg_err>( &rx.msg ) )
+	{
+		// *err is "timeout" (rx.msg.index() == Log::msg_err)
+	}
+}
+```
 
 ### `pb::arena` and scratch buffer details
 
@@ -115,6 +158,7 @@ Plain `char`, `wchar_t`, `char8_t`, `char16_t`, `char32_t`, `__int128`, pointers
 * Every generated struct member has a proto3 default initializer (`= 0` for integers, `= 0.0f` / `= 0.0` for floats, `= false` for `bool`, `= Enum::ZERO` for enums, and `= {}` for views, messages, optionals, `oneof` variants, bounded containers, and fixed `std::array`s), so unbraced declarations (`T msg;`) start at proto3 defaults.
 * Generated headers include `<stdint.h>` and `<stddef.h>` (only when needed) and emit unqualified `int8_t`..`int64_t` and `uint8_t`..`uint64_t` types.
 * `sint32`/`sint64` and `fixed32`/`fixed64`/`sfixed32`/`sfixed64` emit plain `int32_t`/`int64_t`/`uint32_t`/`uint64_t` members and record `pb::int_encoding::ZIGZAG` or `pb::int_encoding::FIXED` in `pb::field_at`.
+* Each `oneof` emits `static constexpr size_t <oneof>_<field> = 1..K;` constants for its alternatives above the `std::variant` member.
 * `package a.b;` maps to `namespace a::b`.
 * Nested definitions flatten with underscores: `Outer.Inner` becomes `Outer_Inner`.
 * C++ keywords, `pb`, `std`, `<stdint.h>`/`<stddef.h>` typedefs (`uint32_t`, `size_t`, etc.), and common C macros (`NULL`, `EOF`, `errno`, `stdin`, `stdout`, `stderr`, `assert`, `offsetof`) receive a trailing `_`.
@@ -137,7 +181,7 @@ The plugin searches for `<stem>.options` relative to the current directory first
 | `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `int32`, `int64`, `uint32`, `uint64`, `sint32`, `sint64` | Narrow or wide `intN_t` / `uintN_t` |
 | `enum_intsize:IS_8`, `IS_16`, `IS_32` | `enum` | `enum class E : intN_t` (fails generation if a `.proto` enumerator does not fit) |
 
-Inline `.proto` annotations such as `[(nanopb).max_size = 6]` are not read. Unknown options and unmatched patterns print warnings to `stderr`. The plugin rejects proto2/editions files, `map` fields, recursive messages, duplicate C++ types inside one `oneof` (for example `int32` and `sint32` in the same `oneof`), `int_size:IS_8` on repeated unsigned integers, and `enum_intsize:IS_64`. Services, `extend` blocks, and `[packed = false]` are ignored.
+Inline `.proto` annotations such as `[(nanopb).max_size = 6]` are not read. Unknown options and unmatched patterns print warnings to `stderr`. The plugin rejects proto2/editions files, `map` fields, recursive messages, colliding C++ member names inside a struct, `int_size:IS_8` on repeated unsigned integers, and `enum_intsize:IS_64`. Services, `extend` blocks, and `[packed = false]` are ignored.
 
 ## Errors
 
@@ -159,7 +203,7 @@ Invalid schemas fail compilation with `static_assert` diagnostics prefixed by `p
 | --- | --- |
 | Field numbers | `tag_zero` (0), `tag_too_large` (> 2^29 - 1), `tag_reserved` (19000–19999), `duplicate_tag` |
 | Message & member types | `not_aggregate`, `member_offset_too_large` (> 65535), `unmapped_type`, `zigzag_unsigned`, `fixed_width`, `enum_too_wide` (> 32 bits), `recursive_message`, `span_element_trivial` |
-| Invalid nesting | `monostate_member`, `variant_no_monostate`, `variant_duplicate_alternative`, `variant_repeated_alternative`, `variant_optional_alternative`, `variant_variant_alternative`, `optional_repeated`, `optional_optional`, `optional_variant`, `repeated_repeated`, `repeated_optional`, `repeated_variant` |
+| Invalid nesting | `monostate_member`, `variant_no_monostate`, `variant_repeated_alternative`, `variant_optional_alternative`, `variant_variant_alternative`, `optional_repeated`, `optional_optional`, `optional_variant`, `repeated_repeated`, `repeated_optional`, `repeated_variant` |
 | Field lists | `no_field_list`, `field_list_type`, `field_list_offset`, `field_list_alternative`, `field_list_overlap` |
 | Decode-only constraints | `decode_encode_only` (`std::array` repeated), `decode_fixed_span` (static-extent `std::span`), `decode_needs_arena`, `decode_const_member` |
 
@@ -357,6 +401,8 @@ if ( pb_decode( &in, app_Envelope_fields, &rx ) && rx.which_msg == app_Envelope_
 // };
 // struct Envelope
 // {
+// 	static constexpr size_t msg_sample = 1;
+// 	static constexpr size_t msg_ping = 2;
 // 	std::variant<std::monostate, Sample, uint32_t> msg = {};
 // };
 

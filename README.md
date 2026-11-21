@@ -52,6 +52,8 @@ struct Reading
 	pb::repeated<float, 4> channels = {};
 	pb::bytes<8> token = {};
 	std::array<uint8_t, 6> mac = {};
+	static constexpr size_t detail_uptime_s = 1;
+	static constexpr size_t detail_fault = 2;
 	std::variant<std::monostate, uint32_t, std::string_view> detail = {};
 };
 
@@ -111,7 +113,7 @@ bool round_trip()
   | NanoPB 0.4.9.3 — `pb_callback_t` (default flags) | 6,676 B | 8,072 B | 9,544 B | 92 B |
 
 * **No heap, no exceptions, no RTTI, no startup code:** compiles with `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`. Tables live in `.rodata` with zero static constructors before `main()`.
-* **Compile-time schema validation:** invalid tags, duplicate `oneof` types, recursive messages, and missing scratch buffers fail at compile time with named `static_assert` diagnostics (`pb: <rule>:`).
+* **Compile-time schema validation:** invalid tags, unmapped types, recursive messages, and missing scratch buffers fail at compile time with named `static_assert` diagnostics (`pb: <rule>:`).
 * **Wire-identical to `protoc` & zero external dependencies:** verified byte-for-byte against `protoc`, using 5 standard-library-only C++23 headers and a single-file Python 3 plugin (stdlib only).
 
 > [!NOTE]
