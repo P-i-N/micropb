@@ -1,6 +1,6 @@
 # micropb Implementation & Reference Details
 
-This document covers the API rules, proto3-to-C++23 type mapping, `.options` reference, diagnostics, and build options for `micropb`. For an overview and quick-start examples, see [README.md](README.md).
+This document covers the API rules, proto3-to-C++23 type mapping, `.options` reference, diagnostics, NanoPB comparison, and build options for `micropb`. For an overview and quick start, see [README.md](README.md).
 
 ## Contents
 
@@ -21,13 +21,20 @@ template <typename T>
 [[nodiscard]] std::size_t pb::encoded_size(const T& msg);
 
 template <typename T>
-[[nodiscard]] std::expected<std::size_t, pb::error> pb::encode(const T& msg, std::span<std::uint8_t> out);
+[[nodiscard]] std::expected<std::size_t, pb::error> pb::encode(
+    const T& msg, std::span<std::uint8_t> out);
 
 template <typename T>
-[[nodiscard]] std::expected<std::size_t, pb::error> pb::decode(std::span<const std::uint8_t> in, T& msg);
+[[nodiscard]] std::expected<std::size_t, pb::error> pb::decode(
+    std::span<const std::uint8_t> in, T& msg);
 
 template <typename T>
-[[nodiscard]] std::expected<std::size_t, pb::error> pb::decode(std::span<const std::uint8_t> in, T& msg, pb::arena& memory);
+[[nodiscard]] std::expected<std::size_t, pb::error> pb::decode(
+    std::span<const std::uint8_t> in, T& msg, std::span<std::uint8_t> memory);
+
+template <typename T>
+[[nodiscard]] std::expected<std::size_t, pb::error> pb::decode(
+    std::span<const std::uint8_t> in, T& msg, pb::arena& memory);
 ```
 
 ### Encode rules
@@ -39,44 +46,46 @@ template <typename T>
 ### Decode rules
 
 * `decode` reads one message from `in` and returns `in.size()` on success.
-* It resets `msg` before reading, so you can reuse one struct across messages (`pb::repeated` resets its size to 0; `std::span<const T>` becomes empty).
+* It resets `msg` before reading, so you can reuse one struct across messages (`pb::repeated` and `pb::bytes` reset size to 0; `pb::string` resets size to 0 and writes `'\0'` at index 0; `std::span<const T>` becomes empty).
 * New `std::optional` values and switched `std::variant` alternatives also start from the proto3 zero/empty state; C++ default member initializers inside them do not persist.
 * Unknown field numbers and known fields with unexpected wire types are skipped, preserving forward compatibility.
 * Duplicate scalar fields keep the last value; duplicate nested messages merge; duplicate `oneof` fields keep the last alternative; repeated scalar fields accept packed, unpacked, or mixed encodings.
 * Varints wider than a narrow integer member truncate to the member width, matching the Google C++ runtime. Any non-zero varint decodes as `true` for `bool`. Unnamed enum values keep their integer value.
 * Strings are not checked for valid UTF-8.
 * On error, `msg` retains fields decoded before the failure, and arena blocks allocated during that call remain used until `memory.clear()`.
+* For single-message decode with `std::span<const T>` repeated fields, pass a `uint8_t[N]` C array, `std::array<uint8_t, N>`, or `std::span<uint8_t>` directly as `memory` (temporary rvalue `std::array`s do not compile, preventing dangling spans). Pass `pb::arena&` when sharing one scratch buffer across multiple `decode` calls or inspecting `memory.used()`.
 
 > [!WARNING]
-> Decoded `std::string_view` and `std::span<const std::uint8_t>` fields point into `in`. Decoded `std::span<const T>` repeated fields point into `memory`. Keep `in` and `memory` alive and unchanged for as long as you read `msg`.
+> Decoded `std::string_view` and `std::span<const uint8_t>` fields point into `in`. Decoded `std::span<const T>` repeated fields point into `memory`. Keep `in` and `memory` alive and unchanged for as long as you read `msg`. Fields stored in `pb::string<N>`, `pb::bytes<N>`, `pb::repeated<T, N>`, or `std::array` own their data inside `msg`.
 
 ## Type mapping and rules
 
 ### Proto3 to C++23 mapping
 
-| C++ type | proto3 type | Notes |
-| --- | --- | --- |
-| `bool` | `bool` | |
-| `std::int32_t`, `std::int64_t` | `int32`, `int64` | Negative values encode as 10-byte varints. |
-| `std::uint32_t`, `std::uint64_t` | `uint32`, `uint64` | |
-| `std::int8_t`, `std::int16_t` | `int32` | Narrow storage in RAM; decode truncates to member width. |
-| `std::uint8_t`, `std::uint16_t` | `uint32` | Narrow storage in RAM; decode truncates to member width. |
-| Standard integer types (`short`, `int`, `long`, `long long`, signed/unsigned) | `int32`/`int64`/`uint32`/`uint64` by size and sign | Prefer `<cstdint>` types across targets (`long` is 32-bit on Windows/Arm and 64-bit on Linux x86-64). |
-| `pb::sint32`, `pb::sint64`, `pb::wire_int<T, pb::int_encoding::ZIGZAG>` | `sint32` (1/2/4-byte signed `T`), `sint64` (8-byte signed `T`) | ZigZag varint; compact for negative numbers. Converts implicitly to and from `T`. |
-| `pb::fixed32`, `pb::fixed64`, `pb::sfixed32`, `pb::sfixed64` | `fixed32`, `fixed64`, `sfixed32`, `sfixed64` | Fixed 4- or 8-byte little-endian wire encoding. |
-| `float`, `double` | `float`, `double` | |
-| `enum`, `enum class` (up to 32 bits) | `enum` | `int32` on the wire. |
-| `std::string_view` | `string` | Zero-copy view into input on decode. |
-| `std::span<const std::uint8_t>` | `bytes` | Zero-copy view into input on decode. |
-| `pb::repeated<std::uint8_t, N>` | `bytes` | Copies up to `N` bytes into the struct. |
-| `std::array<std::uint8_t, N>` | `bytes` | Fixed length: encodes all `N` bytes; shorter input zero-pads; longer input fails with `CAPACITY_EXCEEDED`. |
-| `std::span<const std::uint8_t, N>` | `bytes` | Encode-only fixed-extent view. |
-| Aggregate `struct` | `message` | Nested message. |
-| `std::optional<T>` | `optional T` | Explicit presence. |
-| `std::variant<std::monostate, A, B, ...>` | `oneof` | Each alternative must have a distinct type. |
-| `pb::repeated<T, N>` | `repeated T` | Fixed capacity `N` inside the struct. |
-| `std::span<const T>` | `repeated T` | Variable length; decodes into `pb::arena`. |
-| `std::array<T, N>` (`T` not `uint8_t`) | `repeated T` | Encode-only fixed array of `N` elements. |
+| C++ type | `pb::field_at` encoding | proto3 type | Notes |
+| --- | --- | --- | --- |
+| `bool` | `VARINT` | `bool` | |
+| `int32_t`, `int64_t` | `VARINT` | `int32`, `int64` | Negative values encode as 10-byte varints. |
+| `uint32_t`, `uint64_t` | `VARINT` | `uint32`, `uint64` | |
+| `int8_t`, `int16_t` | `VARINT` | `int32` | Narrow storage in RAM; decode truncates to member width. |
+| `uint8_t`, `uint16_t` | `VARINT` | `uint32` | Narrow storage in RAM; decode truncates to member width. |
+| Standard integers (`short`, `int`, `long`, `long long`, signed/unsigned) | `VARINT` | `int32`/`int64`/`uint32`/`uint64` by size and sign | Prefer `<stdint.h>` types across targets (`long` is 32-bit on Windows/Arm and 64-bit on Linux x86-64). |
+| Signed 1-, 2-, 4-, or 8-byte integer (`int8_t`..`int64_t`) | `pb::int_encoding::ZIGZAG` | `sint32`, `sint64` | ZigZag varint; compact for negative numbers. |
+| 4- or 8-byte integer (`uint32_t`, `uint64_t`, `int32_t`, `int64_t`) | `pb::int_encoding::FIXED` | `fixed32`, `fixed64`, `sfixed32`, `sfixed64` | Fixed 4- or 8-byte little-endian wire encoding. |
+| `float`, `double` | `VARINT` *(default)* | `float`, `double` | 4- and 8-byte IEEE-754 fixed wire encoding. |
+| `enum`, `enum class` (up to 32 bits) | `VARINT` | `enum` | `int32` on the wire. |
+| `std::string_view` | — | `string` | Zero-copy view into input on decode. |
+| `pb::string<N>` | — | `string` | Copies up to `N` bytes into the struct plus a trailing `'\0'` (`c_str()`, `view()`, `assign()`, implicit `std::string_view`). |
+| `std::span<const uint8_t>` | — | `bytes` | Zero-copy view into input on decode. |
+| `pb::bytes<N>` | — | `bytes` | Copies up to `N` bytes into the struct (`data()`, `span()`, `assign()`, `push_back()`, implicit `std::span<const uint8_t>`). |
+| `std::array<uint8_t, N>` | — | `bytes` | Fixed length: encodes all `N` bytes; shorter input zero-pads; longer input fails with `CAPACITY_EXCEEDED`. |
+| `std::span<const uint8_t, N>` | — | `bytes` | Encode-only fixed-extent view. |
+| Aggregate `struct` | — | `message` | Nested message. |
+| `std::optional<T>` | *(element encoding)* | `optional T` | Explicit presence. |
+| `std::variant<std::monostate, A, B, ...>` | *(per-alternative encoding)* | `oneof` | Each alternative must have a distinct C++ type. |
+| `pb::repeated<T, N>` | *(element encoding)* | `repeated T` | Fixed capacity `N` inside the struct (`push_back()`, `data()`, `span()`, range-`for`, `==`). |
+| `std::span<const T>` | *(element encoding)* | `repeated T` | Variable length; decodes into caller scratch memory / `pb::arena`. |
+| `std::array<T, N>` (`T` not `uint8_t`) | *(element encoding)* | `repeated T` | Encode-only fixed array of `N` elements. |
 
 Plain `char`, `wchar_t`, `char8_t`, `char16_t`, `char32_t`, `__int128`, pointers, and `volatile` types do not compile (`pb: unmapped_type`). `const` members compile for `encode` and `encoded_size`, and fail at compile time in `decode` (`pb: decode_const_member`).
 
@@ -84,20 +93,20 @@ Plain `char`, `wchar_t`, `char8_t`, `char16_t`, `char32_t`, `__int128`, pointers
 
 | Member | Written on the wire when |
 | --- | --- |
-| Scalar, `string`, `bytes` (`span` or `pb::repeated`) | Value is non-zero or non-empty (`-0.0` is non-zero) |
-| `std::array<std::uint8_t, N>` (`FIXED_BYTES`) | `N > 0` (writes all `N` bytes) |
+| Scalar, `string` (`std::string_view`, `pb::string<N>`), `bytes` (`std::span`, `pb::bytes<N>`) | Value is non-zero or non-empty (`-0.0` is non-zero) |
+| `std::array<uint8_t, N>` (`FIXED_BYTES`) | `N > 0` (writes all `N` bytes) |
 | Nested `struct` | Always |
 | `std::optional<T>` | Engaged (including zero or empty values) |
 | `std::variant` | An alternative other than `std::monostate` is active |
 | Repeated field | Element count is at least 1 (scalars are always packed) |
 
-### `pb::arena` details
+### `pb::arena` and scratch buffer details
 
 * Before allocating, `decode` scans the remaining message bytes to count all elements of that `std::span<const T>` field, then allocates one aligned contiguous block.
 * Multiple `decode` calls can share one `pb::arena`. `memory.clear()` resets usage to 0 and invalidates previously decoded spans.
 * If space is insufficient, `decode` returns `pb::error::ARENA_FULL` without writing out of bounds.
 * If a non-canonical sender splits one nested submessage across multiple wire records and appends repeated elements in both, `decode` allocates a larger block and copies prior elements; the earlier block stays used until `clear()`.
-* Element types in `std::span<const T>` must be trivially copyable and trivially destructible (`pb: span_element_trivial`).
+* Element types in `std::span<const T>` must be trivially copyable and trivially destructible (`pb: span_element_trivial`). `pb::string<N>`, `pb::bytes<N>`, and `pb::repeated<T, N>` (for trivially copyable `T`) satisfy this requirement.
 
 ## Code generator (`protoc-gen-micropb`)
 
@@ -105,9 +114,12 @@ Plain `char`, `wchar_t`, `char8_t`, `char16_t`, `char32_t`, `__int128`, pointers
 
 ### Naming and layout rules
 
+* Every generated struct member carries `{}` so unbraced declarations (`T msg;`) initialize all scalars, enums, views, bounded containers, and fixed `std::array`s to their proto3 defaults.
+* Generated headers include `<stdint.h>` and `<stddef.h>` (only when needed) and emit unqualified `int8_t`..`int64_t` and `uint8_t`..`uint64_t` types.
+* `sint32`/`sint64` and `fixed32`/`fixed64`/`sfixed32`/`sfixed64` emit plain `int32_t`/`int64_t`/`uint32_t`/`uint64_t` members and record `pb::int_encoding::ZIGZAG` or `pb::int_encoding::FIXED` in `pb::field_at`.
 * `package a.b;` maps to `namespace a::b`.
 * Nested definitions flatten with underscores: `Outer.Inner` becomes `Outer_Inner`.
-* C++ keywords, `pb`, `std`, and common C macros (`NULL`, `EOF`, `errno`, `stdin`, `stdout`, `stderr`, `assert`, `offsetof`) receive a trailing `_`.
+* C++ keywords, `pb`, `std`, `<stdint.h>`/`<stddef.h>` typedefs (`uint32_t`, `size_t`, etc.), and common C macros (`NULL`, `EOF`, `errno`, `stdin`, `stdout`, `stderr`, `assert`, `offsetof`) receive a trailing `_`.
 * Enumerator prefixes matching `<ENUM_NAME>_` (case-insensitive) are stripped when every value in the enum has the prefix and the remainder starts with a letter (`MODE_IDLE` -> `Mode::IDLE`).
 * Structs are emitted in dependency order. Unused `import` statements emit no `#include`.
 
@@ -119,14 +131,15 @@ The plugin searches for `<stem>.options` relative to the current directory first
 | --- | --- | --- |
 | `max_count:N` | `repeated` | `pb::repeated<T, N>` |
 | `max_count:N fixed_count:true` | `repeated` | `std::array<T, N>` (encode-only) |
-| `max_size:N` | `bytes` | `pb::repeated<std::uint8_t, N>` |
-| `max_size:N fixed_length:true` | `bytes` | `std::array<std::uint8_t, N>` |
-| `type:FT_POINTER` | `repeated` or `bytes` | `std::span<const T>` or `std::span<const std::uint8_t>` (overrides wildcard `max_count`/`max_size`) |
+| `max_length:N` | `string` (including `repeated string`) | `pb::string<N>` (up to `N` bytes + `'\0'`) |
+| `max_size:N` | `bytes` / `string` (including `repeated`) | `pb::bytes<N>` on `bytes`; `pb::string<N - 1>` on `string` (matches NanoPB buffer size including `'\0'`) |
+| `max_size:N fixed_length:true` | `bytes` | `std::array<uint8_t, N>` |
+| `type:FT_POINTER` | `repeated`, `bytes`, or `string` | `std::span<const T>`, `std::span<const uint8_t>`, or `std::string_view` (overrides wildcard `max_count`/`max_size`/`max_length`) |
 | `type:FT_STATIC`, `type:FT_DEFAULT` | `repeated`, `bytes`, `string` | Uses the other options on the field |
-| `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `int32`, `int64`, `uint32`, `uint64`, `sint32`, `sint64` | Narrow/wide `<cstdint>` integer or `pb::wire_int<std::intN_t, pb::int_encoding::ZIGZAG>` |
-| `enum_intsize:IS_8`, `IS_16`, `IS_32` | `enum` | `enum class E : std::intN_t` (fails generation if a `.proto` enumerator does not fit) |
+| `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `int32`, `int64`, `uint32`, `uint64`, `sint32`, `sint64` | Narrow or wide `intN_t` / `uintN_t` |
+| `enum_intsize:IS_8`, `IS_16`, `IS_32` | `enum` | `enum class E : intN_t` (fails generation if a `.proto` enumerator does not fit) |
 
-Inline `.proto` annotations such as `[(nanopb).max_size = 6]` are not read. Unknown options and unmatched patterns print warnings to `stderr`. The plugin rejects proto2/editions files, `map` fields, recursive messages, duplicate C++ types inside one `oneof`, `int_size:IS_8` on repeated unsigned integers, and `enum_intsize:IS_64`. Services, `extend` blocks, and `[packed = false]` are ignored.
+Inline `.proto` annotations such as `[(nanopb).max_size = 6]` are not read. Unknown options and unmatched patterns print warnings to `stderr`. The plugin rejects proto2/editions files, `map` fields, recursive messages, duplicate C++ types inside one `oneof` (for example `int32` and `sint32` in the same `oneof`), `int_size:IS_8` on repeated unsigned integers, and `enum_intsize:IS_64`. Services, `extend` blocks, and `[packed = false]` are ignored.
 
 ## Errors
 
@@ -137,8 +150,8 @@ Inline `.proto` annotations such as `[(nanopb).max_size = 6]` are not read. Unkn
 | `INVALID_VARINT` | `decode` | Varint exceeds 10 bytes or 64 bits. |
 | `INVALID_WIRE_TYPE` | `decode` | Wire type is 3, 4, 6, or 7. |
 | `INVALID_TAG` | `decode` | Field number is 0 or exceeds 2^29 - 1. |
-| `CAPACITY_EXCEEDED` | `decode` | Input has more elements or bytes than `pb::repeated` or `std::array` holds. |
-| `ARENA_FULL` | `decode` | `pb::arena` lacks space for a `std::span<const T>` repeated field. |
+| `CAPACITY_EXCEEDED` | `decode` | Input has more elements or bytes than `pb::repeated`, `pb::bytes`, `pb::string`, or `std::array` holds. |
+| `ARENA_FULL` | `decode` | Scratch memory / `pb::arena` lacks space for a `std::span<const T>` repeated field. |
 
 ## Compile-time checks
 
@@ -147,22 +160,22 @@ Invalid schemas fail compilation with `static_assert` diagnostics prefixed by `p
 | Category | Rules |
 | --- | --- |
 | Field numbers | `tag_zero` (0), `tag_too_large` (> 2^29 - 1), `tag_reserved` (19000–19999), `duplicate_tag` |
-| Message & member types | `not_aggregate`, `member_offset_too_large` (> 65535), `unmapped_type`, `zigzag_unsigned`, `enum_too_wide` (> 32 bits), `recursive_message`, `span_element_trivial` |
+| Message & member types | `not_aggregate`, `member_offset_too_large` (> 65535), `unmapped_type`, `zigzag_unsigned`, `fixed_width`, `enum_too_wide` (> 32 bits), `recursive_message`, `span_element_trivial` |
 | Invalid nesting | `monostate_member`, `variant_no_monostate`, `variant_duplicate_alternative`, `variant_repeated_alternative`, `variant_optional_alternative`, `variant_variant_alternative`, `optional_repeated`, `optional_optional`, `optional_variant`, `repeated_repeated`, `repeated_optional`, `repeated_variant` |
 | Field lists | `no_field_list`, `field_list_type`, `field_list_offset`, `field_list_alternative`, `field_list_overlap` |
 | Decode-only constraints | `decode_encode_only` (`std::array` repeated), `decode_fixed_span` (static-extent `std::span`), `decode_needs_arena`, `decode_const_member` |
 
 ## Code size
 
-`cmake --build .build --target size_report` compiles one translation unit (`-Os`, GCC 16.2.1, Linux x86-64) that encodes and decodes an envelope `oneof` containing 16 or 32 distinct 8-field message types:
+`tests/size/size_report.cpp` compiles one translation unit (`-Os`, GCC 16.2) that encodes and decodes an envelope `oneof` containing 16 or 32 distinct 8-field message types (`cmake --build .build --target size_report` runs the host measurement):
 
-| Configuration | Without `.eh_frame` (bytes) | With `.eh_frame` (bytes) |
-| --- | ---: | ---: |
-| 16 message types | 7,308 | 8,716 |
-| 32 message types | 9,229 | 10,637 |
-| Each additional 8-field type | 120 | 120 |
+| Configuration | Arm Cortex-M4 / M33 (`-mthumb`, B) | x86-64 without `.eh_frame` (B) | x86-64 with `.eh_frame` (B) |
+| --- | ---: | ---: | ---: |
+| 16 message types | **4,902** | 7,350 | 8,758 |
+| 32 message types | **6,222** | 9,271 | 10,679 |
+| Each additional 8-field type | **82** | 120 | 120 |
 
-For side-by-side measurements against NanoPB, see [Binary size comparison](#binary-size-comparison). Arm hardware size measurements are not yet recorded.
+For side-by-side measurements against NanoPB, see [Binary size comparison](#binary-size-comparison).
 
 ## micropb vs. NanoPB
 
@@ -229,24 +242,23 @@ bool decode_values(pb_istream_t* s, const pb_field_iter_t*, void** arg) {
 // funcs.decode unless `(nanopb_msgopt).submsg_callback = true` is also configured.
 ```
 
-**`micropb`** generates standard C++23 view types (`std::string_view` and `std::span<const std::int32_t>`). There are no callbacks to write or attach, packed and unpacked inputs both work, and `Batch` works unchanged inside `std::optional` or `std::variant` (`oneof`):
+**`micropb`** generates standard C++23 view types (`std::string_view` and `std::span<const int32_t>`). There are no callbacks to write or attach, packed and unpacked inputs both work, and `Batch` works unchanged inside `std::optional` or `std::variant` (`oneof`):
 
 ```cpp
 // Generated by protoc-gen-micropb:
 // struct Batch {
-//     std::string_view device;
-//     std::span<const std::int32_t> values;
+//     std::string_view device{};
+//     std::span<const int32_t> values{};
 // };
 
 // Encode (packed varints written automatically)
-const std::array<std::int32_t, 3> items{10, 20, 30};
+const int32_t items[]{10, 20, 30};
 const auto written = pb::encode(Batch{.device = "imu0", .values = items}, wire);
 
-// Decode (`device` views `packet`; `values` is contiguous in `memory`)
-std::array<std::uint8_t, 128> scratch{};
-pb::arena memory(scratch);
-Batch rx{};
-const auto read = pb::decode(packet, rx, memory);
+// Decode (`device` views `packet`; `values` is contiguous in `scratch`)
+uint8_t scratch[128];
+Batch rx;
+const auto read = pb::decode(packet, rx, scratch);
 ```
 
 ### 2. Fixed-size fields (no callbacks): no manual `has_x`, `x_count`, or `which_x`
@@ -260,7 +272,7 @@ package app;
 message Sample {
   repeated float values = 1; // .options: max_count:8
   optional sint32 offset = 2;
-  optional string label = 3; // NanoPB .options: max_length:31
+  optional string label = 3; // .options: max_length:31
 }
 
 message Envelope {
@@ -294,7 +306,7 @@ s.values_count = 1;                                // manual count; no bounds ch
 s.has_offset = true;                               // forgetting `has_offset = true` silently drops offset
 s.offset = -12;
 s.has_label = true;
-std::strncpy(s.label, "ch0", sizeof(s.label) - 1); // copies into 32-byte buffer in every Sample
+std::strncpy(s.label, "ch0", sizeof(s.label) - 1); // manual strncpy + null-termination care
 
 pb_ostream_t out = pb_ostream_from_buffer(wire.data(), wire.size());
 if (!pb_encode(&out, app_Envelope_fields, &tx))
@@ -307,33 +319,33 @@ if (pb_decode(&in, app_Envelope_fields, &rx) && rx.which_msg == app_Envelope_sam
 }
 ```
 
-**`micropb`** encodes presence, union state, and bounds in standard C++23 types, needs no `max_length` buffer for `string`, and needs no `.pb.c` translation unit:
+**`micropb`** encodes presence, union state, and bounds in C++23 types (`pb::repeated`, `std::optional`, `pb::string` or zero-copy `std::string_view`, `std::variant`) and needs no `.pb.c` translation unit:
 
 ```cpp
 // Generated by protoc-gen-micropb:
 // struct Sample {
-//     pb::repeated<float, 8> values;
-//     std::optional<pb::sint32> offset;
-//     std::optional<std::string_view> label;
+//     pb::repeated<float, 8> values{};
+//     std::optional<int32_t> offset{};
+//     std::optional<pb::string<31>> label{};
 // };
 // struct Envelope {
-//     std::variant<std::monostate, Sample, std::uint32_t> msg;
+//     std::variant<std::monostate, Sample, uint32_t> msg{};
 // };
 
-app::Sample s{};
-if (!s.values.push_back(1.5f)) // bounds-checked
-    return;
-s.offset = -12;                // sets presence automatically
-s.label = "ch0";               // zero-copy view; no char[32] buffer in struct
+const app::Sample s{
+    .values = {{1.5f}},
+    .offset = -12,   // sets presence automatically; ZigZag-encoded via pb::fields_of
+    .label = "ch0",  // compile-time length-checked and null-terminated
+};
 
 const auto n = pb::encode(app::Envelope{.msg = s}, wire); // sets active variant alternative
 if (!n)
     return;
 
-app::Envelope rx{};
-if (pb::decode(std::span<const std::uint8_t>(wire).first(*n), rx)) {
+app::Envelope rx;
+if (pb::decode(std::span(wire).first(*n), rx)) {
     if (const auto* sample = std::get_if<app::Sample>(&rx.msg)) {
-        // sample->offset is std::optional<pb::sint32>; sample->label views `wire`
+        // sample->offset is std::optional<int32_t>; sample->label->c_str() is "ch0"
     }
 }
 ```
@@ -343,33 +355,49 @@ if (pb::decode(std::span<const std::uint8_t>(wire).first(*n), rx)) {
 | Area | micropb | NanoPB |
 | --- | --- | --- |
 | Language & integration | Header-only C++23 (5 headers, no `.c` files) | C99 (`pb_common.c`, `pb_encode.c`, `pb_decode.c` + `.pb.c` per `.proto`) |
-| Variable `string` / `bytes` | `std::string_view` / `std::span<const std::uint8_t>` (zero-copy view) | `pb_callback_t` (`encode`/`decode` callbacks + `void* arg`) |
-| Fixed `string` | Not needed (`std::string_view` has no length cap) | `char x[N + 1]` in every struct (`max_length:N`) |
-| Variable `repeated T` | `std::span<const T>` + `pb::arena` (works inside `oneof`) | `pb_callback_t` (needs `submsg_callback` inside `oneof`) or `FT_POINTER` (`malloc`) |
-| Fixed `repeated T` | `pb::repeated<T, N>` (`push_back`, `size`, range-`for`) | `pb_size_t x_count; T x[N];` |
+| Integer scalar members | Plain `int32_t`, `uint32_t`, `int64_t`, `uint64_t` (`int8_t`/`int16_t` with `int_size`) | Plain `int32_t`, `uint32_t`, etc. |
+| Variable `string` / `bytes` | `std::string_view` / `std::span<const uint8_t>` (zero-copy view) | `pb_callback_t` (`encode`/`decode` callbacks + `void* arg`) |
+| Bounded `string` / `bytes` | `pb::string<N>` (null-terminated) / `pb::bytes<N>` | `char x[N + 1]` / `PB_BYTES_ARRAY_T(N)` |
+| Variable `repeated T` | `std::span<const T>` + scratch buffer / `pb::arena` (works inside `oneof`) | `pb_callback_t` (needs `submsg_callback` inside `oneof`) or `FT_POINTER` (`malloc`) |
+| Bounded `repeated T` | `pb::repeated<T, N>` (`push_back`, `size`, `span`, range-`for`) | `pb_size_t x_count; T x[N];` |
 | `optional T` | `std::optional<T>` | `bool has_x; T x;` |
 | `oneof` | `std::variant<std::monostate, A, B>` | `pb_size_t which_x; union { ... } x;` |
 | Error handling | `std::expected<std::size_t, pb::error>` | `bool` + `stream.errmsg` string |
-| `.options` file | Same syntax (`max_count`, `max_size`, `fixed_length`, `int_size`) | Native format |
+| `.options` file | Same syntax (`max_count`, `max_size`, `max_length`, `fixed_length`, `int_size`) | Native format |
 | Generator dependencies | Python 3 stdlib only + `protoc` | Python 3 + `protobuf` Python package + `protoc` |
 | Streaming I/O & custom callbacks | No (contiguous spans only, no callbacks) | Yes (`pb_istream_t` / `pb_ostream_t`, `pb_callback_t`) |
 | C99, proto2 | No (C++23, proto3) | Yes |
 
 ### Binary size comparison
 
-Measured on the `size_report` schema (an envelope `oneof` holding 1, 16, or 32 distinct message types of 8 mixed fields each, both `encode` and `decode` linked with `--gc-sections`, GCC 16.2.1 `-Os`, Linux x86-64):
+Measured on the `size_report` schema (an envelope `oneof` holding 1, 16, or 32 distinct message types of 8 mixed fields each, both `encode` and `decode` compiled with `-Os -ffunction-sections -fdata-sections -fno-unwind-tables -fno-asynchronous-unwind-tables` and linked with `--gc-sections`):
 
-**Code + read-only data (`-fno-asynchronous-unwind-tables -fno-unwind-tables`, no `.eh_frame`):**
+#### Arm Cortex-M4 & Cortex-M33 (`arm-none-eabi-gcc` / `arm-none-eabi-g++` 16.2.0, `-mthumb`)
 
-| Configuration | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Each extra 8-field type |
+| Configuration (`-mcpu=cortex-m4 -mthumb`) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Each extra 8-field type |
 | --- | ---: | ---: | ---: | ---: |
-| **micropb** | **5,497** | **7,308** | **9,229** | 120 |
-| **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, default flags) | 10,413 | 12,037 | 13,781 | **109** |
-| **NanoPB 0.4.9.3** — fixed-size (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,405 | 10,029 | 11,773 | **109** |
-| **NanoPB 0.4.9.3** — `pb_callback_t` strings (default flags) | 10,497 | 12,374 | 14,326 | 122 |
-| **NanoPB 0.4.9.3** — `pb_callback_t` strings (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,489 | 10,366 | 12,318 | 122 |
+| **micropb** | **3,614 B** | **4,902 B** | **6,222 B** | **82 B** |
+| **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,150 B | 6,414 B | 7,774 B | 85 B |
+| **NanoPB 0.4.9.3** — `pb_callback_t` strings (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,210 B | 6,606 B | 8,078 B | 92 B |
+| **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, default flags) | 6,616 B | 7,880 B | 9,240 B | 85 B |
+| **NanoPB 0.4.9.3** — `pb_callback_t` strings (default flags) | 6,676 B | 8,072 B | 9,544 B | 92 B |
 
-*(With Linux default `.eh_frame` unwind tables included, totals at 1 / 16 / 32 types are `6,901 / 8,712 / 10,633 B` for `micropb`, `12,469 / 14,093 / 15,837 B` for NanoPB fixed default, and `10,189 / 11,813 / 13,557 B` for NanoPB fixed with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`.)*
+*(With `-mcpu=cortex-m33 -mthumb`, `micropb` is identical at `3,614 / 4,902 / 6,222 B` (`82 B/type`); NanoPB with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG` is `2 B` smaller at `5,148 / 6,412 / 7,772 B` fixed and `5,208 / 6,604 / 8,076 B` callback; NanoPB default flags are identical.)*
+
+* **32-bit Arm scaling:** on 32-bit Arm, 4-byte pointers halve `micropb`'s subdescriptor and variant tables and Thumb-2 shrinks `std::variant` accessors, so `micropb` is smaller than every NanoPB configuration on both base runtime (`1.5–3.0 KB` smaller at 1 type, `1.6–3.3 KB` smaller at 32 types) and per-message growth (`82 B` vs `85–92 B` per 8-field message type).
+* **External symbols:** `arm-none-eabi-nm -u` shows that `micropb` references only `memcpy`, `memmove`, and `memset` (no 64-bit division helpers or C++ runtime symbols).
+
+#### Linux x86-64 (`GCC 16.2.1 -Os`)
+
+| Configuration (no `.eh_frame`) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Each extra 8-field type |
+| --- | ---: | ---: | ---: | ---: |
+| **micropb** | **5,539 B** | **7,350 B** | **9,271 B** | 120 B |
+| **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,405 B | 10,029 B | 11,773 B | **109 B** |
+| **NanoPB 0.4.9.3** — `pb_callback_t` strings (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,489 B | 10,366 B | 12,318 B | 122 B |
+| **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, default flags) | 10,413 B | 12,037 B | 13,781 B | **109 B** |
+| **NanoPB 0.4.9.3** — `pb_callback_t` strings (default flags) | 10,497 B | 12,374 B | 14,326 B | 122 B |
+
+*(With Linux default `.eh_frame` unwind tables included, x86-64 totals at 1 / 16 / 32 types are `6,943 / 8,754 / 10,675 B` for `micropb`, `12,469 / 14,093 / 15,837 B` for NanoPB fixed default, and `10,189 / 11,813 / 13,557 B` for NanoPB fixed with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`.)*
 
 ## Build, sanitizers, and cross-compilation
 
@@ -393,7 +421,7 @@ ctest --test-dir .build --output-on-failure
 
 ## Status and limits
 
-* **Tested toolchains:** GCC 16.2 on Linux and Windows (MSYS2 UCRT64); compile-tested with Arm GNU Toolchain 13.3, 14.2, and 16.2 (`-mcpu=cortex-m4 -mthumb`, not yet executed on hardware); `protoc` 35.1 and 36.2 with Python 3.13 and 3.14. Clang currently warns on `[[gnu::noclone]]` in `codec.hpp`.
+* **Tested toolchains:** GCC 16.2 on Linux and Windows (MSYS2 UCRT64); compile-tested with Arm GNU Toolchain 13.3, 14.2, and 16.2 (`-mcpu=cortex-m4 -mthumb`, not yet executed on hardware); `protoc` 35.1 and 36.2 with Python 3.13 and 3.14.
 * **Out of scope:** proto2, editions, `map` fields, groups, well-known types (`Any`, `Timestamp`), JSON, unknown-field preservation, and streaming I/O.
 * **Runtime-only codec:** `encode`, `decode`, and `encoded_size` read members via byte offsets and cannot run in `constexpr` evaluation.
 * **Limits:** member offsets must be 65535 bytes or less; recursive message definitions are rejected so stack depth stays bounded.

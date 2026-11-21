@@ -10,13 +10,13 @@ fields come from app.options, a file in the NanoPB format:
     Message.field  (no option)                    repeated: std::span<const T>; decode needs a pb::arena
     Message.field  max_count:8                    pb::repeated<T, 8>
     Message.field  max_count:3 fixed_count:true   std::array<T, 3>
-    Message.field  max_size:16                    bytes: pb::repeated<std::uint8_t, 16>
-    Message.field  max_size:6 fixed_length:true   bytes: std::array<std::uint8_t, 6>
-    Message.field  int_size:IS_8                  std::int8_t or std::uint8_t (also IS_16, IS_32, IS_64);
-                                                    sint32, sint64: pb::wire_int<std::int8_t, pb::int_encoding::ZIGZAG>
+    Message.field  max_size:16                    bytes: pb::bytes<16>; string: pb::string<15>
+    Message.field  max_length:15                  string: pb::string<15>
+    Message.field  max_size:6 fixed_length:true   bytes: std::array<uint8_t, 6>
+    Message.field  int_size:IS_8                  int8_t or uint8_t (also IS_16, IS_32, IS_64)
     Message.field  type:FT_POINTER                repeated: std::span<const T>, also with max_count;
-                                                    bytes: std::span<const std::uint8_t>
-    Enum           enum_intsize:IS_8              enum class Enum : std::int8_t (also IS_16, IS_32)
+                                                    bytes: std::span<const uint8_t>; string: std::string_view
+    Enum           enum_intsize:IS_8              enum class Enum : int8_t (also IS_16, IS_32)
 
 The plugin looks for app.options with the path that protoc has for app.proto: first from the
 current folder, then from each folder of the parameter --micropb_opt=options_dir=<folder>. With
@@ -170,36 +170,43 @@ def encode_response(error, files):
 
 SCALARS = {
     Field.TYPE_BOOL: "bool",
-    Field.TYPE_INT32: "std::int32_t",
-    Field.TYPE_INT64: "std::int64_t",
-    Field.TYPE_UINT32: "std::uint32_t",
-    Field.TYPE_UINT64: "std::uint64_t",
-    Field.TYPE_SINT32: "pb::sint32",
-    Field.TYPE_SINT64: "pb::sint64",
-    Field.TYPE_FIXED32: "pb::fixed32",
-    Field.TYPE_FIXED64: "pb::fixed64",
-    Field.TYPE_SFIXED32: "pb::sfixed32",
-    Field.TYPE_SFIXED64: "pb::sfixed64",
+    Field.TYPE_INT32: "int32_t",
+    Field.TYPE_INT64: "int64_t",
+    Field.TYPE_UINT32: "uint32_t",
+    Field.TYPE_UINT64: "uint64_t",
+    Field.TYPE_SINT32: "int32_t",
+    Field.TYPE_SINT64: "int64_t",
+    Field.TYPE_FIXED32: "uint32_t",
+    Field.TYPE_FIXED64: "uint64_t",
+    Field.TYPE_SFIXED32: "int32_t",
+    Field.TYPE_SFIXED64: "int64_t",
     Field.TYPE_FLOAT: "float",
     Field.TYPE_DOUBLE: "double",
     Field.TYPE_STRING: "std::string_view",
-    Field.TYPE_BYTES: "std::span<const std::uint8_t>",
+    Field.TYPE_BYTES: "std::span<const uint8_t>",
+}
+
+ENCODINGS = {
+    Field.TYPE_SINT32: "pb::int_encoding::ZIGZAG",
+    Field.TYPE_SINT64: "pb::int_encoding::ZIGZAG",
+    Field.TYPE_FIXED32: "pb::int_encoding::FIXED",
+    Field.TYPE_FIXED64: "pb::int_encoding::FIXED",
+    Field.TYPE_SFIXED32: "pb::int_encoding::FIXED",
+    Field.TYPE_SFIXED64: "pb::int_encoding::FIXED",
 }
 
 # The types that `int_size` can change.
 SIZED_INTEGERS = (Field.TYPE_INT32, Field.TYPE_INT64, Field.TYPE_UINT32, Field.TYPE_UINT64,
                   Field.TYPE_SINT32, Field.TYPE_SINT64)
-# The size that a ZigZag type has without `int_size`.
-ZIGZAG_SIZES = {Field.TYPE_SINT32: 32, Field.TYPE_SINT64: 64}
 
 # The headers that the generated text can need, each with a pattern that shows the need.
 INCLUDES = [
     ("<array>", r"std::array<"),
-    ("<cstddef>", r"offsetof\("),
-    ("<cstdint>", r"std::u?int\d+_t"),
     ("<optional>", r"std::optional<"),
     ("<span>", r"std::span<"),
-    ("<string_view>", r"std::string_view"),
+    ("<stddef.h>", r"\boffsetof\("),
+    ("<stdint.h>", r"\bu?int\d+_t\b"),
+    ("<string_view>", r"std::string_view\b"),
     ("<variant>", r"std::variant<"),
 ]
 
@@ -212,8 +219,11 @@ KEYWORDS = set("""
     static_cast struct switch template this thread_local throw true try typedef typeid typename union unsigned
     using virtual void volatile wchar_t while xor xor_eq""".split())
 
-# Names that the generated code or a standard header uses: the two namespaces, and common macros.
-RESERVED = KEYWORDS | set("pb std NULL EOF errno stdin stdout stderr assert offsetof".split())
+# Names that the generated code or a standard header uses: the two namespaces, <stdint.h>/<stddef.h> types, and macros.
+RESERVED = KEYWORDS | set(
+    "pb std NULL EOF errno stdin stdout stderr assert offsetof "
+    "int8_t int16_t int32_t int64_t uint8_t uint16_t uint32_t uint64_t size_t ptrdiff_t".split()
+)
 
 
 def ident(name):
@@ -279,8 +289,8 @@ class Rule:
 class Options:
     """The rules of one options file. `path` is None when the .proto file has no options file."""
 
-    PARSERS = {"max_count": positive, "max_size": positive, "fixed_count": boolean, "fixed_length": boolean,
-               "int_size": int_size, "enum_intsize": int_size, "type": field_type}
+    PARSERS = {"max_count": positive, "max_size": positive, "max_length": positive, "fixed_count": boolean,
+               "fixed_length": boolean, "int_size": int_size, "enum_intsize": int_size, "type": field_type}
 
     def __init__(self, path):
         self.path = path
@@ -402,7 +412,7 @@ def enum_text(enum, options):
             raise Error(f"{enum.file.name}: {enum.proto_name}: the value {value.number} does not fit "
                         f"enum_intsize:IS_{bits}, IS_{fits} is the smallest")
 
-    lines = [f"enum class {enum.name} : std::int{bits}_t {{"]
+    lines = [f"enum class {enum.name} : int{bits}_t {{"]
     lines += [f"    {ident(name)} = {value.number}," for name, value in zip(names, enum.desc.value)]
     return "\n".join(lines + ["};"])
 
@@ -450,22 +460,34 @@ class Header:
 
         if field.type in SIZED_INTEGERS:
             bits = option("int_size")
-            if bits and field.type in ZIGZAG_SIZES:
-                if bits != ZIGZAG_SIZES[field.type]:
-                    text = f"pb::wire_int<std::int{bits}_t, pb::int_encoding::ZIGZAG>"
-            elif bits:
+            if bits:
                 text = re.sub(r"\d+", str(bits), text)
-            if repeated and text == "std::uint8_t":
+            if repeated and text == "uint8_t":
                 raise self.error(f"{name}: int_size:IS_8 on a repeated unsigned field gives a bytes field")
 
         pointer = option("type") if repeated or field.type in (Field.TYPE_BYTES, Field.TYPE_STRING) else False
 
-        if field.type == Field.TYPE_BYTES and not repeated and not pointer:
+        if field.type == Field.TYPE_BYTES and not pointer:
             size, fixed = option("max_size"), option("fixed_length")
             if fixed and not size:
                 raise self.error(f"{name}: fixed_length needs max_size")
             if size:
-                text = f"std::array<std::uint8_t, {size}>" if fixed else f"pb::repeated<std::uint8_t, {size}>"
+                text = f"std::array<uint8_t, {size}>" if fixed else f"pb::bytes<{size}>"
+        elif field.type == Field.TYPE_STRING and not pointer:
+            length, size = option("max_length"), option("max_size")
+            if length is not None and size is not None:
+                len_line, size_line = found["max_length"][1].line, found["max_size"][1].line
+                if len_line == size_line:
+                    raise self.error(f"{name}: give max_length or max_size, not both")
+                chars = length if len_line > size_line else size - 1
+            elif length is not None:
+                chars = length
+            elif size is not None:
+                chars = size - 1
+            else:
+                chars = None
+            if chars is not None:
+                text = f"pb::string<{chars}>"
 
         count = option("max_count") if repeated and not pointer else None
         if repeated and not pointer and not count and option("fixed_count"):
@@ -491,15 +513,15 @@ class Header:
         member_names |= {ident(desc.oneof_decl[oneof_of(field)].name) for field in desc.field
                          if oneof_of(field) is not None}
 
-        lines, entries, done = [], [], set()  # an entry: member name, field number, index of the alternative
+        lines, entries, done = [], [], set()  # an entry: member name, field number, alternative index, encoding
         for field in desc.field:
             index = oneof_of(field)
             if index is None:
                 text = self.field_type(message, field, member_names)
                 if field.proto3_optional:
                     text = f"std::optional<{text}>"
-                lines.append(f"    {text} {ident(field.name)};")
-                entries.append((ident(field.name), field.number, 0))
+                lines.append(f"    {text} {ident(field.name)}{{}};")
+                entries.append((ident(field.name), field.number, 0, ENCODINGS.get(field.type)))
             elif index not in done:
                 done.add(index)
                 group = [other for other in desc.field if oneof_of(other) == index]
@@ -509,8 +531,9 @@ class Header:
                     if types.count(text) > 1:
                         raise self.error(f"{message.proto_name}.{name}: a oneof cannot have two members "
                                          f"of the type {text}")
-                lines.append(f"    std::variant<std::monostate, {', '.join(types)}> {ident(name)};")
-                entries += [(ident(name), other.number, position) for position, other in enumerate(group, 1)]
+                lines.append(f"    std::variant<std::monostate, {', '.join(types)}> {ident(name)}{{}};")
+                entries += [(ident(name), other.number, position, ENCODINGS.get(other.type))
+                            for position, other in enumerate(group, 1)]
 
         self.field_lists.append(self.field_list_text(message, entries))
         if not lines:
@@ -518,13 +541,13 @@ class Header:
         return "\n".join([f"struct {message.name} {{"] + lines + ["};"])
 
     def field_list_text(self, message, entries):
-        """The `pb::fields_of` specialization of `message`: the type, field number and offset of each member."""
+        """The `pb::fields_of` specialization of `message`: the type, field number, offset and encoding."""
         # The full name with `::` at the start: this text is in the scope of `pb`, which has names of its own.
         name = "::" + "::".join(filter(None, [namespace_of(self.file.package), message.name]))
         lines = [f"template <>\nstruct pb::fields_of<{name}> : pb::field_list<{name}"]
-        for member, number, alternative in entries:
-            index = f", {alternative}" if alternative else ""
-            lines.append(f"    pb::field_at<decltype({name}::{member}), {number}, offsetof({name}, {member}){index}>")
+        for member, number, alternative, encoding in entries:
+            tail = f", {alternative}, {encoding}" if encoding else (f", {alternative}" if alternative else "")
+            lines.append(f"    pb::field_at<decltype({name}::{member}), {number}, offsetof({name}, {member}){tail}>")
         return ",\n".join(lines) + "> {};"
 
     def in_dependency_order(self, messages):

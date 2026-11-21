@@ -1,9 +1,11 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 namespace pb {
 
@@ -22,7 +24,7 @@ enum class error
 	INVALID_WIRE_TYPE,
 	/// decode: a key has field number 0 or a field number above 2^29 - 1.
 	INVALID_TAG,
-	/// decode: a field has more elements or bytes than its `pb::repeated` or `std::array` holds.
+	/// decode: a field has more elements or bytes than its `pb::repeated`, `pb::bytes`, `pb::string` or `std::array` holds.
 	CAPACITY_EXCEEDED,
 	/// decode: the arena has no space for the items of a repeated field.
 	ARENA_FULL,
@@ -39,37 +41,24 @@ enum class wire_type : std::uint8_t
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Integer encoding on the wire: zigzag varint or fixed width.
-enum class int_encoding
+/// Wire encoding of an integer field, element, optional value or oneof alternative.
+enum class int_encoding : std::uint8_t
 {
+	VARINT,
 	ZIGZAG,
-	FIXED
+	FIXED,
 };
-
-/// Integer field with a fixed wire encoding. Converts implicitly to and from `T`.
-template <typename T, int_encoding E>
-struct wire_int
-{
-	constexpr wire_int() = default;
-	constexpr wire_int( T v ) : value( v ) {}
-	[[nodiscard]] constexpr operator T() const { return value; }
-
-	T value{};
-};
-
-using sint32 = wire_int<std::int32_t, int_encoding::ZIGZAG>;
-using sint64 = wire_int<std::int64_t, int_encoding::ZIGZAG>;
-using fixed32 = wire_int<std::uint32_t, int_encoding::FIXED>;
-using fixed64 = wire_int<std::uint64_t, int_encoding::FIXED>;
-using sfixed32 = wire_int<std::int32_t, int_encoding::FIXED>;
-using sfixed64 = wire_int<std::int64_t, int_encoding::FIXED>;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/// One field of a message: the type `M` of the member, the field number and
-/// the offset of the member in bytes. For an alternative of a `std::variant`
-/// member, `Alternative` is the index of the alternative, which is 1 or more.
-template <typename M, std::uint32_t Number, std::size_t Offset, std::size_t Alternative = 0>
+/// One field of a message: the type `M` of the member, the field number, the
+/// offset of the member in bytes, the 1-based `std::variant` alternative index
+/// (0 for plain members), and the wire encoding for integer scalars.
+template <typename M,
+          std::uint32_t Number,
+          std::size_t Offset,
+          std::size_t Alternative = 0,
+          int_encoding Encoding = int_encoding::VARINT>
 struct field_at
 {};
 
@@ -89,7 +78,7 @@ template <typename T>
 struct fields_of;
 
 namespace detail {
-/// Gives the codec the count member of `repeated`.
+/// Gives the codec the `_items` and `_count` members of `repeated`, `bytes` and `string`.
 struct sequence_access;
 } // namespace detail
 
@@ -99,18 +88,35 @@ struct sequence_access;
 template <typename T, std::size_t N>
 struct repeated
 {
-	[[nodiscard]] constexpr std::size_t size() const { return _count; }
-	[[nodiscard]] constexpr std::size_t capacity() const { return N; }
-	[[nodiscard]] constexpr bool empty() const { return _count == 0; }
+	static constexpr std::size_t max_size = N;
 
-	[[nodiscard]] constexpr T* begin() { return _items.data(); }
-	[[nodiscard]] constexpr T* end() { return _items.data() + _count; }
-	[[nodiscard]] constexpr const T* begin() const { return _items.data(); }
-	[[nodiscard]] constexpr const T* end() const { return _items.data() + _count; }
+	constexpr repeated() = default;
+
+	template <std::size_t M>
+		requires( M <= N )
+	constexpr repeated( const T ( &items )[M] ) : _count( M )
+	{
+		std::copy_n( items, M, _items.data() );
+	}
+
+	[[nodiscard]] constexpr std::size_t size() const noexcept { return _count; }
+	[[nodiscard]] constexpr std::size_t capacity() const noexcept { return N; }
+	[[nodiscard]] constexpr bool empty() const noexcept { return _count == 0; }
+
+	[[nodiscard]] constexpr T* data() noexcept { return _items.data(); }
+	[[nodiscard]] constexpr const T* data() const noexcept { return _items.data(); }
+
+	[[nodiscard]] constexpr T* begin() noexcept { return _items.data(); }
+	[[nodiscard]] constexpr T* end() noexcept { return _items.data() + _count; }
+	[[nodiscard]] constexpr const T* begin() const noexcept { return _items.data(); }
+	[[nodiscard]] constexpr const T* end() const noexcept { return _items.data() + _count; }
 
 	/// `index` must be less than `size()`.
-	[[nodiscard]] constexpr T& operator[]( std::size_t index ) { return _items[index]; }
-	[[nodiscard]] constexpr const T& operator[]( std::size_t index ) const { return _items[index]; }
+	[[nodiscard]] constexpr T& operator[]( std::size_t index ) noexcept { return _items[index]; }
+	[[nodiscard]] constexpr const T& operator[]( std::size_t index ) const noexcept { return _items[index]; }
+
+	[[nodiscard]] constexpr std::span<T> span() noexcept { return { _items.data(), _count }; }
+	[[nodiscard]] constexpr std::span<const T> span() const noexcept { return { _items.data(), _count }; }
 
 	/// Returns `false` and does not add `item` when the sequence is full.
 	[[nodiscard]] constexpr bool push_back( const T& item )
@@ -122,12 +128,202 @@ struct repeated
 		return true;
 	}
 
-	constexpr void clear() { _count = 0; }
+	constexpr void clear() noexcept { _count = 0; }
+
+	template <std::size_t M>
+	[[nodiscard]] constexpr bool operator==( const repeated<T, M>& other ) const
+	{
+		return _count == other.size() && std::equal( begin(), end(), other.begin() );
+	}
 
 private:
 	friend struct detail::sequence_access;
 
 	std::array<T, N> _items;
+	std::size_t _count = 0;
+};
+
+/// Byte sequence that keeps up to `N` bytes in the object. Does not allocate.
+template <std::size_t N>
+struct bytes
+{
+	static constexpr std::size_t max_size = N;
+
+	constexpr bytes() = default;
+
+	template <std::size_t M>
+		requires( M <= N )
+	constexpr bytes( const std::uint8_t ( &data )[M] ) noexcept : _count( M )
+	{
+		std::copy_n( data, M, _items.data() );
+	}
+
+	template <std::size_t M>
+		requires( M <= N )
+	constexpr bytes( const std::array<std::uint8_t, M>& data ) noexcept : _count( M )
+	{
+		std::copy_n( data.data(), M, _items.data() );
+	}
+
+	[[nodiscard]] constexpr std::size_t size() const noexcept { return _count; }
+	[[nodiscard]] constexpr std::size_t capacity() const noexcept { return N; }
+	[[nodiscard]] constexpr bool empty() const noexcept { return _count == 0; }
+
+	[[nodiscard]] constexpr std::uint8_t* data() noexcept { return _items.data(); }
+	[[nodiscard]] constexpr const std::uint8_t* data() const noexcept { return _items.data(); }
+
+	[[nodiscard]] constexpr std::uint8_t* begin() noexcept { return _items.data(); }
+	[[nodiscard]] constexpr std::uint8_t* end() noexcept { return _items.data() + _count; }
+	[[nodiscard]] constexpr const std::uint8_t* begin() const noexcept { return _items.data(); }
+	[[nodiscard]] constexpr const std::uint8_t* end() const noexcept { return _items.data() + _count; }
+
+	/// `index` must be less than `size()`.
+	[[nodiscard]] constexpr std::uint8_t& operator[]( std::size_t index ) noexcept { return _items[index]; }
+	[[nodiscard]] constexpr const std::uint8_t& operator[]( std::size_t index ) const noexcept { return _items[index]; }
+
+	[[nodiscard]] constexpr std::span<std::uint8_t> span() noexcept { return { _items.data(), _count }; }
+	[[nodiscard]] constexpr std::span<const std::uint8_t> span() const noexcept { return { _items.data(), _count }; }
+	[[nodiscard]] constexpr operator std::span<const std::uint8_t>() const noexcept { return span(); }
+
+	/// Returns `false` and does not add `byte` when full.
+	[[nodiscard]] constexpr bool push_back( std::uint8_t byte ) noexcept
+	{
+		if ( _count == N )
+			return false;
+
+		_items[_count++] = byte;
+		return true;
+	}
+
+	/// Copies `data` into the buffer. Returns `false` without changing the buffer when `data.size() > N`.
+	[[nodiscard]] constexpr bool assign( std::span<const std::uint8_t> data ) noexcept
+	{
+		if ( data.size() > N )
+			return false;
+
+		std::copy_n( data.data(), data.size(), _items.data() );
+		_count = data.size();
+		return true;
+	}
+
+	constexpr void clear() noexcept { _count = 0; }
+
+	template <std::size_t M>
+	[[nodiscard]] constexpr bool operator==( const bytes<M>& other ) const noexcept
+	{
+		return _count == other.size() && std::equal( begin(), end(), other.begin() );
+	}
+
+	[[nodiscard]] friend constexpr bool operator==( const bytes& a, std::span<const std::uint8_t> b ) noexcept
+	{
+		return a.size() == b.size() && std::equal( a.begin(), a.end(), b.begin() );
+	}
+
+private:
+	friend struct detail::sequence_access;
+
+	std::array<std::uint8_t, N> _items;
+	std::size_t _count = 0;
+};
+
+/// Null-terminated text that keeps up to `N` bytes (plus a trailing `'\0'`) in the object. Does not allocate.
+template <std::size_t N>
+struct string
+{
+	static constexpr std::size_t max_size = N;
+
+	constexpr string() noexcept
+	{
+		if consteval
+		{
+			_items.fill( '\0' );
+		}
+		else
+		{
+			_items[0] = '\0';
+		}
+	}
+
+	/// Copies characters from `text` up to the first `'\0'` (at most `M - 1` bytes).
+	template <std::size_t M>
+		requires( M >= 1 && M - 1 <= N )
+	constexpr string( const char ( &text )[M] ) noexcept
+	{
+		if consteval
+		{
+			_items.fill( '\0' );
+		}
+		const char* stop = std::find( text, text + ( M - 1 ), '\0' );
+		_count = static_cast<std::size_t>( stop - text );
+		std::copy_n( text, _count, _items.data() );
+		_items[_count] = '\0';
+	}
+
+	[[nodiscard]] constexpr std::size_t size() const noexcept { return _count; }
+	[[nodiscard]] constexpr std::size_t length() const noexcept { return _count; }
+	[[nodiscard]] constexpr std::size_t capacity() const noexcept { return N; }
+	[[nodiscard]] constexpr bool empty() const noexcept { return _count == 0; }
+
+	[[nodiscard]] constexpr const char* c_str() const noexcept { return _items.data(); }
+	[[nodiscard]] constexpr char* data() noexcept { return _items.data(); }
+	[[nodiscard]] constexpr const char* data() const noexcept { return _items.data(); }
+
+	[[nodiscard]] constexpr char* begin() noexcept { return _items.data(); }
+	[[nodiscard]] constexpr char* end() noexcept { return _items.data() + _count; }
+	[[nodiscard]] constexpr const char* begin() const noexcept { return _items.data(); }
+	[[nodiscard]] constexpr const char* end() const noexcept { return _items.data() + _count; }
+
+	/// `index` must be less than `size()`.
+	[[nodiscard]] constexpr char& operator[]( std::size_t index ) noexcept { return _items[index]; }
+	[[nodiscard]] constexpr const char& operator[]( std::size_t index ) const noexcept { return _items[index]; }
+
+	[[nodiscard]] constexpr std::string_view view() const noexcept { return { _items.data(), _count }; }
+	[[nodiscard]] constexpr operator std::string_view() const noexcept { return view(); }
+
+	/// Returns `false` and does not add `ch` when full.
+	[[nodiscard]] constexpr bool push_back( char ch ) noexcept
+	{
+		if ( _count == N )
+			return false;
+
+		_items[_count++] = ch;
+		_items[_count] = '\0';
+		return true;
+	}
+
+	/// Copies `text` into the buffer. Returns `false` without changing the buffer when `text.size() > N`.
+	[[nodiscard]] constexpr bool assign( std::string_view text ) noexcept
+	{
+		if ( text.size() > N )
+			return false;
+
+		std::copy_n( text.data(), text.size(), _items.data() );
+		_count = text.size();
+		_items[_count] = '\0';
+		return true;
+	}
+
+	constexpr void clear() noexcept
+	{
+		_count = 0;
+		_items[0] = '\0';
+	}
+
+	template <std::size_t M>
+	[[nodiscard]] constexpr bool operator==( const string<M>& other ) const noexcept
+	{
+		return view() == other.view();
+	}
+
+	[[nodiscard]] friend constexpr bool operator==( const string& a, std::string_view b ) noexcept
+	{
+		return a.view() == b;
+	}
+
+private:
+	friend struct detail::sequence_access;
+
+	std::array<char, N + 1> _items;
 	std::size_t _count = 0;
 };
 

@@ -21,12 +21,16 @@ struct pose
 
 consteval bool test_kinds()
 {
-	return kind_of<sint32>() == field_kind::SCALAR && kind_of<std::string_view>() == field_kind::STRING &&
+	return kind_of<std::int32_t>() == field_kind::SCALAR && kind_of<std::string_view>() == field_kind::STRING &&
+	       kind_of<string<16>>() == field_kind::STRING &&
 	       kind_of<std::span<const std::uint8_t>>() == field_kind::BYTES &&
+	       kind_of<bytes<16>>() == field_kind::BYTES &&
 	       kind_of<std::array<std::uint8_t, 6>>() == field_kind::FIXED_BYTES &&
 	       kind_of<repeated<float, 4>>() == field_kind::REPEATED && kind_of<pose>() == field_kind::MESSAGE &&
 	       kind_of<std::optional<int>>() == field_kind::OPTIONAL &&
 	       kind_of<repeated<std::uint8_t, 4>>() == field_kind::BYTES &&
+	       kind_of<repeated<bytes<8>, 4>>() == field_kind::REPEATED &&
+	       kind_of<repeated<string<8>, 4>>() == field_kind::REPEATED &&
 	       kind_of<std::span<const float>>() == field_kind::REPEATED &&
 	       kind_of<std::span<const pose>>() == field_kind::REPEATED &&
 	       kind_of<std::variant<std::monostate, int>>() == field_kind::ONEOF;
@@ -35,14 +39,15 @@ consteval bool test_kinds()
 consteval bool test_wire_types()
 {
 	return wire_type_of<float>() == wire_type::FIXED32 && wire_type_of<double>() == wire_type::FIXED64 &&
-	       wire_type_of<sfixed64>() == wire_type::FIXED64 && wire_type_of<std::int8_t>() == wire_type::VARINT &&
-	       wire_type_of<bool>() == wire_type::VARINT && wire_type_of<sint32>() == wire_type::VARINT &&
-	       wire_type_of<fixed32>() == wire_type::FIXED32;
+	       wire_type_of<std::int64_t, int_encoding::FIXED>() == wire_type::FIXED64 &&
+	       wire_type_of<std::int8_t>() == wire_type::VARINT && wire_type_of<bool>() == wire_type::VARINT &&
+	       wire_type_of<std::int32_t, int_encoding::ZIGZAG>() == wire_type::VARINT &&
+	       wire_type_of<std::uint32_t, int_encoding::FIXED>() == wire_type::FIXED32;
 }
 
 consteval bool test_packed()
 {
-	return is_packed<float>() && is_packed<sint64>() && !is_packed<std::string_view>() && !is_packed<pose>();
+	return is_packed<float>() && is_packed<std::int64_t>() && !is_packed<std::string_view>() && !is_packed<pose>();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

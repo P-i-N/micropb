@@ -71,8 +71,18 @@ inline constexpr bool is_repeated = false;
 template <typename T, std::size_t N>
 inline constexpr bool is_repeated<repeated<T, N>> = true;
 
-/// The sequence types: `std::array`, `std::span<const T>` and `pb::repeated`. `element` has no `const`. `capacity` is
-/// the size `N` of a type that has one, else 0.
+template <typename T>
+inline constexpr bool is_bytes = false;
+template <std::size_t N>
+inline constexpr bool is_bytes<bytes<N>> = true;
+
+template <typename T>
+inline constexpr bool is_string = false;
+template <std::size_t N>
+inline constexpr bool is_string<string<N>> = true;
+
+/// The sequence types: `std::array`, `std::span<const T>`, `pb::repeated` and `pb::bytes`. `element` has no `const`.
+/// `capacity` is the size `N` of a type that has one, else 0.
 template <typename T>
 struct sequence_traits
 {
@@ -106,6 +116,15 @@ struct sequence_traits<repeated<T, N>>
 	using element = std::remove_const_t<T>;
 };
 
+template <std::size_t N>
+struct sequence_traits<bytes<N>>
+{
+	static constexpr bool is_sequence = true;
+	static constexpr std::size_t capacity = N;
+	static constexpr bool is_const_element = false;
+	using element = std::uint8_t;
+};
+
 /// Element type of a sequence type.
 template <typename T>
 using element_t = typename sequence_traits<T>::element;
@@ -122,41 +141,10 @@ template <typename T>
 	       !is_one_of<std::remove_cv_t<T>, bool, char, wchar_t, char8_t, char16_t, char32_t>;
 }
 
-/// `wire_int<T, ZIGZAG>`: `sint32` or `sint64` with a stored integer type of any size.
-template <typename T>
-inline constexpr bool is_zigzag = false;
-template <typename T>
-inline constexpr bool is_zigzag<wire_int<T, int_encoding::ZIGZAG>> = true;
-
-/// The stored integer type of a `wire_int`.
-template <typename T>
-using stored_t = decltype( T::value );
-
-/// A ZigZag member whose stored type is a signed standard integer: 1, 2 or 4 bytes are `sint32`, 8 bytes are `sint64`.
-template <typename T>
-[[nodiscard]] consteval bool is_signed_zigzag()
-{
-	if constexpr ( is_zigzag<T> )
-		return is_standard_integer<stored_t<T>>() && std::is_signed_v<stored_t<T>>;
-	else
-		return false;
-}
-
-/// A ZigZag member whose stored type is an unsigned standard integer.
-template <typename T>
-[[nodiscard]] consteval bool is_unsigned_zigzag()
-{
-	if constexpr ( is_zigzag<T> )
-		return is_standard_integer<stored_t<T>>() && !std::is_signed_v<stored_t<T>>;
-	else
-		return false;
-}
-
 template <typename T>
 [[nodiscard]] consteval bool is_scalar()
 {
-	return std::is_enum_v<T> || is_standard_integer<T>() || is_signed_zigzag<T>() ||
-	       is_one_of<T, bool, float, double, fixed32, fixed64, sfixed32, sfixed64>;
+	return std::is_enum_v<T> || is_standard_integer<T>() || is_one_of<T, bool, float, double>;
 }
 
 } // namespace detail
@@ -173,12 +161,7 @@ template <typename T>
 			static_assert( sizeof( T ) <= 4, "pb: enum_too_wide: a proto3 enum is int32, so the enum must fit in 32 bits" );
 		return field_kind::SCALAR;
 	}
-	else if constexpr ( detail::is_unsigned_zigzag<T>() )
-	{
-		static_assert( !std::is_same_v<T, T>,
-		               "pb: zigzag_unsigned: a ZigZag (sint32, sint64) member needs a signed integer type" );
-	}
-	else if constexpr ( std::is_same_v<T, std::string_view> )
+	else if constexpr ( std::is_same_v<T, std::string_view> || detail::is_string<T> )
 	{
 		return field_kind::STRING;
 	}
@@ -211,19 +194,19 @@ template <typename T>
 
 /// Wire type of a field of type `T`. A `std::optional` has the wire type of its value.
 /// A oneof or a repeated field has no single wire type.
-template <typename T>
+template <typename T, int_encoding Encoding = int_encoding::VARINT>
 [[nodiscard]] consteval wire_type wire_type_of()
 {
 	constexpr field_kind kind = kind_of<T>();
 	if constexpr ( kind == field_kind::OPTIONAL )
-		return wire_type_of<typename T::value_type>();
+		return wire_type_of<typename T::value_type, Encoding>();
 	else if constexpr ( kind == field_kind::ONEOF || kind == field_kind::REPEATED )
 		static_assert( !std::is_same_v<T, T>, "pb: wire_type_of: a oneof or repeated field has no single wire type" );
 	else if constexpr ( kind != field_kind::SCALAR )
 		return wire_type::LENGTH_DELIMITED;
-	else if constexpr ( detail::is_one_of<T, float, fixed32, sfixed32> )
+	else if constexpr ( std::is_same_v<T, float> || ( Encoding == int_encoding::FIXED && sizeof( T ) == 4 ) )
 		return wire_type::FIXED32;
-	else if constexpr ( detail::is_one_of<T, double, fixed64, sfixed64> )
+	else if constexpr ( std::is_same_v<T, double> || ( Encoding == int_encoding::FIXED && sizeof( T ) == 8 ) )
 		return wire_type::FIXED64;
 	else
 		return wire_type::VARINT;
@@ -396,12 +379,64 @@ struct variant_traits<std::variant<First, More...>>
 	}
 };
 
+/// Unwraps one `std::optional` or repeated sequence to reach its scalar leaf type.
+template <typename T>
+struct encoding_leaf
+{
+	using type = T;
+};
+
+template <typename T>
+struct encoding_leaf<std::optional<T>>
+{
+	using type = std::remove_const_t<T>;
+};
+
+template <typename S>
+	requires( sequence_traits<S>::is_sequence && !std::is_same_v<element_t<S>, std::uint8_t> )
+struct encoding_leaf<S>
+{
+	using type = element_t<S>;
+};
+
+template <typename Leaf, int_encoding Encoding>
+consteval void check_leaf_encoding()
+{
+	if constexpr ( Encoding == int_encoding::ZIGZAG )
+	{
+		static_assert( is_standard_integer<Leaf>() && std::is_signed_v<Leaf>,
+		               "pb: zigzag_unsigned: a ZigZag (sint32, sint64) field needs a signed integer type" );
+	}
+	else if constexpr ( Encoding == int_encoding::FIXED )
+	{
+		static_assert( is_standard_integer<Leaf>() && ( sizeof( Leaf ) == 4 || sizeof( Leaf ) == 8 ),
+		               "pb: fixed_width: a fixed-width integer field needs a 32-bit or 64-bit integer type" );
+	}
+}
+
+template <typename U, std::size_t Alternative, int_encoding Encoding>
+consteval void check_field_encoding()
+{
+	if constexpr ( Encoding != int_encoding::VARINT && is_alternative_valid<U>( Alternative ) )
+	{
+		if constexpr ( Alternative != 0 )
+			check_leaf_encoding<std::remove_const_t<std::variant_alternative_t<Alternative, U>>, Encoding>();
+		else
+			check_leaf_encoding<typename encoding_leaf<U>::type, Encoding>();
+	}
+}
+
 /// The entries of a field list. `M` can have `const`.
 template <typename L>
 struct list_traits;
 
-template <typename T, typename... M, std::uint32_t... Number, std::size_t... Offset, std::size_t... Alternative>
-struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>>
+template <typename T,
+          typename... M,
+          std::uint32_t... Number,
+          std::size_t... Offset,
+          std::size_t... Alternative,
+          int_encoding... Encoding>
+struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative, Encoding>...>>
 {
 	using message = T;
 	static constexpr std::size_t count = sizeof...( M );
@@ -440,6 +475,7 @@ struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>>
 
 		check_field_numbers<sorted_numbers()>();
 		( check_member_type<std::remove_const_t<M>>(), ... );
+		( check_field_encoding<std::remove_const_t<M>, Alternative, Encoding>(), ... );
 		static_assert( !is_recursive<T>(),
 		               "pb: recursive_message: a message cannot contain itself, also through a std::span or other "
 		               "messages" );

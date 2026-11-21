@@ -145,9 +145,9 @@ static_assert( d::value_descriptor<std::array<float, 3>>::value.sequence->storag
 static_assert( d::scalar_code_of<bool>() == ( 0 | d::scalar_bool ) );
 static_assert( d::scalar_code_of<std::int8_t>() == ( 0 | d::scalar_signed ) );
 static_assert( d::scalar_code_of<std::uint16_t>() == 1 && d::scalar_code_of<std::uint64_t>() == 3 );
-static_assert( d::scalar_code_of<pb::sint32>() == ( 2 | d::scalar_signed | d::scalar_zigzag ) );
+static_assert( d::scalar_code_of<std::int32_t, pb::int_encoding::ZIGZAG>() == ( 2 | d::scalar_signed | d::scalar_zigzag ) );
 static_assert( d::scalar_code_of<float>() == ( 2 | d::scalar_fixed ) &&
-               d::value_descriptor<pb::sfixed64>::value.scalar == ( 3 | d::scalar_fixed ) );
+               d::value_descriptor<std::int64_t, pb::int_encoding::FIXED>::value.scalar == ( 3 | d::scalar_fixed ) );
 static_assert( d::scalar_code_of<small>() == ( 0 | d::scalar_enum ) );
 static_assert( d::scalar_code_of<level>() == ( 2 | d::scalar_enum | d::scalar_signed ) );
 
@@ -263,7 +263,7 @@ struct inner
 {
 	std::int32_t x;
 	std::string_view label;
-	pb::sint64 z;
+	std::int64_t z;
 };
 
 struct pose
@@ -291,12 +291,12 @@ struct all
 	std::uint16_t u16;
 	std::uint32_t u32;
 	std::uint64_t u64;
-	pb::sint32 s32;
-	pb::sint64 s64;
-	pb::fixed32 fx32;
-	pb::fixed64 fx64;
-	pb::sfixed32 sfx32;
-	pb::sfixed64 sfx64;
+	std::int32_t s32;
+	std::int64_t s64;
+	std::uint32_t fx32;
+	std::uint64_t fx64;
+	std::int32_t sfx32;
+	std::int64_t sfx64;
 	float f;
 	double d;
 	mode m;
@@ -309,7 +309,7 @@ struct all
 	std::optional<std::int32_t> maybe;
 	std::optional<inner> maybe_child;
 	pb::repeated<std::int32_t, 8> ints;
-	pb::repeated<pb::sint32, 4> zz;
+	pb::repeated<std::int32_t, 4> zz;
 	pb::repeated<double, 2> ds;
 	pb::repeated<inner, 3> items;
 	pb::repeated<std::string_view, 3> names;
@@ -330,12 +330,12 @@ struct all_views
 	std::uint16_t u16;
 	std::uint32_t u32;
 	std::uint64_t u64;
-	pb::sint32 s32;
-	pb::sint64 s64;
-	pb::fixed32 fx32;
-	pb::fixed64 fx64;
-	pb::sfixed32 sfx32;
-	pb::sfixed64 sfx64;
+	std::int32_t s32;
+	std::int64_t s64;
+	std::uint32_t fx32;
+	std::uint64_t fx64;
+	std::int32_t sfx32;
+	std::int64_t sfx64;
 	float f;
 	double d;
 	mode m;
@@ -348,7 +348,7 @@ struct all_views
 	std::optional<std::int32_t> maybe;
 	std::optional<inner> maybe_child;
 	std::span<const std::int32_t> ints;
-	std::span<const pb::sint32> zz;
+	std::span<const std::int32_t> zz;
 	std::array<double, 2> ds;
 	pb::repeated<inner, 3> items;
 	pb::repeated<std::string_view, 3> names;
@@ -359,10 +359,11 @@ struct all_views
 } // namespace
 
 template <>
-struct pb::fields_of<inner> : pb::field_list<inner,
-                                             pb::field_at<decltype( inner::x ), 1, offsetof( inner, x )>,
-                                             pb::field_at<decltype( inner::label ), 2, offsetof( inner, label )>,
-                                             pb::field_at<decltype( inner::z ), 3, offsetof( inner, z )>>
+struct pb::fields_of<inner>
+  : pb::field_list<inner,
+                   pb::field_at<decltype( inner::x ), 1, offsetof( inner, x )>,
+                   pb::field_at<decltype( inner::label ), 2, offsetof( inner, label )>,
+                   pb::field_at<decltype( inner::z ), 3, offsetof( inner, z ), 0, pb::int_encoding::ZIGZAG>>
 {};
 
 template <>
@@ -387,12 +388,12 @@ struct pb::fields_of<all>
                    pb::field_at<decltype( all::u16 ), 7, offsetof( all, u16 )>,
                    pb::field_at<decltype( all::u32 ), 8, offsetof( all, u32 )>,
                    pb::field_at<decltype( all::u64 ), 9, offsetof( all, u64 )>,
-                   pb::field_at<decltype( all::s32 ), 10, offsetof( all, s32 )>,
-                   pb::field_at<decltype( all::s64 ), 11, offsetof( all, s64 )>,
-                   pb::field_at<decltype( all::fx32 ), 12, offsetof( all, fx32 )>,
-                   pb::field_at<decltype( all::fx64 ), 13, offsetof( all, fx64 )>,
-                   pb::field_at<decltype( all::sfx32 ), 14, offsetof( all, sfx32 )>,
-                   pb::field_at<decltype( all::sfx64 ), 15, offsetof( all, sfx64 )>,
+                   pb::field_at<decltype( all::s32 ), 10, offsetof( all, s32 ), 0, pb::int_encoding::ZIGZAG>,
+                   pb::field_at<decltype( all::s64 ), 11, offsetof( all, s64 ), 0, pb::int_encoding::ZIGZAG>,
+                   pb::field_at<decltype( all::fx32 ), 12, offsetof( all, fx32 ), 0, pb::int_encoding::FIXED>,
+                   pb::field_at<decltype( all::fx64 ), 13, offsetof( all, fx64 ), 0, pb::int_encoding::FIXED>,
+                   pb::field_at<decltype( all::sfx32 ), 14, offsetof( all, sfx32 ), 0, pb::int_encoding::FIXED>,
+                   pb::field_at<decltype( all::sfx64 ), 15, offsetof( all, sfx64 ), 0, pb::int_encoding::FIXED>,
                    pb::field_at<decltype( all::f ), 16, offsetof( all, f )>,
                    pb::field_at<decltype( all::d ), 17, offsetof( all, d )>,
                    pb::field_at<decltype( all::m ), 18, offsetof( all, m )>,
@@ -405,7 +406,7 @@ struct pb::fields_of<all>
                    pb::field_at<decltype( all::maybe ), 25, offsetof( all, maybe )>,
                    pb::field_at<decltype( all::maybe_child ), 26, offsetof( all, maybe_child )>,
                    pb::field_at<decltype( all::ints ), 27, offsetof( all, ints )>,
-                   pb::field_at<decltype( all::zz ), 28, offsetof( all, zz )>,
+                   pb::field_at<decltype( all::zz ), 28, offsetof( all, zz ), 0, pb::int_encoding::ZIGZAG>,
                    pb::field_at<decltype( all::ds ), 29, offsetof( all, ds )>,
                    pb::field_at<decltype( all::items ), 30, offsetof( all, items )>,
                    pb::field_at<decltype( all::names ), 31, offsetof( all, names )>,
@@ -427,12 +428,12 @@ struct pb::fields_of<all_views>
                    pb::field_at<decltype( all_views::u16 ), 7, offsetof( all_views, u16 )>,
                    pb::field_at<decltype( all_views::u32 ), 8, offsetof( all_views, u32 )>,
                    pb::field_at<decltype( all_views::u64 ), 9, offsetof( all_views, u64 )>,
-                   pb::field_at<decltype( all_views::s32 ), 10, offsetof( all_views, s32 )>,
-                   pb::field_at<decltype( all_views::s64 ), 11, offsetof( all_views, s64 )>,
-                   pb::field_at<decltype( all_views::fx32 ), 12, offsetof( all_views, fx32 )>,
-                   pb::field_at<decltype( all_views::fx64 ), 13, offsetof( all_views, fx64 )>,
-                   pb::field_at<decltype( all_views::sfx32 ), 14, offsetof( all_views, sfx32 )>,
-                   pb::field_at<decltype( all_views::sfx64 ), 15, offsetof( all_views, sfx64 )>,
+                   pb::field_at<decltype( all_views::s32 ), 10, offsetof( all_views, s32 ), 0, pb::int_encoding::ZIGZAG>,
+                   pb::field_at<decltype( all_views::s64 ), 11, offsetof( all_views, s64 ), 0, pb::int_encoding::ZIGZAG>,
+                   pb::field_at<decltype( all_views::fx32 ), 12, offsetof( all_views, fx32 ), 0, pb::int_encoding::FIXED>,
+                   pb::field_at<decltype( all_views::fx64 ), 13, offsetof( all_views, fx64 ), 0, pb::int_encoding::FIXED>,
+                   pb::field_at<decltype( all_views::sfx32 ), 14, offsetof( all_views, sfx32 ), 0, pb::int_encoding::FIXED>,
+                   pb::field_at<decltype( all_views::sfx64 ), 15, offsetof( all_views, sfx64 ), 0, pb::int_encoding::FIXED>,
                    pb::field_at<decltype( all_views::f ), 16, offsetof( all_views, f )>,
                    pb::field_at<decltype( all_views::d ), 17, offsetof( all_views, d )>,
                    pb::field_at<decltype( all_views::m ), 18, offsetof( all_views, m )>,
@@ -445,7 +446,7 @@ struct pb::fields_of<all_views>
                    pb::field_at<decltype( all_views::maybe ), 25, offsetof( all_views, maybe )>,
                    pb::field_at<decltype( all_views::maybe_child ), 26, offsetof( all_views, maybe_child )>,
                    pb::field_at<decltype( all_views::ints ), 27, offsetof( all_views, ints )>,
-                   pb::field_at<decltype( all_views::zz ), 28, offsetof( all_views, zz )>,
+                   pb::field_at<decltype( all_views::zz ), 28, offsetof( all_views, zz ), 0, pb::int_encoding::ZIGZAG>,
                    pb::field_at<decltype( all_views::ds ), 29, offsetof( all_views, ds )>,
                    pb::field_at<decltype( all_views::items ), 30, offsetof( all_views, items )>,
                    pb::field_at<decltype( all_views::names ), 31, offsetof( all_views, names )>,
@@ -459,7 +460,7 @@ namespace {
 
 constexpr std::array<std::uint8_t, 3> raw{ 9, 8, 7 };
 constexpr std::array<std::int32_t, 3> int_values{ 1, -1, 100000 };
-constexpr std::array<pb::sint32, 2> zz_values{ pb::sint32( -1 ), pb::sint32( 2 ) };
+constexpr std::array<std::int32_t, 2> zz_values{ -1, 2 };
 
 template <typename R, typename V>
 void append_all( R& sequence, const V& values )
@@ -650,11 +651,65 @@ bool test_wide_entries()
 	       rx.max_tag_scalar == 999 && rx.pad.empty();
 }
 
+struct encoded_compounds
+{
+	std::optional<std::int32_t> opt_zz;
+	std::optional<std::uint32_t> opt_fx;
+	std::variant<std::monostate, std::int32_t, std::uint32_t> oneof_enc;
+};
+
+} // namespace
+
+template <>
+struct pb::fields_of<encoded_compounds>
+  : pb::field_list<
+      encoded_compounds,
+      pb::field_at<decltype( encoded_compounds::opt_zz ), 1, offsetof( encoded_compounds, opt_zz ), 0, pb::int_encoding::ZIGZAG>,
+      pb::field_at<decltype( encoded_compounds::opt_fx ), 2, offsetof( encoded_compounds, opt_fx ), 0, pb::int_encoding::FIXED>,
+      pb::field_at<decltype( encoded_compounds::oneof_enc ), 3, offsetof( encoded_compounds, oneof_enc ), 1, pb::int_encoding::ZIGZAG>,
+      pb::field_at<decltype( encoded_compounds::oneof_enc ), 4, offsetof( encoded_compounds, oneof_enc ), 2, pb::int_encoding::FIXED>>
+{};
+
+namespace {
+
+/// `pb::int_encoding` works on `std::optional` values and `std::variant` (`oneof`) alternatives.
+bool test_encoded_compounds()
+{
+	// field 1 (varint zigzag -1 -> 0x01): 0x08 0x01
+	// field 2 (fixed32 0x04030201):       0x15 0x01 0x02 0x03 0x04
+	// field 3 (varint zigzag -2 -> 0x03): 0x18 0x03
+	constexpr auto expected_a = std::to_array<std::uint8_t>( { 0x08, 0x01, 0x15, 0x01, 0x02, 0x03, 0x04, 0x18, 0x03 } );
+	encoded_compounds tx_a{ .opt_zz = -1, .opt_fx = 0x04030201u, .oneof_enc = std::int32_t{ -2 } };
+	std::array<std::uint8_t, 16> out_a{};
+	const auto n_a = pb::encode( tx_a, out_a );
+	if ( !n_a || *n_a != expected_a.size() || !std::equal( expected_a.begin(), expected_a.end(), out_a.begin() ) )
+		return false;
+
+	encoded_compounds rx_a{};
+	if ( !pb::decode( expected_a, rx_a ) || rx_a.opt_zz != -1 || rx_a.opt_fx != 0x04030201u ||
+	     !std::holds_alternative<std::int32_t>( rx_a.oneof_enc ) || std::get<std::int32_t>( rx_a.oneof_enc ) != -2 )
+		return false;
+
+	// field 4 (fixed32 0x89ABCDEF): 0x25 0xEF 0xCD 0xAB 0x89
+	constexpr auto expected_b = std::to_array<std::uint8_t>( { 0x25, 0xEF, 0xCD, 0xAB, 0x89 } );
+	encoded_compounds tx_b{ .opt_zz = std::nullopt, .opt_fx = std::nullopt, .oneof_enc = std::uint32_t{ 0x89ABCDEFu } };
+	std::array<std::uint8_t, 16> out_b{};
+	const auto n_b = pb::encode( tx_b, out_b );
+	if ( !n_b || *n_b != expected_b.size() || !std::equal( expected_b.begin(), expected_b.end(), out_b.begin() ) )
+		return false;
+
+	if ( !pb::decode( expected_b, rx_a ) || rx_a.opt_zz.has_value() || rx_a.opt_fx.has_value() ||
+	     !std::holds_alternative<std::uint32_t>( rx_a.oneof_enc ) ||
+	     std::get<std::uint32_t>( rx_a.oneof_enc ) != 0x89ABCDEFu )
+		return false;
+	return true;
+}
+
 } // namespace
 
 int main()
 {
 	const bool ok = test_optional_accessor() && test_variant_accessor() && test_sequence_accessor() &&
-	                test_block_bound() && test_all_kinds() && test_wide_entries();
+	                test_block_bound() && test_all_kinds() && test_wide_entries() && test_encoded_compounds();
 	return ok ? 0 : 1;
 }

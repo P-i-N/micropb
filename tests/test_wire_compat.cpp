@@ -41,7 +41,7 @@ struct span_lists
 	std::span<const float> floats;
 	std::span<const std::string_view> names;
 	std::span<const inner> items;
-	std::span<const sint64> zz;
+	std::span<const std::int64_t> zz;
 };
 
 } // namespace
@@ -69,7 +69,7 @@ struct pb::fields_of<span_lists>
                    pb::field_at<decltype( span_lists::floats ), 2, offsetof( span_lists, floats )>,
                    pb::field_at<decltype( span_lists::names ), 3, offsetof( span_lists, names )>,
                    pb::field_at<decltype( span_lists::items ), 4, offsetof( span_lists, items )>,
-                   pb::field_at<decltype( span_lists::zz ), 5, offsetof( span_lists, zz )>>
+                   pb::field_at<decltype( span_lists::zz ), 5, offsetof( span_lists, zz ), 0, pb::int_encoding::ZIGZAG>>
 {};
 
 namespace {
@@ -290,7 +290,7 @@ bool spans_match( const std::array<std::uint8_t, N>& wire )
 	       same_items( owned.items,
 	                   views.items,
 	                   []( const inner& x, const inner& y ) { return x.x == y.x && x.label == y.label; } ) &&
-	       same_items( owned.zz, views.zz, []( sint64 x, sint64 y ) { return x.value == y.value; } ) && encoded &&
+	       same_items( owned.zz, views.zz, std::equal_to<>{} ) && encoded &&
 	       *encoded == N && out == wire && storage.intact();
 }
 
