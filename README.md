@@ -37,20 +37,22 @@ message Reading {
 // sensor.pb.hpp (generated)
 namespace sensor {
 
-enum class Mode : int32_t {
-    IDLE = 0,
-    RUN = 1,
+enum class Mode : int32_t
+{
+	IDLE = 0,
+	RUN = 1,
 };
 
-struct Reading {
-    uint32_t id = 0;
-    int32_t temperature_mc = 0;
-    Mode mode = Mode::IDLE;
-    std::optional<pb::string<15>> label = {};
-    pb::repeated<float, 4> channels = {};
-    pb::bytes<8> token = {};
-    std::array<uint8_t, 6> mac = {};
-    std::variant<std::monostate, uint32_t, std::string_view> detail = {};
+struct Reading
+{
+	uint32_t id = 0;
+	int32_t temperature_mc = 0;
+	Mode mode = Mode::IDLE;
+	std::optional<pb::string<15>> label = {};
+	pb::repeated<float, 4> channels = {};
+	pb::bytes<8> token = {};
+	std::array<uint8_t, 6> mac = {};
+	std::variant<std::monostate, uint32_t, std::string_view> detail = {};
 };
 
 } // namespace sensor
@@ -59,38 +61,39 @@ struct Reading {
 Encode, size, and decode any message with three functions (`pb::encode`, `pb::decode`, `pb::encoded_size`):
 
 ```cpp
+#include "sensor.pb.hpp"
+
 #include <array>
 #include <span>
 #include <stdint.h>
 
 #include <micropb/micropb.hpp>
-#include "sensor.pb.hpp"
 
-bool round_trip() {
-    uint8_t wire[64]{};
+bool round_trip()
+{
+	uint8_t wire[64]{};
 
-    const sensor::Reading tx{
-        .id = 1,
-        .temperature_mc = -250,
-        .mode = sensor::Mode::RUN,
-        .label = "ambient",
-        .channels = {{3.31f, 3.29f}},
-        .token = {{0xAA, 0xBB}},
-        .mac = {0x02, 0x00, 0x5E, 0x10, 0x00, 0x01},
-        .detail = uint32_t{3600},
-    };
+	const sensor::Reading tx{
+		.id = 1,
+		.temperature_mc = -250,
+		.mode = sensor::Mode::RUN,
+		.label = "ambient",
+		.channels = { { 3.31f, 3.29f } },
+		.token = { { 0xAA, 0xBB } },
+		.mac = { 0x02, 0x00, 0x5E, 0x10, 0x00, 0x01 },
+		.detail = uint32_t{ 3600 },
+	};
 
-    const auto written = pb::encode(tx, wire); // std::expected<size_t, pb::error>
-    if (!written)
-        return false;
+	const auto written = pb::encode( tx, wire ); // std::expected<size_t, pb::error>
+	if ( !written )
+		return false;
 
-    sensor::Reading rx;
-    if (!pb::decode(std::span(wire).first(*written), rx))
-        return false;
+	sensor::Reading rx;
+	if ( !pb::decode( std::span( wire ).first( *written ), rx ) )
+		return false;
 
-    const auto* uptime = std::get_if<uint32_t>(&rx.detail);
-    return rx.id == 1 && rx.temperature_mc == -250 && rx.label == "ambient" &&
-           uptime && *uptime == 3600;
+	const auto* uptime = std::get_if<uint32_t>( &rx.detail );
+	return rx.id == 1 && rx.temperature_mc == -250 && rx.label == "ambient" && uptime && *uptime == 3600;
 }
 ```
 
@@ -122,18 +125,21 @@ When a field has no `max_length`, `max_size`, or `max_count` in `.options`, `pro
 * `repeated T` becomes `std::span<const T>`, allocated as a single contiguous block in a caller-owned scratch buffer (`uint8_t[N]`, `std::array<uint8_t, N>`, `std::span<uint8_t>`, or `pb::arena` when sharing across multiple `decode` calls):
 
 ```cpp
-struct Batch {
-    std::string_view device = {};          // views `packet` directly
-    std::span<const int32_t> samples = {}; // allocated in `scratch` on decode
+struct Batch
+{
+	std::string_view device = {};          // views `packet` directly
+	std::span<const int32_t> samples = {}; // allocated in `scratch` on decode
 };
 
-void on_packet(std::span<const uint8_t> packet) {
-    uint8_t scratch[256]; // or std::array<uint8_t, 256>, std::span<uint8_t>, or pb::arena
+void on_packet( std::span<const uint8_t> packet )
+{
+	uint8_t scratch[256]; // or std::array<uint8_t, 256>, std::span<uint8_t>, or pb::arena
 
-    Batch rx;
-    if (pb::decode(packet, rx, scratch)) {
-        // `rx` is valid while `packet` and `scratch` remain alive
-    }
+	Batch rx;
+	if ( pb::decode( packet, rx, scratch ) )
+	{
+		// `rx` is valid while `packet` and `scratch` remain alive
+	}
 }
 ```
 
@@ -155,23 +161,21 @@ void on_packet(std::span<const uint8_t> packet) {
 
 ```cpp
 template <typename T>
-[[nodiscard]] size_t pb::encoded_size(const T& msg);
+[[nodiscard]] size_t pb::encoded_size( const T& msg );
 
 template <typename T>
-[[nodiscard]] std::expected<size_t, pb::error> pb::encode(
-    const T& msg, std::span<uint8_t> out);
+[[nodiscard]] std::expected<size_t, pb::error> pb::encode( const T& msg, std::span<uint8_t> out );
 
 template <typename T>
-[[nodiscard]] std::expected<size_t, pb::error> pb::decode(
-    std::span<const uint8_t> in, T& msg);
+[[nodiscard]] std::expected<size_t, pb::error> pb::decode( std::span<const uint8_t> in, T& msg );
 
 template <typename T>
-[[nodiscard]] std::expected<size_t, pb::error> pb::decode(
-    std::span<const uint8_t> in, T& msg, std::span<uint8_t> memory);
+[[nodiscard]] std::expected<size_t, pb::error> pb::decode( std::span<const uint8_t> in,
+                                                           T& msg,
+                                                           std::span<uint8_t> memory );
 
 template <typename T>
-[[nodiscard]] std::expected<size_t, pb::error> pb::decode(
-    std::span<const uint8_t> in, T& msg, pb::arena& memory);
+[[nodiscard]] std::expected<size_t, pb::error> pb::decode( std::span<const uint8_t> in, T& msg, pb::arena& memory );
 ```
 
 ## Integration & code generation
