@@ -223,18 +223,20 @@ namespace {
 namespace d = pb::detail;
 
 // The table is in the order of the field numbers.
-constexpr const d::message_desc& table = d::message_descriptor<manual::message>::value;
-static_assert( table.count == 7 );
-static_assert( table.fields[0].number == 1 && table.fields[1].number == 2 && table.fields[2].number == 3 &&
-               table.fields[3].number == 4 && table.fields[4].number == 5 && table.fields[5].number == 10 &&
-               table.fields[6].number == 11 );
-static_assert( table.fields[2].offset == offsetof( manual::message, key ) && table.fields[2].alternative == 0 &&
-               table.fields[2].type == &d::value_descriptor<std::array<std::uint8_t, 4>>::value );
-static_assert( table.fields[5].offset == offsetof( manual::message, choice ) && table.fields[5].alternative == 1 &&
-               table.fields[6].alternative == 2 &&
-               table.fields[6].type == &d::value_descriptor<decltype( manual::message::choice )>::value );
-static_assert( d::message_descriptor<manual::empty>::value.count == 0 );
-static_assert( d::message_descriptor<manual::shared_offset>::value.count == 3 );
+using message_table = d::field_table<d::field_list_of<manual::message>>;
+constexpr const auto& layout = message_table::layout;
+static_assert( message_table::entry_count == 7 && layout.words_n == 7 );
+static_assert( layout.entries[0].number == 1 && layout.entries[1].number == 2 && layout.entries[2].number == 3 &&
+               layout.entries[3].number == 4 && layout.entries[4].number == 5 && layout.entries[5].number == 10 &&
+               layout.entries[6].number == 11 );
+static_assert( layout.entries[2].offset == offsetof( manual::message, key ) && layout.entries[2].alternative == 0 &&
+               layout.subs[layout.entries[2].sub_idx] == &d::value_descriptor<std::array<std::uint8_t, 4>>::value );
+static_assert( layout.entries[5].offset == offsetof( manual::message, choice ) && layout.entries[5].alternative == 1 &&
+               layout.entries[6].alternative == 2 &&
+               layout.subs[layout.entries[6].sub_idx] == &d::value_descriptor<decltype( manual::message::choice )>::value );
+static_assert( d::value_descriptor<manual::empty>::value.words == 0 &&
+               d::value_descriptor<manual::empty>::value.table == nullptr );
+static_assert( d::value_descriptor<manual::shared_offset>::value.words == 3 );
 
 static_assert( !d::is_recursive<manual::inner>() && !d::is_recursive<manual::message>() &&
                !d::is_recursive<manual::empty>() && !d::is_recursive<manual::fixed>() &&

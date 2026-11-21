@@ -62,7 +62,6 @@ template <typename T>
 		return size | ( std::is_signed_v<T> ? scalar_signed : 0 );
 }
 
-struct message_desc;
 struct sequence_desc;
 struct optional_desc;
 struct variant_desc;
@@ -72,14 +71,16 @@ struct variant_desc;
 struct value_desc
 {
 	field_kind kind;
-	/// SCALAR: the scalar code.
+	/// SCALAR: the scalar code. MESSAGE: the number of distinct compound types in `table`.
 	std::uint8_t scalar;
+	/// MESSAGE: the number of `std::uint32_t` words in `table`.
+	std::uint16_t words;
 	union
 	{
 		/// FIXED_BYTES: the number of bytes. 0 for SCALAR and STRING.
 		std::uint32_t size;
-		/// MESSAGE.
-		const message_desc* message;
+		/// MESSAGE: `message_table_data`, or null when `words == 0`.
+		const void* table;
 		/// REPEATED and BYTES. Null for the view `std::span<const std::uint8_t>`.
 		const sequence_desc* sequence;
 		/// OPTIONAL.
@@ -89,24 +90,36 @@ struct value_desc
 	};
 };
 
-/// One entry of the tag table: a member of a message, or one alternative of a
-/// `std::variant` member.
-struct field_desc
+// Each field of a message encodes into 1 or 3 `std::uint32_t` words, sorted in
+// ascending field number:
+// - 1 word (bit 31 == 0): `[30:24 op] [23:12 offset] [11:0 number]`
+//     op 0..70:   inline SCALAR (`op` is the scalar code)
+//     op 71:      inline STRING (`std::string_view`)
+//     op 72:      inline BYTES view (`std::span<const std::uint8_t>`)
+//     op 73..95:  compound member at `subs[op - 73]`
+//     op 96..127: ONEOF alternative `op - 95` (1..32) on `subs[0]`
+// - 3 words (bit 31 == 1), when `number > 4095`, `offset > 4095`, `sub_idx >= 23`,
+//   a second `std::variant` member, or `alternative > 32`:
+//     word 0: `0x80000000u | number`
+//     word 1: `(offset << 16) | alternative`
+//     word 2: `(sub_idx << 8) | base_op`
+inline constexpr std::uint8_t op_string = 71;
+inline constexpr std::uint8_t op_bytes_view = 72;
+inline constexpr std::uint8_t op_sub_base = 73;
+inline constexpr std::uint8_t op_sub_limit = 23;
+inline constexpr std::uint8_t op_oneof_base = 96;
+inline constexpr std::uint8_t op_oneof_max_alt = 32;
+
+/// Unpacked entry of a message field table.
+struct field_entry
 {
 	std::uint32_t number;
-	/// Offset of the member in the message, in bytes.
 	std::uint16_t offset;
-	/// 0 for a plain member, else the index of the alternative.
+	/// 0 for a plain member, else the 1-based index of the `std::variant` alternative.
 	std::uint16_t alternative;
-	/// Type of the member. For an alternative, this is the `std::variant`.
-	const value_desc* type;
-};
-
-/// The fields of a message type, in ascending field number.
-struct message_desc
-{
-	const field_desc* fields;
-	std::uint16_t count;
+	/// Index into `subs` when `base_op == op_sub_base`.
+	std::uint16_t sub_idx;
+	std::uint8_t base_op;
 };
 
 /// The items of a sequence at this moment.
@@ -194,18 +207,12 @@ struct variant_desc
 	variant_accessor access;
 };
 
-static_assert( sizeof( field_desc ) <= ( sizeof( void* ) == 4 ? 12 : 16 ) );
+static_assert( sizeof( value_desc ) <= 2 * sizeof( void* ) );
 
 template <typename T>
 struct value_descriptor
 {
 	static const value_desc value;
-};
-
-template <typename T>
-struct message_descriptor
-{
-	static const message_desc value;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -387,28 +394,201 @@ struct variant_alternatives<std::variant<A...>>
 template <typename V>
 inline constexpr variant_desc variant_descriptor{ variant_alternatives<V>::value, access_variant<V> };
 
-/// The field table of a message type: one entry for each entry of its field
-/// list, in ascending field number.
+/// Compound descriptor of the member type `M`, or null when `M` encodes inline
+/// in a field word (`SCALAR`, `STRING`, and `std::span<const std::uint8_t>`).
+template <typename M>
+[[nodiscard]] consteval const value_desc* sub_desc_of()
+{
+	using U = std::remove_const_t<M>;
+	constexpr field_kind kind = kind_of<U>();
+	if constexpr ( kind == field_kind::SCALAR || kind == field_kind::STRING ||
+	               std::is_same_v<U, std::span<const std::uint8_t>> )
+		return nullptr;
+	else
+		return &value_descriptor<U>::value;
+}
+
+template <typename M>
+[[nodiscard]] consteval std::uint8_t base_op_of()
+{
+	using U = std::remove_const_t<M>;
+	constexpr field_kind kind = kind_of<U>();
+	if constexpr ( kind == field_kind::SCALAR )
+	{
+		constexpr std::uint8_t code = scalar_code_of<U>();
+		static_assert( code < op_string );
+		return code;
+	}
+	else if constexpr ( kind == field_kind::STRING )
+		return op_string;
+	else if constexpr ( std::is_same_v<U, std::span<const std::uint8_t>> )
+		return op_bytes_view;
+	else
+		return op_sub_base;
+}
+
+[[nodiscard]] consteval bool fits_one_word( const field_entry& entry )
+{
+	if ( entry.number > 0xFFFu || entry.offset > 0xFFFu )
+		return false;
+	if ( entry.alternative != 0 )
+		return entry.sub_idx == 0 && entry.alternative <= op_oneof_max_alt;
+	if ( entry.base_op == op_sub_base )
+		return entry.sub_idx < op_sub_limit;
+	return true;
+}
+
+template <std::size_t SubCount, std::size_t WordCount>
+struct message_table_data
+{
+	std::array<const value_desc*, SubCount> subs;
+	std::array<std::uint32_t, WordCount> words;
+};
+
+template <std::size_t WordCount>
+struct message_table_data<0, WordCount>
+{
+	std::array<std::uint32_t, WordCount> words;
+};
+
+template <>
+struct message_table_data<0, 0>
+{};
+
+/// The field table of a message type: distinct compound descriptors followed by
+/// 1- or 3-word field entries in ascending field number.
 template <typename L>
 struct field_table;
 
 template <typename T, typename... M, std::uint32_t... Number, std::size_t... Offset, std::size_t... Alternative>
 struct field_table<field_list<T, field_at<M, Number, Offset, Alternative>...>>
 {
-	[[nodiscard]] static consteval std::array<field_desc, sizeof...( M )> make()
-	{
-		list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>>::check();
+	static constexpr std::size_t entry_count = sizeof...( M );
 
-		std::array<field_desc, sizeof...( M )> fields{ field_desc{ Number,
-		                                                           static_cast<std::uint16_t>( Offset ),
-		                                                           static_cast<std::uint16_t>( Alternative ),
-		                                                           &value_descriptor<std::remove_const_t<M>>::value }... };
-		std::sort(
-		  fields.begin(), fields.end(), []( const field_desc& a, const field_desc& b ) { return a.number < b.number; } );
-		return fields;
+	template <typename Target>
+	[[nodiscard]] static consteval std::size_t type_id_of()
+	{
+		if constexpr ( entry_count > 0 )
+		{
+			const bool same[]{ std::is_same_v<Target, std::remove_const_t<M>>... };
+			for ( std::size_t i = 0; i < entry_count; ++i )
+				if ( same[i] )
+					return i;
+		}
+		return 0;
 	}
 
-	static constexpr std::array<field_desc, sizeof...( M )> value = make();
+	struct plan
+	{
+		std::size_t subs_n;
+		std::size_t words_n;
+		std::array<const value_desc*, entry_count> subs;
+		std::array<field_entry, entry_count> entries;
+	};
+
+	[[nodiscard]] static consteval plan build_plan()
+	{
+		list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>>::check();
+		struct raw_row
+		{
+			std::uint32_t number;
+			std::size_t offset;
+			std::size_t alternative;
+			std::size_t type_id;
+			std::uint8_t base_op;
+			const value_desc* sub;
+		};
+		std::array<raw_row, entry_count> rows{ raw_row{ Number,
+		                                                Offset,
+		                                                Alternative,
+		                                                type_id_of<std::remove_const_t<M>>(),
+		                                                base_op_of<M>(),
+		                                                sub_desc_of<M>() }... };
+		std::sort( rows.begin(), rows.end(), []( const raw_row& a, const raw_row& b ) { return a.number < b.number; } );
+
+		plan p{};
+		std::array<std::size_t, entry_count> sub_ids{};
+		// Put a `std::variant` descriptor first (`subs[0]`) so its alternatives fit in 1 word.
+		for ( unsigned pass = 0; pass < 2; ++pass )
+		{
+			for ( std::size_t i = 0; i < entry_count; ++i )
+			{
+				if ( rows[i].base_op != op_sub_base || ( ( rows[i].alternative != 0 ) != ( pass == 0 ) ) )
+					continue;
+				bool found = false;
+				for ( std::size_t j = 0; j < p.subs_n; ++j )
+					if ( sub_ids[j] == rows[i].type_id )
+						found = true;
+				if ( !found )
+				{
+					sub_ids[p.subs_n] = rows[i].type_id;
+					p.subs[p.subs_n++] = rows[i].sub;
+				}
+			}
+		}
+
+		for ( std::size_t i = 0; i < entry_count; ++i )
+		{
+			std::uint16_t sub_idx = 0;
+			if ( rows[i].base_op == op_sub_base )
+			{
+				for ( std::size_t j = 0; j < p.subs_n; ++j )
+					if ( sub_ids[j] == rows[i].type_id )
+						sub_idx = static_cast<std::uint16_t>( j );
+			}
+			p.entries[i] = field_entry{
+				rows[i].number,
+				static_cast<std::uint16_t>( rows[i].offset ),
+				static_cast<std::uint16_t>( rows[i].alternative ),
+				sub_idx,
+				rows[i].base_op,
+			};
+			p.words_n += fits_one_word( p.entries[i] ) ? 1u : 3u;
+		}
+		return p;
+	}
+
+	static constexpr plan layout = build_plan();
+	static_assert( layout.subs_n <= 255 && layout.words_n <= 65535 );
+
+	using table_type = message_table_data<layout.subs_n, layout.words_n>;
+
+	[[nodiscard]] static consteval table_type make()
+	{
+		if constexpr ( layout.subs_n > 0 && layout.words_n > 0 )
+			static_assert( offsetof( table_type, words ) == layout.subs_n * sizeof( const value_desc* ) );
+
+		table_type out{};
+		if constexpr ( layout.subs_n > 0 )
+		{
+			for ( std::size_t j = 0; j < layout.subs_n; ++j )
+				out.subs[j] = layout.subs[j];
+		}
+		if constexpr ( layout.words_n > 0 )
+		{
+			std::size_t w = 0;
+			for ( std::size_t i = 0; i < entry_count; ++i )
+			{
+				const field_entry& e = layout.entries[i];
+				if ( fits_one_word( e ) )
+				{
+					const std::uint32_t op = e.alternative != 0 ? ( std::uint32_t{ op_oneof_base } + e.alternative - 1u )
+					                         : e.base_op == op_sub_base ? ( std::uint32_t{ op_sub_base } + e.sub_idx )
+					                                                    : std::uint32_t{ e.base_op };
+					out.words[w++] = ( op << 24 ) | ( static_cast<std::uint32_t>( e.offset ) << 12 ) | e.number;
+				}
+				else
+				{
+					out.words[w++] = 0x80000000u | e.number;
+					out.words[w++] = ( static_cast<std::uint32_t>( e.offset ) << 16 ) | e.alternative;
+					out.words[w++] = ( static_cast<std::uint32_t>( e.sub_idx ) << 8 ) | e.base_op;
+				}
+			}
+		}
+		return out;
+	}
+
+	static constexpr table_type value = make();
 };
 
 template <typename T>
@@ -417,41 +597,42 @@ template <typename T>
 	constexpr field_kind kind = kind_of<T>();
 
 	if constexpr ( kind == field_kind::SCALAR )
-		return { .kind = kind, .scalar = scalar_code_of<T>(), .size = 0 };
+		return { .kind = kind, .scalar = scalar_code_of<T>(), .words = 0, .size = 0 };
 	else if constexpr ( kind == field_kind::STRING )
-		return { .kind = kind, .scalar = 0, .size = 0 };
+		return { .kind = kind, .scalar = 0, .words = 0, .size = 0 };
 	else if constexpr ( kind == field_kind::FIXED_BYTES )
-		return { .kind = kind, .scalar = 0, .size = static_cast<std::uint32_t>( sequence_traits<T>::capacity ) };
+		return { .kind = kind, .scalar = 0, .words = 0, .size = static_cast<std::uint32_t>( sequence_traits<T>::capacity ) };
 	else if constexpr ( std::is_same_v<T, std::span<const std::uint8_t>> )
 		// Only this exact type is the bytes view that the interpreter copies as
 		// one object. A span with a static extent has a different layout: it
 		// goes through its accessor, as each other sequence.
-		return { .kind = kind, .scalar = 0, .sequence = nullptr };
+		return { .kind = kind, .scalar = 0, .words = 0, .sequence = nullptr };
 	else if constexpr ( kind == field_kind::BYTES || kind == field_kind::REPEATED )
-		return { .kind = kind, .scalar = 0, .sequence = &sequence_descriptor<T> };
+		return { .kind = kind, .scalar = 0, .words = 0, .sequence = &sequence_descriptor<T> };
 	else if constexpr ( kind == field_kind::MESSAGE )
-		return { .kind = kind, .scalar = 0, .message = &message_descriptor<T>::value };
+	{
+		// The field list of `T` must name `T`: a list of a different type has the offsets of that type.
+		using list = field_list_of<T>;
+		static_assert( std::is_same_v<typename list_traits<list>::message, T>,
+		               "pb: field_list_type: pb::fields_of<T> must derive from pb::field_list<T, ...> with the same T" );
+		const void* table = nullptr;
+		if constexpr ( field_table<list>::layout.words_n > 0 )
+			table = &field_table<list>::value;
+		return {
+			.kind = kind,
+			.scalar = static_cast<std::uint8_t>( field_table<list>::layout.subs_n ),
+			.words = static_cast<std::uint16_t>( field_table<list>::layout.words_n ),
+			.table = table,
+		};
+	}
 	else if constexpr ( kind == field_kind::OPTIONAL )
-		return { .kind = kind, .scalar = 0, .optional = &optional_descriptor<T> };
+		return { .kind = kind, .scalar = 0, .words = 0, .optional = &optional_descriptor<T> };
 	else
-		return { .kind = kind, .scalar = 0, .variant = &variant_descriptor<T> };
+		return { .kind = kind, .scalar = 0, .words = 0, .variant = &variant_descriptor<T> };
 }
 
 template <typename T>
 constexpr value_desc value_descriptor<T>::value = describe_value<T>();
-
-/// The field list of `T` must name `T`: a list of a different type has the offsets of that type.
-template <typename T>
-[[nodiscard]] consteval message_desc describe_message()
-{
-	using list = field_list_of<T>;
-	static_assert( std::is_same_v<typename list_traits<list>::message, T>,
-	               "pb: field_list_type: pb::fields_of<T> must derive from pb::field_list<T, ...> with the same T" );
-	return { field_table<list>::value.data(), static_cast<std::uint16_t>( field_table<list>::value.size() ) };
-}
-
-template <typename T>
-constexpr message_desc message_descriptor<T>::value = describe_message<T>();
 
 ////////////////////////////////////////////////////////////////////////////////
 // Part 2: interpreter. No function in this part is a template.
@@ -465,6 +646,56 @@ constexpr message_desc message_descriptor<T>::value = describe_message<T>();
 [[nodiscard]] inline void* member_at( void* object, std::size_t offset )
 {
 	return static_cast<unsigned char*>( object ) + offset;
+}
+
+[[nodiscard]] inline const value_desc* const* message_subs( const value_desc& message )
+{
+	return static_cast<const value_desc* const*>( message.table );
+}
+
+[[nodiscard]] inline const std::uint32_t* message_words( const value_desc& message )
+{
+	if ( message.table == nullptr )
+		return nullptr;
+	return static_cast<const std::uint32_t*>(
+	  member_at( message.table, std::size_t{ message.scalar } * sizeof( const value_desc* ) ) );
+}
+
+[[nodiscard]] constexpr field_entry decode_entry( const std::uint32_t* words, std::size_t& pos )
+{
+	const std::uint32_t w0 = words[pos++];
+	if ( ( w0 & 0x80000000u ) == 0 )
+	{
+		const auto op = static_cast<std::uint8_t>( w0 >> 24 );
+		const auto offset = static_cast<std::uint16_t>( ( w0 >> 12 ) & 0xFFFu );
+		const std::uint32_t number = w0 & 0xFFFu;
+		if ( op >= op_oneof_base )
+			return { number, offset, static_cast<std::uint16_t>( std::uint32_t{ op } - op_oneof_base + 1u ), 0, op_sub_base };
+		if ( op >= op_sub_base )
+			return { number, offset, 0, static_cast<std::uint16_t>( std::uint32_t{ op } - op_sub_base ), op_sub_base };
+		return { number, offset, 0, 0, op };
+	}
+
+	const std::uint32_t w1 = words[pos++];
+	const std::uint32_t w2 = words[pos++];
+	return {
+		w0 & 0x7FFFFFFFu,
+		static_cast<std::uint16_t>( w1 >> 16 ),
+		static_cast<std::uint16_t>( w1 & 0xFFFFu ),
+		static_cast<std::uint16_t>( w2 >> 8 ),
+		static_cast<std::uint8_t>( w2 & 0xFFu ),
+	};
+}
+
+[[nodiscard]] constexpr value_desc resolve_type( const value_desc* const* subs, const field_entry& entry )
+{
+	if ( entry.base_op < op_string )
+		return { .kind = field_kind::SCALAR, .scalar = entry.base_op, .words = 0, .size = 0 };
+	if ( entry.base_op == op_string )
+		return { .kind = field_kind::STRING, .scalar = 0, .words = 0, .size = 0 };
+	if ( entry.base_op == op_bytes_view )
+		return { .kind = field_kind::BYTES, .scalar = 0, .words = 0, .sequence = nullptr };
+	return *subs[entry.sub_idx];
 }
 
 [[nodiscard]] inline wire_type wire_of_scalar( std::uint8_t code )
@@ -568,7 +799,7 @@ inline void emit_bytes( writer& sink, std::uint32_t number, std::span<const std:
 	sink.write_bytes( bytes );
 }
 
-inline void emit_message( writer& sink, const message_desc& message, const void* object );
+inline void emit_message( writer& sink, const value_desc& message, const void* object );
 
 // The compiler does not inline or clone the three entry points of the
 // interpreter (`gnu::noinline`, `gnu::noclone`). The tables let one copy of
@@ -581,7 +812,7 @@ inline void emit_message( writer& sink, const message_desc& message, const void*
 /// Encoded size of the fields of the message at `object`, without key and
 /// length prefix. A writer without a span only counts, so the size and the
 /// bytes come from one code path.
-[[nodiscard, gnu::noinline, gnu::noclone]] inline std::size_t encoded_size( const message_desc& message,
+[[nodiscard, gnu::noinline, gnu::noclone]] inline std::size_t encoded_size( const value_desc& message,
                                                                             const void* object )
 {
 	writer sink;
@@ -590,7 +821,7 @@ inline void emit_message( writer& sink, const message_desc& message, const void*
 }
 
 /// Writes a field of a message type: the key, the length prefix and the fields.
-inline void emit_submessage( writer& sink, std::uint32_t number, const message_desc& message, const void* object )
+inline void emit_submessage( writer& sink, std::uint32_t number, const value_desc& message, const void* object )
 {
 	sink.write_key( number, wire_type::LENGTH_DELIMITED );
 	if ( !sink.counts_only() )
@@ -676,7 +907,7 @@ inline void emit_value( writer& sink, std::uint32_t number, const value_desc& ty
 			// The length is never 0 here, except for an array of length 0.
 			emit_bytes( sink, number, { static_cast<const std::uint8_t*>( value ), type.size }, always );
 			break;
-		case field_kind::MESSAGE: emit_submessage( sink, number, *type.message, value ); break;
+		case field_kind::MESSAGE: emit_submessage( sink, number, type, value ); break;
 		case field_kind::OPTIONAL: {
 			const optional_desc& optional = *type.optional;
 			if ( const void* held = optional.access( const_cast<void*>( value ), optional_op::GET ) )
@@ -707,26 +938,29 @@ inline void emit_value( writer& sink, std::uint32_t number, const value_desc& ty
 }
 
 /// Writes the fields of the message at `object` in ascending field number.
-inline void emit_message( writer& sink, const message_desc& message, const void* object )
+inline void emit_message( writer& sink, const value_desc& message, const void* object )
 {
-	for ( std::size_t i = 0; i < message.count; ++i )
+	const value_desc* const* subs = message_subs( message );
+	const std::uint32_t* words = message_words( message );
+	for ( std::size_t pos = 0; pos < message.words; )
 	{
-		const field_desc& field = message.fields[i];
+		const field_entry field = decode_entry( words, pos );
+		const value_desc type = resolve_type( subs, field );
 		const void* member = member_at( object, field.offset );
 		if ( field.alternative == 0 )
 		{
-			emit_value( sink, field.number, *field.type, member, false );
+			emit_value( sink, field.number, type, member, false );
 			continue;
 		}
 
-		const variant_desc& variant = *field.type->variant;
+		const variant_desc& variant = *type.variant;
 		if ( const void* active = variant.access( const_cast<void*>( member ), field.alternative, false ) )
 			emit_value( sink, field.number, *variant.alternatives[field.alternative], active, true );
 	}
 }
 
 [[nodiscard, gnu::noinline, gnu::noclone]] inline std::expected<std::size_t, error> encode(
-  const message_desc& message, const void* object, std::span<std::uint8_t> out )
+  const value_desc& message, const void* object, std::span<std::uint8_t> out )
 {
 	writer sink( out );
 	emit_message( sink, message, object );
@@ -783,7 +1017,7 @@ inline void store_scalar( void* value, std::uint8_t code, std::uint64_t bits )
 	}
 }
 
-inline void reset_message( const message_desc& message, void* object );
+inline void reset_message( const value_desc& message, void* object );
 
 /// Sets the value at `value` to its initial state. A `pb::repeated` keeps its
 /// storage and only gets the count 0. A `std::span<const T>` becomes empty and
@@ -813,25 +1047,30 @@ inline void reset_value( const value_desc& type, void* value )
 			else if ( type.sequence->storage == sequence_storage::REPEATED )
 				*repeated_count( *type.sequence, value ) = 0;
 			break;
-		case field_kind::MESSAGE: reset_message( *type.message, value ); break;
+		case field_kind::MESSAGE: reset_message( type, value ); break;
 		case field_kind::OPTIONAL: static_cast<void>( type.optional->access( value, optional_op::RESET ) ); break;
 		case field_kind::ONEOF: static_cast<void>( type.variant->access( value, 0, true ) ); break;
 	}
 }
 
 /// Resets each member of the message at `object`, also in a nested message.
-inline void reset_message( const message_desc& message, void* object )
+inline void reset_message( const value_desc& message, void* object )
 {
-	for ( std::size_t i = 0; i < message.count; ++i )
+	const value_desc* const* subs = message_subs( message );
+	const std::uint32_t* words = message_words( message );
+	for ( std::size_t pos = 0; pos < message.words; )
 	{
 		// A `std::variant` member has one entry for each alternative. Reset it one time.
-		const field_desc& field = message.fields[i];
+		const field_entry field = decode_entry( words, pos );
 		if ( field.alternative <= 1 )
-			reset_value( *field.type, member_at( object, field.offset ) );
+		{
+			const value_desc type = resolve_type( subs, field );
+			reset_value( type, member_at( object, field.offset ) );
+		}
 	}
 }
 
-inline void decode_message( reader& in, const message_desc& message, void* object, arena* memory );
+inline void decode_message( reader& in, const value_desc& message, void* object, arena* memory );
 inline void decode_value( reader& in, wire_type wire, const value_desc& type, void* value, arena* memory );
 
 /// Capacity of the arena block at `data`: a `std::size_t` just before the first
@@ -1060,7 +1299,7 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 		case field_kind::MESSAGE: {
 			// The codec does not reset the message: a second occurrence merges into the first.
 			reader part( bytes );
-			decode_message( part, *type.message, value, memory );
+			decode_message( part, type, value, memory );
 			in.absorb( part );
 			break;
 		}
@@ -1068,55 +1307,69 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 	}
 }
 
-/// The entry of the field `number` in `message`, or null. The search starts at
-/// the entry `last`. After the end of the table, it continues at the first
-/// entry. After a match, `last` is the index of the entry.
-[[nodiscard]] inline const field_desc* find_field( const message_desc& message,
-                                                   std::uint32_t number,
-                                                   std::size_t& last )
+/// Finds the entry of the field `number` in `words`. The search starts at the
+/// word index `cursor`. After the end of the table, it continues at 0. After a
+/// match, `cursor` is the start word index of the entry.
+[[nodiscard]] inline bool find_field( const std::uint32_t* words,
+                                      std::size_t total_words,
+                                      std::uint32_t number,
+                                      std::size_t& cursor,
+                                      field_entry& out )
 {
-	for ( std::size_t tried = 0; tried < message.count; ++tried )
+	for ( unsigned pass = 0; pass < 2; ++pass )
 	{
-		const std::size_t index = last + tried < message.count ? last + tried : last + tried - message.count;
-		if ( message.fields[index].number == number )
+		std::size_t pos = pass == 0 ? cursor : 0;
+		const std::size_t stop = pass == 0 ? total_words : cursor;
+		while ( pos < stop )
 		{
-			last = index;
-			return &message.fields[index];
+			const std::uint32_t w0 = words[pos];
+			const bool wide = ( w0 & 0x80000000u ) != 0;
+			const std::uint32_t entry_number = wide ? ( w0 & 0x7FFFFFFFu ) : ( w0 & 0xFFFu );
+			if ( entry_number == number )
+			{
+				cursor = pos;
+				out = decode_entry( words, pos );
+				return true;
+			}
+			pos += wide ? 3u : 1u;
 		}
 	}
-	return nullptr;
+	return false;
 }
 
 /// Reads all fields of `in` into the message at `object`, until the end of
 /// the input or the first error. Does not reset the message: a field that
 /// occurs again changes the value that is there.
-inline void decode_message( reader& in, const message_desc& message, void* object, arena* memory )
+inline void decode_message( reader& in, const value_desc& message, void* object, arena* memory )
 {
+	const value_desc* const* subs = message_subs( message );
+	const std::uint32_t* words = message_words( message );
 	// Fields usually arrive in ascending order, and a repeated field arrives
 	// many times. The search starts at the entry of the last match.
-	std::size_t last = 0;
+	std::size_t cursor = 0;
 	while ( !in.empty() )
 	{
 		const field_key key = in.read_key();
 		if ( in.failed() )
 			return;
 
-		const field_desc* field = find_field( message, key.number, last );
-		if ( field == nullptr )
+		field_entry field{};
+		if ( !find_field( words, message.words, key.number, cursor, field ) )
 		{
 			in.skip( key.type );
 			continue;
 		}
 
-		void* member = member_at( object, field->offset );
-		if ( field->type->kind == field_kind::REPEATED )
+		const value_desc type = resolve_type( subs, field );
+		void* member = member_at( object, field.offset );
+		if ( type.kind == field_kind::REPEATED )
 		{
-			decode_repeated( in, key, *field->type->sequence, member, memory );
+			decode_repeated( in, key, *type.sequence, member, memory );
 			continue;
 		}
-		if ( field->alternative == 0 )
+		if ( field.alternative == 0 )
 		{
-			decode_value( in, key.type, *field->type, member, memory );
+			decode_value( in, key.type, type, member, memory );
 			continue;
 		}
 
@@ -1124,18 +1377,18 @@ inline void decode_message( reader& in, const message_desc& message, void* objec
 		// state, as each member of `msg` has. The same alternative stays, so a
 		// message merges. The codec skips a field with a wrong wire type and
 		// keeps the variant.
-		const variant_desc& variant = *field->type->variant;
-		const value_desc& alternative = *variant.alternatives[field->alternative];
+		const variant_desc& variant = *type.variant;
+		const value_desc& alternative = *variant.alternatives[field.alternative];
 		if ( key.type != wire_of( alternative ) )
 		{
 			in.skip( key.type );
 			continue;
 		}
 
-		void* active = variant.access( member, field->alternative, false );
+		void* active = variant.access( member, field.alternative, false );
 		if ( active == nullptr )
 		{
-			active = variant.access( member, field->alternative, true );
+			active = variant.access( member, field.alternative, true );
 			reset_value( alternative, active );
 		}
 		decode_value( in, key.type, alternative, active, memory );
@@ -1144,7 +1397,7 @@ inline void decode_message( reader& in, const message_desc& message, void* objec
 
 /// `memory` is null for a message without a `std::span<const T>` repeated field.
 [[nodiscard, gnu::noinline, gnu::noclone]] inline std::expected<std::size_t, error> decode(
-  const message_desc& message, std::span<const std::uint8_t> in, void* object, arena* memory )
+  const value_desc& message, std::span<const std::uint8_t> in, void* object, arena* memory )
 {
 	reset_message( message, object );
 
@@ -1163,7 +1416,7 @@ inline void decode_message( reader& in, const message_desc& message, void* objec
 template <typename T>
 [[nodiscard]] std::size_t encoded_size( const T& msg )
 {
-	return detail::encoded_size( detail::message_descriptor<T>::value, &msg );
+	return detail::encoded_size( detail::value_descriptor<T>::value, &msg );
 }
 
 /// Encodes `msg` into `out` in proto3 wire format and returns the number of
@@ -1172,7 +1425,7 @@ template <typename T>
 template <typename T>
 [[nodiscard]] std::expected<std::size_t, error> encode( const T& msg, std::span<std::uint8_t> out )
 {
-	return detail::encode( detail::message_descriptor<T>::value, &msg, out );
+	return detail::encode( detail::value_descriptor<T>::value, &msg, out );
 }
 
 /// Decodes the proto3 message in `in` into `msg` and returns `in.size()`. Resets
@@ -1186,7 +1439,7 @@ template <typename T>
 [[nodiscard]] std::expected<std::size_t, error> decode( std::span<const std::uint8_t> in, T& msg, arena& memory )
 {
 	detail::check_decodable<T>();
-	return detail::decode( detail::message_descriptor<T>::value, in, &msg, &memory );
+	return detail::decode( detail::value_descriptor<T>::value, in, &msg, &memory );
 }
 
 /// `decode` for a message without a `std::span<const T>` repeated field, also
@@ -1196,7 +1449,7 @@ template <typename T>
 {
 	detail::check_decodable<T>();
 	detail::check_no_arena<T>();
-	return detail::decode( detail::message_descriptor<T>::value, in, &msg, nullptr );
+	return detail::decode( detail::value_descriptor<T>::value, in, &msg, nullptr );
 }
 
 } // namespace pb

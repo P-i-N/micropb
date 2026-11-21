@@ -77,37 +77,65 @@ struct pb::fields_of<holder> : pb::field_list<holder,
 
 namespace {
 
-constexpr const d::message_desc& p = d::message_descriptor<plain>::value;
-constexpr const d::message_desc& h = d::message_descriptor<holder>::value;
+using plain_table = d::field_table<d::field_list_of<plain>>;
+using holder_table = d::field_table<d::field_list_of<holder>>;
+constexpr const d::value_desc& p = d::value_descriptor<plain>::value;
+constexpr const d::value_desc& h = d::value_descriptor<holder>::value;
+
+template <typename Table>
+consteval d::field_entry entry_at( std::size_t index )
+{
+	std::size_t pos = 0;
+	d::field_entry entry{};
+	for ( std::size_t i = 0; i <= index; ++i )
+		entry = d::decode_entry( Table::value.words.data(), pos );
+	return entry;
+}
+
+template <typename Table>
+consteval d::value_desc type_at( std::size_t index )
+{
+	const d::value_desc* const* subs = nullptr;
+	if constexpr ( Table::layout.subs_n > 0 )
+		subs = Table::value.subs.data();
+	return d::resolve_type( subs, entry_at<Table>( index ) );
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// `plain`: three scalars at the offsets 0, 4, 8, with the numbers 1, 2, 3.
-static_assert( p.count == 3 && p.fields[0].offset == 0 && p.fields[1].offset == 4 && p.fields[2].offset == 8 );
-static_assert( p.fields[2].number == 3 && p.fields[2].type->kind == K::SCALAR && p.fields[0].alternative == 0 );
-static_assert( p.fields[1].type == &d::value_descriptor<std::uint32_t>::value );
+// `plain`: three inline scalars at offsets 0, 4, 8, numbers 1, 2, 3, zero compound pointers, 3 words (12 B).
+static_assert( p.kind == K::MESSAGE && p.scalar == 0 && p.words == 3 && sizeof( plain_table::value ) == 12 );
+static_assert( entry_at<plain_table>( 0 ).offset == 0 && entry_at<plain_table>( 1 ).offset == 4 &&
+               entry_at<plain_table>( 2 ).offset == 8 );
+static_assert( entry_at<plain_table>( 2 ).number == 3 && type_at<plain_table>( 2 ).kind == K::SCALAR &&
+               entry_at<plain_table>( 0 ).alternative == 0 );
+static_assert( type_at<plain_table>( 1 ).scalar == d::scalar_code_of<std::uint32_t>() );
 
-// `holder`: 11 entries, with the numbers 1 5 6 7 8 9 10 11 12 13 14.
-static_assert( h.count == 11 && h.fields[1].number == 5 && h.fields[8].number == 12 && h.fields[10].number == 14 );
-static_assert( h.fields[1].type->kind == K::MESSAGE && h.fields[1].type->message == &p );
-static_assert( h.fields[2].type->kind == K::OPTIONAL &&
-               h.fields[2].type->optional->value == &d::value_descriptor<float>::value );
-static_assert( h.fields[3].type->kind == K::REPEATED &&
-               h.fields[3].type->sequence->storage == d::sequence_storage::REPEATED &&
-               h.fields[3].type->sequence->capacity == 4 && h.fields[3].type->sequence->element_size == 4 &&
-               h.fields[3].type->sequence->element == &d::value_descriptor<float>::value );
-static_assert( h.fields[4].type->kind == K::BYTES && h.fields[4].type->sequence->capacity == 16 );
-static_assert( h.fields[5].type->kind == K::FIXED_BYTES && h.fields[5].type->size == 6 );
-static_assert( h.fields[6].type->kind == K::REPEATED &&
-               h.fields[6].type->sequence->storage == d::sequence_storage::ACCESSOR &&
-               h.fields[6].type->sequence->element == &d::value_descriptor<std::int32_t>::value );
-static_assert( h.fields[7].type->kind == K::STRING );
-static_assert( h.fields[8].type->kind == K::MESSAGE && h.fields[8].type->message->count == 0 );
-static_assert( h.fields[9].alternative == 1 && h.fields[10].alternative == 2 &&
-               h.fields[9].offset == h.fields[10].offset && h.fields[9].type == h.fields[10].type &&
-               h.fields[9].type->kind == K::ONEOF &&
-               h.fields[9].type->variant->alternatives[1] == &d::value_descriptor<plain>::value &&
-               h.fields[9].type->variant->alternatives[2] == &d::value_descriptor<float>::value );
+// `holder`: 11 1-word entries, with the numbers 1 5 6 7 8 9 10 11 12 13 14, and 8 deduplicated compound pointers.
+static_assert( h.kind == K::MESSAGE && h.scalar == 8 && h.words == 11 );
+static_assert( entry_at<holder_table>( 1 ).number == 5 && entry_at<holder_table>( 8 ).number == 12 &&
+               entry_at<holder_table>( 10 ).number == 14 );
+static_assert( type_at<holder_table>( 1 ).kind == K::MESSAGE && type_at<holder_table>( 1 ).table == p.table );
+static_assert( type_at<holder_table>( 2 ).kind == K::OPTIONAL &&
+               type_at<holder_table>( 2 ).optional->value == &d::value_descriptor<float>::value );
+static_assert( type_at<holder_table>( 3 ).kind == K::REPEATED &&
+               type_at<holder_table>( 3 ).sequence->storage == d::sequence_storage::REPEATED &&
+               type_at<holder_table>( 3 ).sequence->capacity == 4 &&
+               type_at<holder_table>( 3 ).sequence->element_size == 4 &&
+               type_at<holder_table>( 3 ).sequence->element == &d::value_descriptor<float>::value );
+static_assert( type_at<holder_table>( 4 ).kind == K::BYTES && type_at<holder_table>( 4 ).sequence->capacity == 16 );
+static_assert( type_at<holder_table>( 5 ).kind == K::FIXED_BYTES && type_at<holder_table>( 5 ).size == 6 );
+static_assert( type_at<holder_table>( 6 ).kind == K::REPEATED &&
+               type_at<holder_table>( 6 ).sequence->storage == d::sequence_storage::ACCESSOR &&
+               type_at<holder_table>( 6 ).sequence->element == &d::value_descriptor<std::int32_t>::value );
+static_assert( type_at<holder_table>( 7 ).kind == K::STRING );
+static_assert( type_at<holder_table>( 8 ).kind == K::MESSAGE && type_at<holder_table>( 8 ).words == 0 );
+static_assert( entry_at<holder_table>( 9 ).alternative == 1 && entry_at<holder_table>( 10 ).alternative == 2 &&
+               entry_at<holder_table>( 9 ).offset == entry_at<holder_table>( 10 ).offset &&
+               entry_at<holder_table>( 9 ).sub_idx == 0 && entry_at<holder_table>( 10 ).sub_idx == 0 &&
+               type_at<holder_table>( 9 ).kind == K::ONEOF &&
+               type_at<holder_table>( 9 ).variant->alternatives[1] == &d::value_descriptor<plain>::value &&
+               type_at<holder_table>( 9 ).variant->alternatives[2] == &d::value_descriptor<float>::value );
 
 static_assert( d::value_descriptor<std::span<const std::uint8_t>>::value.kind == K::BYTES &&
                d::value_descriptor<std::span<const std::uint8_t>>::value.sequence == nullptr );
@@ -119,11 +147,10 @@ static_assert( d::scalar_code_of<std::int8_t>() == ( 0 | d::scalar_signed ) );
 static_assert( d::scalar_code_of<std::uint16_t>() == 1 && d::scalar_code_of<std::uint64_t>() == 3 );
 static_assert( d::scalar_code_of<pb::sint32>() == ( 2 | d::scalar_signed | d::scalar_zigzag ) );
 static_assert( d::scalar_code_of<float>() == ( 2 | d::scalar_fixed ) &&
-               d::scalar_code_of<pb::sfixed64>() == ( 3 | d::scalar_fixed ) );
+               d::value_descriptor<pb::sfixed64>::value.scalar == ( 3 | d::scalar_fixed ) );
 static_assert( d::scalar_code_of<small>() == ( 0 | d::scalar_enum ) );
 static_assert( d::scalar_code_of<level>() == ( 2 | d::scalar_enum | d::scalar_signed ) );
 
-static_assert( sizeof( d::field_desc ) <= ( sizeof( void* ) == 4 ? 12 : 16 ) );
 static_assert( sizeof( d::value_desc ) <= 2 * sizeof( void* ) );
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -543,9 +570,91 @@ bool test_all_kinds()
 
 } // namespace
 
+namespace {
+
+template <std::size_t I>
+struct alt_tag
+{
+	std::uint32_t v;
+};
+
+template <typename Seq>
+struct wide_variant_msg;
+
+template <std::size_t... I>
+struct wide_variant_msg<std::index_sequence<I...>>
+{
+	using variant_t = std::variant<std::monostate, alt_tag<I>...>;
+	variant_t first;
+	std::variant<std::monostate, std::int32_t, double> second;
+	pb::repeated<std::uint8_t, 4100> pad;
+	std::uint32_t far_scalar;
+	std::uint32_t max_tag_scalar;
+};
+
+using wide_msg = wide_variant_msg<std::make_index_sequence<33>>;
+
+} // namespace
+
+template <std::size_t I>
+struct pb::fields_of<alt_tag<I>> : pb::field_list<alt_tag<I>, pb::field_at<decltype( alt_tag<I>::v ), 1, 0>>
+{};
+
+template <std::size_t... I>
+pb::field_list<
+  wide_msg,
+  pb::field_at<decltype( wide_msg::first ), static_cast<std::uint32_t>( I + 1 ), offsetof( wide_msg, first ), I + 1>...,
+  pb::field_at<decltype( wide_msg::second ), 100, offsetof( wide_msg, second ), 1>,
+  pb::field_at<decltype( wide_msg::second ), 101, offsetof( wide_msg, second ), 2>,
+  pb::field_at<decltype( wide_msg::pad ), 200, offsetof( wide_msg, pad )>,
+  pb::field_at<decltype( wide_msg::far_scalar ), 4096, offsetof( wide_msg, far_scalar )>,
+  pb::field_at<decltype( wide_msg::max_tag_scalar ),
+               pb::detail::max_field_number,
+               offsetof( wide_msg, max_tag_scalar )>>
+make_wide_list( std::index_sequence<I...> );
+
+template <>
+struct pb::fields_of<wide_msg> : decltype( make_wide_list( std::make_index_sequence<33>{} ) )
+{};
+
+namespace {
+
+/// Exercises 3-word field entries: alternative 33 (> 32), a second `std::variant`
+/// (`sub_idx == 1`), member offsets > 4095, and field numbers 4096 and 2^29 - 1.
+bool test_wide_entries()
+{
+	using wt = d::field_table<d::field_list_of<wide_msg>>;
+	// 32 1-word entries (`first` 1..32) + 1 (`pad`) = 33 1-word entries, plus 5 3-word entries = 48 words.
+	static_assert( wt::entry_count == 38 && wt::layout.words_n == 33 + 5 * 3 );
+
+	wide_msg tx{};
+	tx.first.emplace<33>( alt_tag<32>{ 42 } );
+	tx.second = 3.5;
+	tx.far_scalar = 777;
+	tx.max_tag_scalar = 999;
+
+	std::array<std::uint8_t, 128> wire{};
+	const auto n = pb::encode( tx, wire );
+	if ( !n || pb::encoded_size( tx ) != *n )
+		return false;
+
+	wide_msg rx{};
+	rx.first.emplace<1>( alt_tag<0>{ 9 } );
+	rx.second = std::int32_t{ 5 };
+	if ( !pb::decode( std::span<const std::uint8_t>( wire ).first( *n ), rx ) )
+		return false;
+
+	const auto* a33 = std::get_if<33>( &rx.first );
+	const auto* s2 = std::get_if<double>( &rx.second );
+	return a33 != nullptr && a33->v == 42 && s2 != nullptr && *s2 == 3.5 && rx.far_scalar == 777 &&
+	       rx.max_tag_scalar == 999 && rx.pad.empty();
+}
+
+} // namespace
+
 int main()
 {
 	const bool ok = test_optional_accessor() && test_variant_accessor() && test_sequence_accessor() &&
-	                test_block_bound() && test_all_kinds();
+	                test_block_bound() && test_all_kinds() && test_wide_entries();
 	return ok ? 0 : 1;
 }
