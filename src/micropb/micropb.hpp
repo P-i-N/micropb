@@ -1,6 +1,6 @@
 #pragma once
 
-/// Umbrella header: the complete micropb API.
+/// Umbrella header: the complete MicroPB API.
 
 #include <micropb/codec.hpp>
 #include <micropb/schema.hpp>

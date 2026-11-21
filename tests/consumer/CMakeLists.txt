@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 project(consumer LANGUAGES CXX)
 
-# MICROPB_SOURCE_DIR is the micropb folder. The test `arm_<version>.consumer` sets it.
+# MICROPB_SOURCE_DIR is the MicroPB folder. The test `arm_<version>.consumer` sets it.
 add_subdirectory(${MICROPB_SOURCE_DIR} micropb)
 
 add_library(consumer STATIC consumer.cpp)

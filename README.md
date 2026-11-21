@@ -1,4 +1,4 @@
-# micropb
+# MicroPB
 
 A header-only proto3 encoder and decoder for embedded C++23.
 
@@ -43,14 +43,14 @@ enum class Mode : int32_t {
 };
 
 struct Reading {
-    uint32_t id{};
-    int32_t temperature_mc{};
-    Mode mode{};
-    std::optional<pb::string<15>> label{};
-    pb::repeated<float, 4> channels{};
-    pb::bytes<8> token{};
-    std::array<uint8_t, 6> mac{};
-    std::variant<std::monostate, uint32_t, std::string_view> detail{};
+    uint32_t id = 0;
+    int32_t temperature_mc = 0;
+    Mode mode = {};
+    std::optional<pb::string<15>> label = {};
+    pb::repeated<float, 4> channels = {};
+    pb::bytes<8> token = {};
+    std::array<uint8_t, 6> mac = {};
+    std::variant<std::monostate, uint32_t, std::string_view> detail = {};
 };
 
 } // namespace sensor
@@ -94,14 +94,14 @@ bool round_trip() {
 }
 ```
 
-## Why micropb
+## Why MicroPB
 
 * **Plain C++23 types, no callbacks:** structs use `int32_t`/`uint32_t`, `enum class`, `std::optional`, `std::variant`, `pb::string<N>`, `pb::bytes<N>`, `pb::repeated<T, N>`, `std::string_view`, `std::span`, and `std::array`, default-initialized to their proto3 defaults. No `has_x` booleans, manual union tags, integer wrapper structs, or stream callbacks.
 * **Smaller Flash footprint than NanoPB on Arm Cortex-M:** one non-template interpreter handles all messages from compact `constexpr` word tables in ROM. Measured on Arm Cortex-M4 / Cortex-M33 (`arm-none-eabi-gcc 16.2.0 -Os -mthumb --gc-sections`; x86-64 tables in [DETAILS.md](DETAILS.md#binary-size-comparison)):
 
   | Configuration (Cortex-M4 / M33) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Extra 8-field type |
   | --- | ---: | ---: | ---: | ---: |
-  | **micropb** | **3,614 B** | **4,902 B** | **6,222 B** | **82 B** |
+  | **MicroPB** | **3,614 B** | **4,902 B** | **6,222 B** | **82 B** |
   | NanoPB 0.4.9.3 — fixed-size (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,150 B | 6,414 B | 7,774 B | 85 B |
   | NanoPB 0.4.9.3 — `pb_callback_t` (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,210 B | 6,606 B | 8,078 B | 92 B |
   | NanoPB 0.4.9.3 — fixed-size (default flags) | 6,616 B | 7,880 B | 9,240 B | 85 B |
@@ -112,7 +112,7 @@ bool round_trip() {
 * **Wire-identical to `protoc` & zero external dependencies:** verified byte-for-byte against `protoc`, using 5 standard-library-only C++23 headers and a single-file Python 3 plugin (stdlib only).
 
 > [!NOTE]
-> **Contiguous buffers only:** `micropb` reads from and writes to contiguous byte spans. Streaming I/O (`pb_istream_t` / `pb_ostream_t`) and user callbacks (`pb_callback_t`) are not supported.
+> **Contiguous buffers only:** MicroPB reads from and writes to contiguous byte spans. Streaming I/O (`pb_istream_t` / `pb_ostream_t`) and user callbacks (`pb_callback_t`) are not supported.
 
 ## Zero-copy views & scratch buffers
 
@@ -123,8 +123,8 @@ When a field has no `max_length`, `max_size`, or `max_count` in `.options`, `pro
 
 ```cpp
 struct Batch {
-    std::string_view device{};          // views `packet` directly
-    std::span<const int32_t> samples{}; // allocated in `scratch` on decode
+    std::string_view device = {};          // views `packet` directly
+    std::span<const int32_t> samples = {}; // allocated in `scratch` on decode
 };
 
 void on_packet(std::span<const uint8_t> packet) {

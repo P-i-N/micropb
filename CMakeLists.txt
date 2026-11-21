@@ -3,7 +3,7 @@ project(micropb LANGUAGES CXX)
 
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-option(MICROPB_TESTS "Build the micropb tests" ${PROJECT_IS_TOP_LEVEL})
+option(MICROPB_TESTS "Build the MicroPB tests" ${PROJECT_IS_TOP_LEVEL})
 
 add_library(micropb INTERFACE)
 target_include_directories(micropb INTERFACE src)
@@ -161,7 +161,7 @@ if(MICROPB_TESTS)
             message(STATUS "micropb: no arm-none-eabi-nm next to ${micropb_${prefix}_gxx}, ${prefix}.no_startup_code is off")
         endif()
 
-        # A project that uses micropb: configure and build with this compiler.
+        # A project that uses MicroPB: configure and build with this compiler.
         set(consumer_command ${CMAKE_COMMAND} -DCOMPILER=${micropb_${prefix}_gxx} -DCPU=${MICROPB_ARM_CPU}
             -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR} -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/${prefix}_consumer
             "-DGENERATOR=${CMAKE_GENERATOR}")

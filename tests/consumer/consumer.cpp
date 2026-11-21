@@ -1,4 +1,4 @@
-// A project that uses micropb through its CMake target. Two non-inline functions use the
+// A project that uses MicroPB through its CMake target. Two non-inline functions use the
 // codec, so the compiler must instantiate it.
 #include <cstddef>
 #include <cstdint>

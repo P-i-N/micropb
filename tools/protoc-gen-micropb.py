@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""protoc plugin: writes C++ structs for micropb from a proto3 file.
+"""protoc plugin: writes C++ structs for MicroPB from a proto3 file.
 
     protoc --plugin=protoc-gen-micropb=tools/protoc-gen-micropb.py --micropb_out=gen app.proto
 

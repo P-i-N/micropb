@@ -1,5 +1,5 @@
 # Runs the consumer project with one Arm compiler: cmake -P run.cmake
-# Inputs (-D): COMPILER, CPU, SOURCE_DIR (micropb), BINARY_DIR (a folder for this run),
+# Inputs (-D): COMPILER, CPU, SOURCE_DIR (MicroPB), BINARY_DIR (a folder for this run),
 # GENERATOR (the CMake generator of the outer project), MAKE_PROGRAM (optional: its CMAKE_MAKE_PROGRAM).
 foreach(var COMPILER CPU SOURCE_DIR BINARY_DIR GENERATOR)
     if(NOT DEFINED ${var})

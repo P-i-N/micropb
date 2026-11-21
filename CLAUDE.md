@@ -6,7 +6,7 @@ Work as a senior C++ library engineer for embedded systems. Apply the architectu
 
 ## Domain
 
-`micropb` is a header-only proto3 codec. It sends messages between embedded devices and host PC tools over a USB COM serial port. It is a personal project with one owner (me); there is no team.
+MicroPB is a header-only proto3 codec. It sends messages between embedded devices and host PC tools over a USB COM serial port. It is a personal project with one owner (me); there is no team.
 
 *   **Device side:** firmware built with the Arm GNU Toolchain (13.3, 14.2), C++23, no reflection. Flash, RAM and stack are small. Code size is a requirement.
 *   **Host side:** GCC 16 with C++26 reflection, and PC tools that use Google protobuf (Python, C#) with the same `.proto` file.

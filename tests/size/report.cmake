@@ -2,7 +2,7 @@
 # size), OBJECT_16, OBJECT_32.
 
 if(NOT SIZE_TOOL OR NOT EXISTS "${SIZE_TOOL}")
-    message("micropb size report: GNU size is not available")
+    message("MicroPB size report: GNU size is not available")
     return()
 endif()
 
@@ -21,7 +21,7 @@ object_size("${OBJECT_16}" size_16)
 object_size("${OBJECT_32}" size_32)
 math(EXPR per_type "(${size_32} - ${size_16}) / 16")
 
-message("micropb size report (text + data, -Os)")
+message("MicroPB size report (text + data, -Os)")
 message("16 message types: ${size_16} bytes")
 message("32 message types: ${size_32} bytes (target: 15000 or less)")
 message("one more message type: ${per_type} bytes (target: 300 or less)")
