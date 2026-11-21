@@ -41,7 +41,7 @@ bool round_trip() {
 ## Why micropb
 
 * **Plain C++23 types, no callbacks:** messages are aggregates with `enum class`, `std::optional`, `std::variant`, `std::string_view`, `std::span`, `std::array`, and `pb::repeated<T, N>`. There are no `_has_field` flags, manual union tags, or stream callbacks.
-* **Small Flash footprint across many message types:** one non-template interpreter encodes and decodes all messages from `constexpr` descriptor tables in ROM (`5.4 KB` for 1 message type, `13.6 KB` for 32 8-field message types without unwind tables, ~272 bytes per additional type).
+* **Small Flash footprint across many message types:** one non-template interpreter encodes and decodes all messages from `constexpr` descriptor tables in ROM (`5.5 KB` for 1 message type, `9.2 KB` for 32 8-field message types without unwind tables, `120 bytes` per additional type).
 * **No heap, no exceptions, no RTTI:** compiles cleanly with `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`. Errors return `std::expected<std::size_t, pb::error>`.
 * **Zero startup code:** descriptor tables are `constexpr` constants in read-only memory. Nothing runs before `main()`.
 * **Zero-copy views and optional arena storage:** decoded `string` and `bytes` fields point directly into the input buffer. Repeated fields use fixed in-struct storage (`pb::repeated<T, N>`) or contiguous blocks in a caller-owned `pb::arena` (`std::span<const T>`).
@@ -264,16 +264,16 @@ Measured on the `size_report` schema (an envelope `oneof` holding 1, 16, or 32 d
 
 | Configuration | 1 type (B) | 16 types (B) | 32 types (B) | Each extra 8-field type (B) |
 | --- | ---: | ---: | ---: | ---: |
-| **micropb** | **5,364** | **9,245** | 13,612 | 272 |
+| **micropb** | **5,497** | **7,308** | **9,229** | 120 |
 | **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, default flags) | 10,413 | 12,037 | 13,781 | **109** |
-| **NanoPB 0.4.9.3** — fixed-size (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,405 | 10,029 | **11,773** | **109** |
+| **NanoPB 0.4.9.3** — fixed-size (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,405 | 10,029 | 11,773 | **109** |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (default flags) | 10,497 | 12,374 | 14,326 | 122 |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,489 | 10,366 | 12,318 | 122 |
 
-*(With Linux default `.eh_frame` unwind tables included, totals at 1 / 16 / 32 types are `6,756 / 10,665 / 15,032 B` for `micropb`, `12,469 / 14,093 / 15,837 B` for NanoPB fixed default, and `10,189 / 11,813 / 13,557 B` for NanoPB fixed with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`.)*
+*(With Linux default `.eh_frame` unwind tables included, totals at 1 / 16 / 32 types are `6,901 / 8,712 / 10,633 B` for `micropb`, `12,469 / 14,093 / 15,837 B` for NanoPB fixed default, and `10,189 / 11,813 / 13,557 B` for NanoPB fixed with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`.)*
 
-* **Core runtime:** `micropb`'s interpreter (`~5.1 KB`) is smaller than NanoPB's `pb_common + pb_encode + pb_decode` runtime (`8.3 KB` with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`, `10.3 KB` default), so `micropb` is smaller up to ~20 message types (and up to 32 message types against NanoPB's default flags).
-* **Per-message scaling:** NanoPB adds fewer bytes per additional 8-field message (`109 B` vs `272 B`) because it packs descriptors into variable-length `uint32_t` words and uses C `has_` flags and `union` tags with fixed layout, whereas `micropb` uses fixed `field_desc` entries and instantiates a C++ `std::variant` accessor so it never assumes standard-library layout. Above ~21 message types, NanoPB with `PB_BUFFER_ONLY` and `PB_NO_ERRMSG` is smaller.
+* **Total size at 32 message types:** `micropb` (`9,229 B` without `.eh_frame`, `10,633 B` with `.eh_frame`) is `2.5–3.1 KB` smaller than NanoPB with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG` and `4.6–5.1 KB` smaller than NanoPB with default flags.
+* **Per-message scaling:** `micropb` packs common fields into one `uint32_t` word (`4 B`, inline scalar, string, and bytes-view codes) with a deduplicated per-message subdescriptor table, adding `120 B` per 8-field `oneof` message type on x86-64 (including its C++ `std::variant` accessor). NanoPB fixed-size adds `109 B` per type (plain C union without `std::variant`), so `micropb` stays smaller up to ~260 message types against NanoPB with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG` and stays smaller at every count against `pb_callback_t` (`122 B` per type).
 
 ## Examples
 
@@ -615,13 +615,13 @@ On the PC side, compile the same `.proto` file with standard `protoc` (`--python
 
 ## Code size
 
-`cmake --build .build --target size_report` compiles one translation unit (`-Os`, GCC 16.2, x86-64) that encodes and decodes an envelope `oneof` containing 16 or 32 distinct 8-field message types:
+`cmake --build .build --target size_report` compiles one translation unit (`-Os`, GCC 16.2.1, Linux x86-64) that encodes and decodes an envelope `oneof` containing 16 or 32 distinct 8-field message types:
 
-| Configuration | MSYS2 UCRT64 (bytes) | Linux x86-64 with `.eh_frame` (bytes) |
+| Configuration | Without `.eh_frame` (bytes) | With `.eh_frame` (bytes) |
 | --- | ---: | ---: |
-| 16 message types | 9,920 | 10,669 |
-| 32 message types | 14,256 | 15,036 |
-| Each additional 8-field type | 271 | 272 |
+| 16 message types | 7,308 | 8,716 |
+| 32 message types | 9,229 | 10,637 |
+| Each additional 8-field type | 120 | 120 |
 
 For side-by-side measurements against NanoPB, see [Binary size comparison](#binary-size-comparison). Arm hardware size measurements are not yet recorded.
 

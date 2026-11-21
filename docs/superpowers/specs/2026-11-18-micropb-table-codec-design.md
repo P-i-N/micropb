@@ -250,3 +250,13 @@ It gave the same bytes as the template encoder for four test messages. It gave t
 * A full block during the fill means that the count was too small, thus the input is not valid: `TRUNCATED`.
 * The descriptor of a span has a pointer to the count function (`reserve`). The other sequence descriptors have null there. Thus a program without a span field does not contain the count and the new block.
 * Size report: 16 types 9920 bytes, 32 types 14256 bytes, one more type 271 bytes (before: 9400, 13736, 271).
+
+## Changes: compact word tables
+
+* `pb::repeated<T, N>` leaves unused elements in `_items` uninitialized at default construction; `_count` is `0`, and `push_back()` and `clear()` manage active elements up to `_count`.
+* `sequence_view` holds only `{data, count}`. `sequence_desc` holds `element`, `element_size`, `view` and `add`; span-only callbacks (`access`, `bind`, `construct`, `reserve`, `element_align`) move to a separate `span_desc` pointer that is null for `pb::repeated`, `pb::span_buffer` and `std::array`.
+* `message_desc` and `message_descriptor<T>` are folded into `value_desc`: for `field_kind::MESSAGE`, `scalar` holds the count of distinct compound member types (`subs_n`), `words` holds the count of `std::uint32_t` field words (`words_n`), and `table` points to `message_table_data<SubCount, WordCount>`.
+* Each message table stores deduplicated `const value_desc* subs[SubCount]` for compound members (`std::optional`, `pb::repeated`, `std::span`, `std::array`, fixed bytes, nested messages and `std::variant`), followed by 1-word (`4 B`) or 3-word (`12 B`) `std::uint32_t` field entries:
+  * 1-word entry (bit 31 is `0`): `[30:24 op] [23:12 offset (0..4095)] [11:0 number (1..4095)]`. `op` `0..70` encodes `SCALAR` (`scalar_code_of<T>()`), `71` encodes `STRING` (`std::string_view`), `72` encodes `BYTES` (`std::span<const std::uint8_t>`), `73..95` index `subs[op - 73]`, and `96..127` encode `ONEOF` alternatives `1..32` on `subs[0]`.
+  * 3-word entry (bit 31 is `1`): used when `number > 4095`, `offset > 4095`, `sub_idx >= 23`, a second `std::variant` member has `sub_idx > 0`, or `alternative > 32`. Full `2^29 - 1` field numbers, `65535` member offsets and `65535` `oneof` alternatives remain supported.
+* Size report (GCC 16.2.1 `-Os`, Linux x86-64): 16 types 8716 bytes, 32 types 10637 bytes, one more type 120 bytes with `.eh_frame` (`7308`, `9229`, `120` without `.eh_frame`; before on Linux x86-64 with `.eh_frame`: `10669`, `15036`, `272`).
