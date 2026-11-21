@@ -18,4 +18,4 @@ template <>
 struct pb::fields_of<msg> : pb::field_list<other, pb::field_at<decltype( other::a ), 1, offsetof( other, a )>>
 {};
 
-static_assert( pb::detail::message_descriptor<msg>::value.count == 1 );
+static_assert( pb::detail::value_descriptor<msg>::value.kind == pb::field_kind::MESSAGE );

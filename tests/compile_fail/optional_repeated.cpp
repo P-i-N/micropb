@@ -1,11 +1,16 @@
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 
-#include <micropb/meta_schema.hpp>
+#include <micropb/codec.hpp>
 
 struct msg
 {
 	std::optional<pb::repeated<std::int32_t, 4>> values;
 };
 
-static_assert( pb::build_tag_table<msg>().size() == 1 );
+template <>
+struct pb::fields_of<msg> : pb::field_list<msg, pb::field_at<decltype( msg::values ), 1, offsetof( msg, values )>>
+{};
+
+static_assert( pb::detail::value_descriptor<msg>::value.kind == pb::field_kind::MESSAGE );

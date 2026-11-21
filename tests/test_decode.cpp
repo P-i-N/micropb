@@ -190,6 +190,111 @@ struct fragile_items
 	std::span<const fragile> items;
 };
 
+} // namespace
+
+template <>
+struct pb::fields_of<narrow> : pb::field_list<narrow,
+                                              pb::field_at<decltype( narrow::i32 ), 1, offsetof( narrow, i32 )>,
+                                              pb::field_at<decltype( narrow::i8 ), 2, offsetof( narrow, i8 )>,
+                                              pb::field_at<decltype( narrow::u16 ), 3, offsetof( narrow, u16 )>,
+                                              pb::field_at<decltype( narrow::flag ), 4, offsetof( narrow, flag )>,
+                                              pb::field_at<decltype( narrow::s32 ), 5, offsetof( narrow, s32 )>>
+{};
+
+template <>
+struct pb::fields_of<small_enum>
+  : pb::field_list<small_enum, pb::field_at<decltype( small_enum::e ), 1, offsetof( small_enum, e )>>
+{};
+
+template <>
+struct pb::fields_of<mac_only>
+  : pb::field_list<mac_only, pb::field_at<decltype( mac_only::mac ), 1, offsetof( mac_only, mac )>>
+{};
+
+template <>
+struct pb::fields_of<blob>
+  : pb::field_list<blob, pb::field_at<decltype( blob::bytes ), 1, offsetof( blob, bytes )>>
+{};
+
+template <>
+struct pb::fields_of<pose_owned>
+  : pb::field_list<pose_owned,
+                   pb::field_at<decltype( pose_owned::pos ), 1, offsetof( pose_owned, pos )>,
+                   pb::field_at<decltype( pose_owned::rot ), 2, offsetof( pose_owned, rot )>>
+{};
+
+template <>
+struct pb::fields_of<envelope_owned>
+  : pb::field_list<envelope_owned,
+                   pb::field_at<decltype( envelope_owned::id ), 1, offsetof( envelope_owned, id )>,
+                   pb::field_at<decltype( envelope_owned::payload ), 2, offsetof( envelope_owned, payload ), 1>,
+                   pb::field_at<decltype( envelope_owned::payload ), 3, offsetof( envelope_owned, payload ), 2>,
+                   pb::field_at<decltype( envelope_owned::payload ), 4, offsetof( envelope_owned, payload ), 3>>
+{};
+
+template <>
+struct pb::fields_of<ints_only>
+  : pb::field_list<ints_only, pb::field_at<decltype( ints_only::ints ), 1, offsetof( ints_only, ints )>>
+{};
+
+template <>
+struct pb::fields_of<floats_only>
+  : pb::field_list<floats_only, pb::field_at<decltype( floats_only::floats ), 1, offsetof( floats_only, floats )>>
+{};
+
+template <>
+struct pb::fields_of<arena_lists>
+  : pb::field_list<arena_lists,
+                   pb::field_at<decltype( arena_lists::ints ), 1, offsetof( arena_lists, ints )>,
+                   pb::field_at<decltype( arena_lists::names ), 2, offsetof( arena_lists, names )>,
+                   pb::field_at<decltype( arena_lists::floats ), 3, offsetof( arena_lists, floats )>>
+{};
+
+template <>
+struct pb::fields_of<arena_items>
+  : pb::field_list<arena_items, pb::field_at<decltype( arena_items::items ), 1, offsetof( arena_items, items )>>
+{};
+
+template <>
+struct pb::fields_of<arena_holder>
+  : pb::field_list<arena_holder, pb::field_at<decltype( arena_holder::child ), 1, offsetof( arena_holder, child )>>
+{};
+
+template <>
+struct pb::fields_of<arena_choices>
+  : pb::field_list<arena_choices,
+                   pb::field_at<decltype( arena_choices::maybe ), 1, offsetof( arena_choices, maybe )>,
+                   pb::field_at<decltype( arena_choices::choice ), 2, offsetof( arena_choices, choice ), 1>,
+                   pb::field_at<decltype( arena_choices::choice ), 3, offsetof( arena_choices, choice ), 2>>
+{};
+
+template <>
+struct pb::fields_of<arena_aligned>
+  : pb::field_list<arena_aligned,
+                   pb::field_at<decltype( arena_aligned::small ), 1, offsetof( arena_aligned, small )>,
+                   pb::field_at<decltype( arena_aligned::wide ), 2, offsetof( arena_aligned, wide )>>
+{};
+
+template <>
+struct pb::fields_of<byte_lists>
+  : pb::field_list<byte_lists, pb::field_at<decltype( byte_lists::blobs ), 1, offsetof( byte_lists, blobs )>>
+{};
+
+template <>
+struct pb::fields_of<fragile> : pb::field_list<fragile,
+                                               pb::field_at<decltype( fragile::o ), 1, offsetof( fragile, o )>,
+                                               pb::field_at<decltype( fragile::c ), 2, offsetof( fragile, c ), 1>,
+                                               pb::field_at<decltype( fragile::c ), 3, offsetof( fragile, c ), 2>,
+                                               pb::field_at<decltype( fragile::flag ), 4, offsetof( fragile, flag )>>
+{};
+
+template <>
+struct pb::fields_of<fragile_items>
+  : pb::field_list<fragile_items, pb::field_at<decltype( fragile_items::items ), 1, offsetof( fragile_items, items )>>
+{};
+
+namespace {
+
 static_assert( !detail::needs_arena<ints_only>() && !detail::needs_arena<lists>() && !detail::needs_arena<text>() &&
                !detail::needs_arena<envelope_owned>() );
 static_assert( detail::needs_arena<arena_lists>() && detail::needs_arena<arena_items>() &&
@@ -267,6 +372,30 @@ struct defaulted_choice
 {
 	std::variant<std::monostate, defaulted, std::uint32_t> c;
 };
+
+} // namespace
+
+template <>
+struct pb::fields_of<defaulted>
+  : pb::field_list<defaulted,
+                   pb::field_at<decltype( defaulted::v ), 1, offsetof( defaulted, v )>,
+                   pb::field_at<decltype( defaulted::x ), 2, offsetof( defaulted, x )>>
+{};
+
+template <>
+struct pb::fields_of<defaulted_optional>
+  : pb::field_list<defaulted_optional,
+                   pb::field_at<decltype( defaulted_optional::o ), 1, offsetof( defaulted_optional, o )>>
+{};
+
+template <>
+struct pb::fields_of<defaulted_choice>
+  : pb::field_list<defaulted_choice,
+                   pb::field_at<decltype( defaulted_choice::c ), 1, offsetof( defaulted_choice, c ), 1>,
+                   pb::field_at<decltype( defaulted_choice::c ), 2, offsetof( defaulted_choice, c ), 2>>
+{};
+
+namespace {
 
 /// Bytes of one varint field.
 struct varint_field
@@ -647,6 +776,21 @@ struct holds_nothing
 	std::uint32_t x;
 };
 
+} // namespace
+
+template <>
+struct pb::fields_of<nothing> : pb::field_list<nothing>
+{};
+
+template <>
+struct pb::fields_of<holds_nothing>
+  : pb::field_list<holds_nothing,
+                   pb::field_at<decltype( holds_nothing::n ), 1, offsetof( holds_nothing, n )>,
+                   pb::field_at<decltype( holds_nothing::x ), 2, offsetof( holds_nothing, x )>>
+{};
+
+namespace {
+
 /// A message type without fields skips all its input.
 bool test_decode_empty_message()
 {
@@ -906,6 +1050,23 @@ bool test_arena_huge_length()
 	       storage.intact();
 }
 
+/// A span record with a varint longer than 10 bytes keeps `INVALID_VARINT` and takes no block.
+bool test_arena_invalid_varint()
+{
+	constexpr auto varint =
+	  std::to_array<std::uint8_t>( { 0x08, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01 } );
+	constexpr auto length =
+	  std::to_array<std::uint8_t>( { 0x12, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01 } );
+	guarded storage( 512 );
+	pb::arena memory = storage.memory();
+	arena_lists a{};
+	arena_lists b{};
+	const auto ra = decode( bytes_of( varint ), a, memory );
+	const auto rb = decode( bytes_of( length ), b, memory );
+	return !ra && ra.error() == error::INVALID_VARINT && !rb && rb.error() == error::INVALID_VARINT &&
+	       memory.used() == 0 && storage.intact();
+}
+
 /// An error in the third element of a span field: the span has the two items before it, in the arena.
 bool test_arena_error_mid_field()
 {
@@ -1067,7 +1228,8 @@ bool test_arena( std::uint8_t fill )
 	arena_fill = fill;
 	return test_arena_exact() && test_arena_mixed_records() && test_arena_nested_repeated() && test_arena_merge() &&
 	       test_arena_oneof_and_optional() && test_arena_alignment() && test_arena_bad_packed() &&
-	       test_arena_byte_lists() && test_arena_huge_length() && test_arena_error_mid_field() &&
+	       test_arena_byte_lists() && test_arena_huge_length() && test_arena_invalid_varint() &&
+	       test_arena_error_mid_field() &&
 	       test_arena_two_messages() && test_arena_order() && test_arena_wrong_wire_type() &&
 	       test_arena_new_value_reset() && test_arena_new_items() && test_arena_reset() && test_arena_no_storage();
 }

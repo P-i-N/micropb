@@ -1,6 +1,7 @@
+#include <cstddef>
 #include <cstdint>
 
-#include <micropb/meta_schema.hpp>
+#include <micropb/codec.hpp>
 
 enum class wide : std::int64_t
 {
@@ -12,4 +13,8 @@ struct msg
 	wide e;
 };
 
-static_assert( pb::build_tag_table<msg>().size() == 1 );
+template <>
+struct pb::fields_of<msg> : pb::field_list<msg, pb::field_at<decltype( msg::e ), 1, offsetof( msg, e )>>
+{};
+
+static_assert( pb::detail::value_descriptor<msg>::value.kind == pb::field_kind::MESSAGE );

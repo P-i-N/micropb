@@ -1,5 +1,6 @@
 #include "generator/detail.pb.hpp"
 #include "generator/features.pb.hpp"
+#include "vectors/messages.hpp"
 #include "vectors/vectors.hpp"
 #include "vectors/vectors.pb.hpp"
 
@@ -11,10 +12,6 @@
 #include <variant>
 
 #include <micropb/micropb.hpp>
-
-#if defined( __cpp_impl_reflection )
-#include "vectors/messages.hpp"
-#endif
 
 /// The headers that `tools/protoc-gen-micropb.py` wrote from `vectors.proto` and `features.proto`.
 /// The expected bytes of the `features` messages come from `protoc --encode` (libprotoc 35.1).
@@ -39,54 +36,17 @@ static_assert( std::is_same_v<decltype( features::Calibration::gains ), std::arr
 static_assert( std::is_same_v<decltype( features::Batch::slots ), std::span<const features::Device_Slot>> );
 static_assert( std::is_same_v<decltype( features::Batch::blob ), std::span<const std::uint8_t>> );
 
-#if defined( __cpp_impl_reflection )
-
 namespace d = pb::detail;
-
-/// `true` when two field lists have the same members, offsets and alternatives. The field numbers can be
-/// different: a generated struct has no annotations, so reflection gives its members the numbers 1, 2, 3 ...
-template <typename A, typename B>
-inline constexpr bool same_members = false;
-
-template <typename T, typename... M, std::uint32_t... N1, std::uint32_t... N2, std::size_t... O, std::size_t... A>
-inline constexpr bool
-  same_members<pb::field_list<T, pb::field_at<M, N1, O, A>...>, pb::field_list<T, pb::field_at<M, N2, O, A>...>> = true;
-
-/// The field list that the plugin wrote for `T` agrees with the members that reflection finds in `T`.
-template <typename... T>
-inline constexpr bool lists_agree_with_reflection =
-  ( same_members<d::reflected_fields<T>, d::field_list_of<T>> && ... );
-
-static_assert( lists_agree_with_reflection<gen::scalars,
-                                           gen::text,
-                                           gen::inner,
-                                           gen::outer,
-                                           gen::lists,
-                                           gen::pose,
-                                           gen::ping,
-                                           gen::envelope> );
-static_assert( lists_agree_with_reflection<features::limits,
-                                           features::Device_Slot,
-                                           features::Device,
-                                           features::Frame,
-                                           features::Calibration,
-                                           features::Batch,
-                                           features::Report,
-                                           shared::types::Point,
-                                           ::detail::tag,
-                                           ::detail::reader> );
 
 /// The field numbers that the plugin wrote are those of the struct that a person wrote for the same message.
 template <typename Generated, typename Written>
 inline constexpr bool same_numbers = d::list_traits<d::field_list_of<Generated>>::sorted_numbers() ==
-                                     d::list_traits<d::reflected_fields<Written>>::sorted_numbers();
+                                     d::list_traits<d::field_list_of<Written>>::sorted_numbers();
 
 static_assert( same_numbers<gen::scalars, messages::scalars> && same_numbers<gen::text, messages::text> &&
                same_numbers<gen::inner, messages::inner> && same_numbers<gen::outer, messages::outer> &&
                same_numbers<gen::lists, messages::lists> && same_numbers<gen::pose, messages::pose> &&
                same_numbers<gen::ping, messages::ping> && same_numbers<gen::envelope, messages::envelope> );
-
-#endif
 
 template <typename T, std::size_t N>
 bool encodes_to( const T& message, const std::array<std::uint8_t, N>& wire )

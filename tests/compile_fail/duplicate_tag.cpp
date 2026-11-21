@@ -1,11 +1,18 @@
+#include <cstddef>
 #include <cstdint>
 
-#include <micropb/meta_schema.hpp>
+#include <micropb/codec.hpp>
 
 struct msg
 {
 	std::int32_t a;
-	[[= pb::tag{ 1 }]] std::int32_t b;
+	std::int32_t b;
 };
 
-static_assert( pb::build_tag_table<msg>().size() == 2 );
+template <>
+struct pb::fields_of<msg> : pb::field_list<msg,
+                                           pb::field_at<decltype( msg::a ), 1, offsetof( msg, a )>,
+                                           pb::field_at<decltype( msg::b ), 1, offsetof( msg, b )>>
+{};
+
+static_assert( pb::detail::value_descriptor<msg>::value.kind == pb::field_kind::MESSAGE );

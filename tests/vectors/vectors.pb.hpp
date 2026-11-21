@@ -81,7 +81,7 @@ struct envelope {
 
 } // namespace micropb::test
 
-// Field lists: with these, the messages also work on a compiler without reflection.
+// Field lists.
 
 template <>
 struct pb::fields_of<::micropb::test::scalars> : pb::field_list<::micropb::test::scalars,

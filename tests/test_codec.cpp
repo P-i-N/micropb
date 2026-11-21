@@ -27,7 +27,7 @@ struct nothing
 struct holder
 {
 	std::uint32_t id;
-	[[= pb::tag{ 5 }]] plain child;
+	plain child;
 	std::optional<float> maybe;
 	pb::repeated<float, 4> floats;
 	pb::repeated<std::uint8_t, 16> blob;
@@ -47,37 +47,95 @@ enum class level : std::int32_t
 	ZERO
 };
 
-constexpr const d::message_desc& p = d::message_descriptor<plain>::value;
-constexpr const d::message_desc& h = d::message_descriptor<holder>::value;
+} // namespace
+
+template <>
+struct pb::fields_of<plain> : pb::field_list<plain,
+                                             pb::field_at<decltype( plain::a ), 1, offsetof( plain, a )>,
+                                             pb::field_at<decltype( plain::b ), 2, offsetof( plain, b )>,
+                                             pb::field_at<decltype( plain::c ), 3, offsetof( plain, c )>>
+{};
+
+template <>
+struct pb::fields_of<nothing> : pb::field_list<nothing>
+{};
+
+template <>
+struct pb::fields_of<holder> : pb::field_list<holder,
+                                              pb::field_at<decltype( holder::id ), 1, offsetof( holder, id )>,
+                                              pb::field_at<decltype( holder::child ), 5, offsetof( holder, child )>,
+                                              pb::field_at<decltype( holder::maybe ), 6, offsetof( holder, maybe )>,
+                                              pb::field_at<decltype( holder::floats ), 7, offsetof( holder, floats )>,
+                                              pb::field_at<decltype( holder::blob ), 8, offsetof( holder, blob )>,
+                                              pb::field_at<decltype( holder::mac ), 9, offsetof( holder, mac )>,
+                                              pb::field_at<decltype( holder::view ), 10, offsetof( holder, view )>,
+                                              pb::field_at<decltype( holder::name ), 11, offsetof( holder, name )>,
+                                              pb::field_at<decltype( holder::none ), 12, offsetof( holder, none )>,
+                                              pb::field_at<decltype( holder::choice ), 13, offsetof( holder, choice ), 1>,
+                                              pb::field_at<decltype( holder::choice ), 14, offsetof( holder, choice ), 2>>
+{};
+
+namespace {
+
+using plain_table = d::field_table<d::field_list_of<plain>>;
+using holder_table = d::field_table<d::field_list_of<holder>>;
+constexpr const d::value_desc& p = d::value_descriptor<plain>::value;
+constexpr const d::value_desc& h = d::value_descriptor<holder>::value;
+
+template <typename Table>
+consteval d::field_entry entry_at( std::size_t index )
+{
+	std::size_t pos = 0;
+	d::field_entry entry{};
+	for ( std::size_t i = 0; i <= index; ++i )
+		entry = d::decode_entry( Table::value.words.data(), pos );
+	return entry;
+}
+
+template <typename Table>
+consteval d::value_desc type_at( std::size_t index )
+{
+	const d::value_desc* const* subs = nullptr;
+	if constexpr ( Table::layout.subs_n > 0 )
+		subs = Table::value.subs.data();
+	return d::resolve_type( subs, entry_at<Table>( index ) );
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// `plain`: three scalars at the offsets 0, 4, 8, with the numbers 1, 2, 3.
-static_assert( p.count == 3 && p.fields[0].offset == 0 && p.fields[1].offset == 4 && p.fields[2].offset == 8 );
-static_assert( p.fields[2].number == 3 && p.fields[2].type->kind == K::SCALAR && p.fields[0].alternative == 0 );
-static_assert( p.fields[1].type == &d::value_descriptor<std::uint32_t>::value );
+// `plain`: three inline scalars at offsets 0, 4, 8, numbers 1, 2, 3, zero compound pointers, 3 words (12 B).
+static_assert( p.kind == K::MESSAGE && p.scalar == 0 && p.words == 3 && sizeof( plain_table::value ) == 12 );
+static_assert( entry_at<plain_table>( 0 ).offset == 0 && entry_at<plain_table>( 1 ).offset == 4 &&
+               entry_at<plain_table>( 2 ).offset == 8 );
+static_assert( entry_at<plain_table>( 2 ).number == 3 && type_at<plain_table>( 2 ).kind == K::SCALAR &&
+               entry_at<plain_table>( 0 ).alternative == 0 );
+static_assert( type_at<plain_table>( 1 ).scalar == d::scalar_code_of<std::uint32_t>() );
 
-// `holder`: 11 entries, with the numbers 1 5 6 7 8 9 10 11 12 13 14.
-static_assert( h.count == 11 && h.fields[1].number == 5 && h.fields[8].number == 12 && h.fields[10].number == 14 );
-static_assert( h.fields[1].type->kind == K::MESSAGE && h.fields[1].type->message == &p );
-static_assert( h.fields[2].type->kind == K::OPTIONAL &&
-               h.fields[2].type->optional->value == &d::value_descriptor<float>::value );
-static_assert( h.fields[3].type->kind == K::REPEATED &&
-               h.fields[3].type->sequence->storage == d::sequence_storage::REPEATED &&
-               h.fields[3].type->sequence->capacity == 4 && h.fields[3].type->sequence->element_size == 4 &&
-               h.fields[3].type->sequence->element == &d::value_descriptor<float>::value );
-static_assert( h.fields[4].type->kind == K::BYTES && h.fields[4].type->sequence->capacity == 16 );
-static_assert( h.fields[5].type->kind == K::FIXED_BYTES && h.fields[5].type->size == 6 );
-static_assert( h.fields[6].type->kind == K::REPEATED &&
-               h.fields[6].type->sequence->storage == d::sequence_storage::ACCESSOR &&
-               h.fields[6].type->sequence->element == &d::value_descriptor<std::int32_t>::value );
-static_assert( h.fields[7].type->kind == K::STRING );
-static_assert( h.fields[8].type->kind == K::MESSAGE && h.fields[8].type->message->count == 0 );
-static_assert( h.fields[9].alternative == 1 && h.fields[10].alternative == 2 &&
-               h.fields[9].offset == h.fields[10].offset && h.fields[9].type == h.fields[10].type &&
-               h.fields[9].type->kind == K::ONEOF &&
-               h.fields[9].type->variant->alternatives[1] == &d::value_descriptor<plain>::value &&
-               h.fields[9].type->variant->alternatives[2] == &d::value_descriptor<float>::value );
+// `holder`: 11 1-word entries, with the numbers 1 5 6 7 8 9 10 11 12 13 14, and 8 deduplicated compound pointers.
+static_assert( h.kind == K::MESSAGE && h.scalar == 8 && h.words == 11 );
+static_assert( entry_at<holder_table>( 1 ).number == 5 && entry_at<holder_table>( 8 ).number == 12 &&
+               entry_at<holder_table>( 10 ).number == 14 );
+static_assert( type_at<holder_table>( 1 ).kind == K::MESSAGE && type_at<holder_table>( 1 ).table == p.table );
+static_assert( type_at<holder_table>( 2 ).kind == K::OPTIONAL &&
+               type_at<holder_table>( 2 ).optional->value == &d::value_descriptor<float>::value );
+static_assert( type_at<holder_table>( 3 ).kind == K::REPEATED &&
+               type_at<holder_table>( 3 ).sequence->storage == d::sequence_storage::REPEATED &&
+               type_at<holder_table>( 3 ).sequence->capacity == 4 &&
+               type_at<holder_table>( 3 ).sequence->element_size == 4 &&
+               type_at<holder_table>( 3 ).sequence->element == &d::value_descriptor<float>::value );
+static_assert( type_at<holder_table>( 4 ).kind == K::BYTES && type_at<holder_table>( 4 ).sequence->capacity == 16 );
+static_assert( type_at<holder_table>( 5 ).kind == K::FIXED_BYTES && type_at<holder_table>( 5 ).size == 6 );
+static_assert( type_at<holder_table>( 6 ).kind == K::REPEATED &&
+               type_at<holder_table>( 6 ).sequence->storage == d::sequence_storage::ACCESSOR &&
+               type_at<holder_table>( 6 ).sequence->element == &d::value_descriptor<std::int32_t>::value );
+static_assert( type_at<holder_table>( 7 ).kind == K::STRING );
+static_assert( type_at<holder_table>( 8 ).kind == K::MESSAGE && type_at<holder_table>( 8 ).words == 0 );
+static_assert( entry_at<holder_table>( 9 ).alternative == 1 && entry_at<holder_table>( 10 ).alternative == 2 &&
+               entry_at<holder_table>( 9 ).offset == entry_at<holder_table>( 10 ).offset &&
+               entry_at<holder_table>( 9 ).sub_idx == 0 && entry_at<holder_table>( 10 ).sub_idx == 0 &&
+               type_at<holder_table>( 9 ).kind == K::ONEOF &&
+               type_at<holder_table>( 9 ).variant->alternatives[1] == &d::value_descriptor<plain>::value &&
+               type_at<holder_table>( 9 ).variant->alternatives[2] == &d::value_descriptor<float>::value );
 
 static_assert( d::value_descriptor<std::span<const std::uint8_t>>::value.kind == K::BYTES &&
                d::value_descriptor<std::span<const std::uint8_t>>::value.sequence == nullptr );
@@ -89,11 +147,10 @@ static_assert( d::scalar_code_of<std::int8_t>() == ( 0 | d::scalar_signed ) );
 static_assert( d::scalar_code_of<std::uint16_t>() == 1 && d::scalar_code_of<std::uint64_t>() == 3 );
 static_assert( d::scalar_code_of<pb::sint32>() == ( 2 | d::scalar_signed | d::scalar_zigzag ) );
 static_assert( d::scalar_code_of<float>() == ( 2 | d::scalar_fixed ) &&
-               d::scalar_code_of<pb::sfixed64>() == ( 3 | d::scalar_fixed ) );
+               d::value_descriptor<pb::sfixed64>::value.scalar == ( 3 | d::scalar_fixed ) );
 static_assert( d::scalar_code_of<small>() == ( 0 | d::scalar_enum ) );
 static_assert( d::scalar_code_of<level>() == ( 2 | d::scalar_enum | d::scalar_signed ) );
 
-static_assert( sizeof( d::field_desc ) <= ( sizeof( void* ) == 4 ? 12 : 16 ) );
 static_assert( sizeof( d::value_desc ) <= 2 * sizeof( void* ) );
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -144,8 +201,9 @@ bool test_sequence_accessor()
 	constexpr std::array<std::int32_t, 3> items{ 1, 2, 3 };
 	std::span<const std::int32_t> view( items );
 	const d::sequence_desc& view_desc = *d::value_descriptor<std::span<const std::int32_t>>::value.sequence;
-	const d::sequence_view a = view_desc.access( &view );
-	if ( a.count != 3 || a.capacity != 3 || a.data != items.data() || a.stored_count != nullptr )
+	const d::span_desc& span = *view_desc.span;
+	const d::sequence_view a = span.access( &view );
+	if ( a.count != 3 || a.data != items.data() )
 		return false;
 
 	if ( view_desc.element_size != 4 || view_desc.storage != d::sequence_storage::ACCESSOR )
@@ -153,13 +211,11 @@ bool test_sequence_accessor()
 
 	// Only a `std::span<const T>` has a binder: `decode` sets it to a block in the arena.
 	std::array<std::int32_t, 2> block{ 5, 6 };
-	view_desc.bind( &view, block.data(), 2 );
-	return view.data() == block.data() && view.size() == 2 && view_desc.element_align == alignof( std::int32_t ) &&
-	       view_desc.construct == &d::construct_item<std::int32_t> &&
-	       d::value_descriptor<pb::repeated<float, 4>>::value.sequence->bind == nullptr &&
-	       view_desc.reserve == &d::reserve &&
-	       d::value_descriptor<pb::repeated<float, 4>>::value.sequence->reserve == nullptr &&
-	       d::value_descriptor<std::array<float, 2>>::value.sequence->reserve == nullptr;
+	span.bind( &view, block.data(), 2 );
+	return view.data() == block.data() && view.size() == 2 && span.element_align == alignof( std::int32_t ) &&
+	       span.construct == &d::construct_item<std::int32_t> && span.reserve == &d::reserve &&
+	       d::value_descriptor<pb::repeated<float, 4>>::value.sequence->span == nullptr &&
+	       d::value_descriptor<std::array<float, 2>>::value.sequence->span == nullptr;
 }
 
 /// A span with more items than the capacity of its block fails closed: the count takes no block
@@ -257,8 +313,8 @@ struct all
 	pb::repeated<double, 2> ds;
 	pb::repeated<inner, 3> items;
 	pb::repeated<std::string_view, 3> names;
-	[[= pb::oneof_tags<60, 61, 62>{}]] choice payload;
-	[[= pb::tag{ 100 }]] std::int16_t tail;
+	choice payload;
+	std::int16_t tail;
 };
 
 /// The same message, with the storage types that only `encode` accepts in the
@@ -296,9 +352,110 @@ struct all_views
 	std::array<double, 2> ds;
 	pb::repeated<inner, 3> items;
 	pb::repeated<std::string_view, 3> names;
-	[[= pb::oneof_tags<60, 61, 62>{}]] choice payload;
-	[[= pb::tag{ 100 }]] std::int16_t tail;
+	choice payload;
+	std::int16_t tail;
 };
+
+} // namespace
+
+template <>
+struct pb::fields_of<inner> : pb::field_list<inner,
+                                             pb::field_at<decltype( inner::x ), 1, offsetof( inner, x )>,
+                                             pb::field_at<decltype( inner::label ), 2, offsetof( inner, label )>,
+                                             pb::field_at<decltype( inner::z ), 3, offsetof( inner, z )>>
+{};
+
+template <>
+struct pb::fields_of<pose> : pb::field_list<pose,
+                                            pb::field_at<decltype( pose::pos ), 1, offsetof( pose, pos )>,
+                                            pb::field_at<decltype( pose::rot ), 2, offsetof( pose, rot )>>
+{};
+
+template <>
+struct pb::fields_of<ping> : pb::field_list<ping, pb::field_at<decltype( ping::seq ), 1, offsetof( ping, seq )>>
+{};
+
+template <>
+struct pb::fields_of<all>
+  : pb::field_list<all,
+                   pb::field_at<decltype( all::flag ), 1, offsetof( all, flag )>,
+                   pb::field_at<decltype( all::i8 ), 2, offsetof( all, i8 )>,
+                   pb::field_at<decltype( all::i16 ), 3, offsetof( all, i16 )>,
+                   pb::field_at<decltype( all::i32 ), 4, offsetof( all, i32 )>,
+                   pb::field_at<decltype( all::i64 ), 5, offsetof( all, i64 )>,
+                   pb::field_at<decltype( all::u8 ), 6, offsetof( all, u8 )>,
+                   pb::field_at<decltype( all::u16 ), 7, offsetof( all, u16 )>,
+                   pb::field_at<decltype( all::u32 ), 8, offsetof( all, u32 )>,
+                   pb::field_at<decltype( all::u64 ), 9, offsetof( all, u64 )>,
+                   pb::field_at<decltype( all::s32 ), 10, offsetof( all, s32 )>,
+                   pb::field_at<decltype( all::s64 ), 11, offsetof( all, s64 )>,
+                   pb::field_at<decltype( all::fx32 ), 12, offsetof( all, fx32 )>,
+                   pb::field_at<decltype( all::fx64 ), 13, offsetof( all, fx64 )>,
+                   pb::field_at<decltype( all::sfx32 ), 14, offsetof( all, sfx32 )>,
+                   pb::field_at<decltype( all::sfx64 ), 15, offsetof( all, sfx64 )>,
+                   pb::field_at<decltype( all::f ), 16, offsetof( all, f )>,
+                   pb::field_at<decltype( all::d ), 17, offsetof( all, d )>,
+                   pb::field_at<decltype( all::m ), 18, offsetof( all, m )>,
+                   pb::field_at<decltype( all::g ), 19, offsetof( all, g )>,
+                   pb::field_at<decltype( all::name ), 20, offsetof( all, name )>,
+                   pb::field_at<decltype( all::view ), 21, offsetof( all, view )>,
+                   pb::field_at<decltype( all::mac ), 22, offsetof( all, mac )>,
+                   pb::field_at<decltype( all::blob ), 23, offsetof( all, blob )>,
+                   pb::field_at<decltype( all::child ), 24, offsetof( all, child )>,
+                   pb::field_at<decltype( all::maybe ), 25, offsetof( all, maybe )>,
+                   pb::field_at<decltype( all::maybe_child ), 26, offsetof( all, maybe_child )>,
+                   pb::field_at<decltype( all::ints ), 27, offsetof( all, ints )>,
+                   pb::field_at<decltype( all::zz ), 28, offsetof( all, zz )>,
+                   pb::field_at<decltype( all::ds ), 29, offsetof( all, ds )>,
+                   pb::field_at<decltype( all::items ), 30, offsetof( all, items )>,
+                   pb::field_at<decltype( all::names ), 31, offsetof( all, names )>,
+                   pb::field_at<decltype( all::payload ), 60, offsetof( all, payload ), 1>,
+                   pb::field_at<decltype( all::payload ), 61, offsetof( all, payload ), 2>,
+                   pb::field_at<decltype( all::payload ), 62, offsetof( all, payload ), 3>,
+                   pb::field_at<decltype( all::tail ), 100, offsetof( all, tail )>>
+{};
+
+template <>
+struct pb::fields_of<all_views>
+  : pb::field_list<all_views,
+                   pb::field_at<decltype( all_views::flag ), 1, offsetof( all_views, flag )>,
+                   pb::field_at<decltype( all_views::i8 ), 2, offsetof( all_views, i8 )>,
+                   pb::field_at<decltype( all_views::i16 ), 3, offsetof( all_views, i16 )>,
+                   pb::field_at<decltype( all_views::i32 ), 4, offsetof( all_views, i32 )>,
+                   pb::field_at<decltype( all_views::i64 ), 5, offsetof( all_views, i64 )>,
+                   pb::field_at<decltype( all_views::u8 ), 6, offsetof( all_views, u8 )>,
+                   pb::field_at<decltype( all_views::u16 ), 7, offsetof( all_views, u16 )>,
+                   pb::field_at<decltype( all_views::u32 ), 8, offsetof( all_views, u32 )>,
+                   pb::field_at<decltype( all_views::u64 ), 9, offsetof( all_views, u64 )>,
+                   pb::field_at<decltype( all_views::s32 ), 10, offsetof( all_views, s32 )>,
+                   pb::field_at<decltype( all_views::s64 ), 11, offsetof( all_views, s64 )>,
+                   pb::field_at<decltype( all_views::fx32 ), 12, offsetof( all_views, fx32 )>,
+                   pb::field_at<decltype( all_views::fx64 ), 13, offsetof( all_views, fx64 )>,
+                   pb::field_at<decltype( all_views::sfx32 ), 14, offsetof( all_views, sfx32 )>,
+                   pb::field_at<decltype( all_views::sfx64 ), 15, offsetof( all_views, sfx64 )>,
+                   pb::field_at<decltype( all_views::f ), 16, offsetof( all_views, f )>,
+                   pb::field_at<decltype( all_views::d ), 17, offsetof( all_views, d )>,
+                   pb::field_at<decltype( all_views::m ), 18, offsetof( all_views, m )>,
+                   pb::field_at<decltype( all_views::g ), 19, offsetof( all_views, g )>,
+                   pb::field_at<decltype( all_views::name ), 20, offsetof( all_views, name )>,
+                   pb::field_at<decltype( all_views::view ), 21, offsetof( all_views, view )>,
+                   pb::field_at<decltype( all_views::mac ), 22, offsetof( all_views, mac )>,
+                   pb::field_at<decltype( all_views::blob ), 23, offsetof( all_views, blob )>,
+                   pb::field_at<decltype( all_views::child ), 24, offsetof( all_views, child )>,
+                   pb::field_at<decltype( all_views::maybe ), 25, offsetof( all_views, maybe )>,
+                   pb::field_at<decltype( all_views::maybe_child ), 26, offsetof( all_views, maybe_child )>,
+                   pb::field_at<decltype( all_views::ints ), 27, offsetof( all_views, ints )>,
+                   pb::field_at<decltype( all_views::zz ), 28, offsetof( all_views, zz )>,
+                   pb::field_at<decltype( all_views::ds ), 29, offsetof( all_views, ds )>,
+                   pb::field_at<decltype( all_views::items ), 30, offsetof( all_views, items )>,
+                   pb::field_at<decltype( all_views::names ), 31, offsetof( all_views, names )>,
+                   pb::field_at<decltype( all_views::payload ), 60, offsetof( all_views, payload ), 1>,
+                   pb::field_at<decltype( all_views::payload ), 61, offsetof( all_views, payload ), 2>,
+                   pb::field_at<decltype( all_views::payload ), 62, offsetof( all_views, payload ), 3>,
+                   pb::field_at<decltype( all_views::tail ), 100, offsetof( all_views, tail )>>
+{};
+
+namespace {
 
 constexpr std::array<std::uint8_t, 3> raw{ 9, 8, 7 };
 constexpr std::array<std::int32_t, 3> int_values{ 1, -1, 100000 };
@@ -413,9 +570,91 @@ bool test_all_kinds()
 
 } // namespace
 
+namespace {
+
+template <std::size_t I>
+struct alt_tag
+{
+	std::uint32_t v;
+};
+
+template <typename Seq>
+struct wide_variant_msg;
+
+template <std::size_t... I>
+struct wide_variant_msg<std::index_sequence<I...>>
+{
+	using variant_t = std::variant<std::monostate, alt_tag<I>...>;
+	variant_t first;
+	std::variant<std::monostate, std::int32_t, double> second;
+	pb::repeated<std::uint8_t, 4100> pad;
+	std::uint32_t far_scalar;
+	std::uint32_t max_tag_scalar;
+};
+
+using wide_msg = wide_variant_msg<std::make_index_sequence<33>>;
+
+} // namespace
+
+template <std::size_t I>
+struct pb::fields_of<alt_tag<I>> : pb::field_list<alt_tag<I>, pb::field_at<decltype( alt_tag<I>::v ), 1, 0>>
+{};
+
+template <std::size_t... I>
+pb::field_list<
+  wide_msg,
+  pb::field_at<decltype( wide_msg::first ), static_cast<std::uint32_t>( I + 1 ), offsetof( wide_msg, first ), I + 1>...,
+  pb::field_at<decltype( wide_msg::second ), 100, offsetof( wide_msg, second ), 1>,
+  pb::field_at<decltype( wide_msg::second ), 101, offsetof( wide_msg, second ), 2>,
+  pb::field_at<decltype( wide_msg::pad ), 200, offsetof( wide_msg, pad )>,
+  pb::field_at<decltype( wide_msg::far_scalar ), 4096, offsetof( wide_msg, far_scalar )>,
+  pb::field_at<decltype( wide_msg::max_tag_scalar ),
+               pb::detail::max_field_number,
+               offsetof( wide_msg, max_tag_scalar )>>
+make_wide_list( std::index_sequence<I...> );
+
+template <>
+struct pb::fields_of<wide_msg> : decltype( make_wide_list( std::make_index_sequence<33>{} ) )
+{};
+
+namespace {
+
+/// Exercises 3-word field entries: alternative 33 (> 32), a second `std::variant`
+/// (`sub_idx == 1`), member offsets > 4095, and field numbers 4096 and 2^29 - 1.
+bool test_wide_entries()
+{
+	using wt = d::field_table<d::field_list_of<wide_msg>>;
+	// 32 1-word entries (`first` 1..32) + 1 (`pad`) = 33 1-word entries, plus 5 3-word entries = 48 words.
+	static_assert( wt::entry_count == 38 && wt::layout.words_n == 33 + 5 * 3 );
+
+	wide_msg tx{};
+	tx.first.emplace<33>( alt_tag<32>{ 42 } );
+	tx.second = 3.5;
+	tx.far_scalar = 777;
+	tx.max_tag_scalar = 999;
+
+	std::array<std::uint8_t, 128> wire{};
+	const auto n = pb::encode( tx, wire );
+	if ( !n || pb::encoded_size( tx ) != *n )
+		return false;
+
+	wide_msg rx{};
+	rx.first.emplace<1>( alt_tag<0>{ 9 } );
+	rx.second = std::int32_t{ 5 };
+	if ( !pb::decode( std::span<const std::uint8_t>( wire ).first( *n ), rx ) )
+		return false;
+
+	const auto* a33 = std::get_if<33>( &rx.first );
+	const auto* s2 = std::get_if<double>( &rx.second );
+	return a33 != nullptr && a33->v == 42 && s2 != nullptr && *s2 == 3.5 && rx.far_scalar == 777 &&
+	       rx.max_tag_scalar == 999 && rx.pad.empty();
+}
+
+} // namespace
+
 int main()
 {
 	const bool ok = test_optional_accessor() && test_variant_accessor() && test_sequence_accessor() &&
-	                test_block_bound() && test_all_kinds();
+	                test_block_bound() && test_all_kinds() && test_wide_entries();
 	return ok ? 0 : 1;
 }

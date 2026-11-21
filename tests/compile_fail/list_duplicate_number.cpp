@@ -21,4 +21,4 @@ struct pb::fields_of<msg> : pb::field_list<msg,
                                            pb::field_at<decltype( msg::c ), 5, offsetof( msg, c )>>
 {};
 
-static_assert( pb::detail::message_descriptor<msg>::value.count == 3 );
+static_assert( pb::detail::value_descriptor<msg>::value.kind == pb::field_kind::MESSAGE );

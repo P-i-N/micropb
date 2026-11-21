@@ -16,5 +16,13 @@ struct msg
 	std::span<const item> items;
 };
 
+template <>
+struct pb::fields_of<item> : pb::field_list<item, pb::field_at<decltype( item::x ), 1, offsetof( item, x )>>
+{};
+
+template <>
+struct pb::fields_of<msg> : pb::field_list<msg, pb::field_at<decltype( msg::items ), 1, offsetof( msg, items )>>
+{};
+
 const msg value{};
 const std::size_t size = pb::encoded_size( value );

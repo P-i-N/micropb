@@ -9,14 +9,6 @@
 
 #include <micropb/micropb.hpp>
 
-// With reflection, the annotations give the field numbers and the library makes the field list.
-// Without reflection, the `pb::fields_of` specializations below give the same list.
-#if defined( __cpp_impl_reflection )
-#define TEST_ANNOTATION( ... ) [[= __VA_ARGS__]]
-#else
-#define TEST_ANNOTATION( ... )
-#endif
-
 namespace manual {
 
 struct inner
@@ -29,14 +21,20 @@ struct message
 {
 	std::uint32_t id;
 	pb::repeated<float, 3> values;
-	TEST_ANNOTATION( pb::tag{ 5 } ) std::optional<inner> child;
-	TEST_ANNOTATION( pb::oneof_tags<10, 11>{} ) std::variant<std::monostate, inner, std::uint32_t> choice;
-	TEST_ANNOTATION( pb::tag{ 3 } ) std::array<std::uint8_t, 4> key;
+	std::optional<inner> child;
+	std::variant<std::monostate, inner, std::uint32_t> choice;
+	std::array<std::uint8_t, 4> key;
 	pb::sint32 delta;
 };
 
 struct empty
 {};
+
+struct shared_offset
+{
+	[[no_unique_address]] empty e;
+	std::variant<std::monostate, std::int32_t, float> choice;
+};
 
 /// Encode only: a `std::array` of a type that is not a byte, and a `const` member.
 struct fixed
@@ -139,6 +137,15 @@ struct pb::fields_of<manual::empty> : pb::field_list<manual::empty>
 {};
 
 template <>
+struct pb::fields_of<manual::shared_offset>
+  : pb::field_list<
+      manual::shared_offset,
+      pb::field_at<decltype( manual::shared_offset::e ), 1, offsetof( manual::shared_offset, e )>,
+      pb::field_at<decltype( manual::shared_offset::choice ), 2, offsetof( manual::shared_offset, choice ), 1>,
+      pb::field_at<decltype( manual::shared_offset::choice ), 3, offsetof( manual::shared_offset, choice ), 2>>
+{};
+
+template <>
 struct pb::fields_of<manual::fixed>
   : pb::field_list<manual::fixed,
                    pb::field_at<decltype( manual::fixed::gains ), 1, offsetof( manual::fixed, gains )>,
@@ -216,17 +223,20 @@ namespace {
 namespace d = pb::detail;
 
 // The table is in the order of the field numbers.
-constexpr const d::message_desc& table = d::message_descriptor<manual::message>::value;
-static_assert( table.count == 7 );
-static_assert( table.fields[0].number == 1 && table.fields[1].number == 2 && table.fields[2].number == 3 &&
-               table.fields[3].number == 4 && table.fields[4].number == 5 && table.fields[5].number == 10 &&
-               table.fields[6].number == 11 );
-static_assert( table.fields[2].offset == offsetof( manual::message, key ) && table.fields[2].alternative == 0 &&
-               table.fields[2].type == &d::value_descriptor<std::array<std::uint8_t, 4>>::value );
-static_assert( table.fields[5].offset == offsetof( manual::message, choice ) && table.fields[5].alternative == 1 &&
-               table.fields[6].alternative == 2 &&
-               table.fields[6].type == &d::value_descriptor<decltype( manual::message::choice )>::value );
-static_assert( d::message_descriptor<manual::empty>::value.count == 0 );
+using message_table = d::field_table<d::field_list_of<manual::message>>;
+constexpr const auto& layout = message_table::layout;
+static_assert( message_table::entry_count == 7 && layout.words_n == 7 );
+static_assert( layout.entries[0].number == 1 && layout.entries[1].number == 2 && layout.entries[2].number == 3 &&
+               layout.entries[3].number == 4 && layout.entries[4].number == 5 && layout.entries[5].number == 10 &&
+               layout.entries[6].number == 11 );
+static_assert( layout.entries[2].offset == offsetof( manual::message, key ) && layout.entries[2].alternative == 0 &&
+               layout.subs[layout.entries[2].sub_idx] == &d::value_descriptor<std::array<std::uint8_t, 4>>::value );
+static_assert( layout.entries[5].offset == offsetof( manual::message, choice ) && layout.entries[5].alternative == 1 &&
+               layout.entries[6].alternative == 2 &&
+               layout.subs[layout.entries[6].sub_idx] == &d::value_descriptor<decltype( manual::message::choice )>::value );
+static_assert( d::value_descriptor<manual::empty>::value.words == 0 &&
+               d::value_descriptor<manual::empty>::value.table == nullptr );
+static_assert( d::value_descriptor<manual::shared_offset>::value.words == 3 );
 
 static_assert( !d::is_recursive<manual::inner>() && !d::is_recursive<manual::message>() &&
                !d::is_recursive<manual::empty>() && !d::is_recursive<manual::fixed>() &&
@@ -238,16 +248,6 @@ static_assert( d::is_recursive<manual::var_node>() && d::is_recursive<manual::va
 
 static_assert( d::needs_arena<manual::spans>() && !d::needs_arena<manual::message>() &&
                !d::needs_arena<manual::inner>() && !d::needs_arena<manual::empty>() );
-
-#if defined( __cpp_impl_reflection )
-// The list that reflection makes from the struct is the same type as the list above.
-static_assert( std::is_same_v<d::reflected_fields<manual::inner>, d::field_list_of<manual::inner>> );
-static_assert( std::is_same_v<d::reflected_fields<manual::message>, d::field_list_of<manual::message>> );
-static_assert( std::is_same_v<d::reflected_fields<manual::empty>, d::field_list_of<manual::empty>> );
-static_assert( std::is_same_v<d::reflected_fields<manual::fixed>, d::field_list_of<manual::fixed>> );
-static_assert( std::is_same_v<d::reflected_fields<manual::constants>, d::field_list_of<manual::constants>> );
-static_assert( std::is_same_v<d::reflected_fields<manual::spans>, d::field_list_of<manual::spans>> );
-#endif
 
 template <typename T, std::size_t N>
 bool encodes_to( const T& message, const std::array<std::uint8_t, N>& wire )
@@ -332,7 +332,7 @@ bool test_const_span_element()
 	using items = decltype( manual::const_items::items );
 	const d::sequence_desc& desc = *d::value_descriptor<items>::value.sequence;
 	const manual::const_item values[2]{ { 1 }, { 2 } };
-	return desc.construct == nullptr &&
+	return desc.span->construct == nullptr &&
 	       encodes_to( manual::const_items{ values },
 	                   std::array<std::uint8_t, 8>{ 0x0a, 0x02, 0x08, 0x01, 0x0a, 0x02, 0x08, 0x02 } );
 }

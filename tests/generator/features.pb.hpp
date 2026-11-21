@@ -78,7 +78,7 @@ struct Report {
 
 } // namespace features
 
-// Field lists: with these, the messages also work on a compiler without reflection.
+// Field lists.
 
 template <>
 struct pb::fields_of<::features::limits> : pb::field_list<::features::limits,

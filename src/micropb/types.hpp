@@ -64,17 +64,6 @@ using fixed64 = wire_int<std::uint64_t, int_encoding::FIXED>;
 using sfixed32 = wire_int<std::int32_t, int_encoding::FIXED>;
 using sfixed64 = wire_int<std::int64_t, int_encoding::FIXED>;
 
-/// Field number of a message field, as a compile-time value.
-struct tag
-{
-	std::uint32_t value;
-};
-
-/// Field numbers that belong to one oneof group.
-template <std::uint32_t... Tags>
-struct oneof_tags
-{};
-
 ////////////////////////////////////////////////////////////////////////////////
 
 /// One field of a message: the type `M` of the member, the field number and
@@ -90,9 +79,8 @@ struct field_list
 {};
 
 /// The field list of the message type `T`: a struct that derives from
-/// `pb::field_list<T, ...>`. A compiler with reflection makes it from the
-/// members of `T`. For a compiler without reflection, protoc-gen-micropb or a
-/// person writes a specialization:
+/// `pb::field_list<T, ...>`. `protoc-gen-micropb` or a person writes a
+/// specialization:
 ///
 ///     template <>
 ///     struct pb::fields_of<ping> : pb::field_list<ping,
@@ -139,7 +127,7 @@ struct repeated
 private:
 	friend struct detail::sequence_access;
 
-	std::array<T, N> _items{};
+	std::array<T, N> _items;
 	std::size_t _count = 0;
 };
 

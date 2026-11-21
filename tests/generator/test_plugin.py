@@ -148,7 +148,7 @@ class CoreTest(unittest.TestCase):
 
             } // namespace app::link
 
-            // Field lists: with these, the messages also work on a compiler without reflection.
+            // Field lists.
 
             template <>
             struct pb::fields_of<::app::link::Inner> : pb::field_list<::app::link::Inner,
@@ -526,13 +526,21 @@ class StructureTest(unittest.TestCase):
         self.assertNotIn("control", text)
 
     def test_extend_block_is_ignored(self):
-        text = header("""
-            import "google/protobuf/descriptor.proto";
-            extend google.protobuf.FieldOptions { int32 unit = 50000; }
-            message m { bool a = 1 [(unit) = 3]; }
-            """)
-        self.assertEqual(members(text, "m"), ["bool a;"])
-        self.assertNotIn('#include "', text)
+        result = run({
+            "google/protobuf/descriptor.proto": """
+                syntax = "proto2";
+                package google.protobuf;
+                message FieldOptions { extensions 1000 to max; }
+                """,
+            "a.proto": """
+                syntax = "proto3";
+                import "google/protobuf/descriptor.proto";
+                extend google.protobuf.FieldOptions { int32 unit = 50000; }
+                message m { bool a = 1 [(unit) = 3]; }
+                """}, protos=["a.proto"])
+        self.assertEqual((result.rc, result.stderr), (0, ""))
+        self.assertEqual(members(result.headers["a.pb.hpp"], "m"), ["bool a;"])
+        self.assertNotIn('#include "', result.headers["a.pb.hpp"])
 
 
 class NameTest(unittest.TestCase):
@@ -652,6 +660,8 @@ class ErrorTest(unittest.TestCase):
     def test_map(self):
         self.assertIn("a.proto: m.values: map fields are not supported",
                       error(PROTO3 + "message m { map<string, int32> values = 1; }"))
+        self.assertIn("a.proto: m.children: map fields are not supported",
+                      error(PROTO3 + "message m { map<string, m> children = 1; }"))
 
     def test_repeated_without_max_count(self):
         text = header("package p; message m { repeated int32 a = 1; }")

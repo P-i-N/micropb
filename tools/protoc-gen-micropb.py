@@ -3,9 +3,8 @@
 
     protoc --plugin=protoc-gen-micropb=tools/protoc-gen-micropb.py --micropb_out=gen app.proto
 
-The output is gen/app.pb.hpp: plain structs, and a field list for each struct, so that the header
-also works on a compiler without reflection. The sizes of repeated fields come from app.options, a
-file in the NanoPB format:
+The output is gen/app.pb.hpp: plain structs, and a field list for each struct. The sizes of repeated
+fields come from app.options, a file in the NanoPB format:
 
     # <name pattern> <option>:<value> ...
     Message.field  (no option)                    repeated: std::span<const T>; decode needs a pb::arena
@@ -519,8 +518,7 @@ class Header:
         return "\n".join([f"struct {message.name} {{"] + lines + ["};"])
 
     def field_list_text(self, message, entries):
-        """The `pb::fields_of` specialization of `message`. It gives each field its number, so that the struct
-        needs no reflection and no annotation."""
+        """The `pb::fields_of` specialization of `message`: the type, field number and offset of each member."""
         # The full name with `::` at the start: this text is in the scope of `pb`, which has names of its own.
         name = "::" + "::".join(filter(None, [namespace_of(self.file.package), message.name]))
         lines = [f"template <>\nstruct pb::fields_of<{name}> : pb::field_list<{name}"]
@@ -542,8 +540,10 @@ class Header:
 
             stack.append(message)
             for field in message.desc.field:
-                if field.type == Field.TYPE_MESSAGE and self.types[field.type_name].file.name == self.file.name:
-                    visit(self.types[field.type_name])
+                if field.type == Field.TYPE_MESSAGE:
+                    target = self.types[field.type_name]
+                    if target.file.name == self.file.name and not target.desc.options.map_entry:
+                        visit(target)
             stack.pop()
             order.append(message)
 
@@ -556,7 +556,8 @@ class Header:
         if self.file.syntax != "proto3":
             raise self.error("only proto3 files are supported")
 
-        types = [each for each in self.types.values() if each.file.name == self.file.name]
+        types = [each for each in self.types.values()
+                 if each.file.name == self.file.name and (each.is_enum or not each.desc.options.map_entry)]
         names = [each.name for each in types]
         for name in names:
             if names.count(name) > 1:
@@ -592,8 +593,7 @@ class Header:
         else:
             out += [body]
         if lists:
-            out += ["", "// Field lists: with these, the messages also work on a compiler without reflection.", "",
-                    lists]
+            out += ["", "// Field lists.", "", lists]
         return "\n".join(out) + "\n"
 
 

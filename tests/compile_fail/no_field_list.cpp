@@ -3,7 +3,7 @@
 
 #include <micropb/micropb.hpp>
 
-// This file is built as C++23 without reflection. `msg` has no `pb::fields_of`.
+// `msg` has no `pb::fields_of`.
 struct msg
 {
 	std::int32_t a;
