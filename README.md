@@ -31,7 +31,7 @@ message Reading {
 }
 ```
 
-`protoc-gen-micropb` generates plain C++23 aggregates — using standard `<stdint.h>` types without wrapper classes — plus a compile-time `pb::fields_of` table:
+`protoc-gen-micropb` generates plain C++23 aggregates — using standard `<stdint.h>` types, Protobuf default member initializers, and no wrapper classes — plus a compile-time `pb::fields_of` table:
 
 ```cpp
 // sensor.pb.hpp (generated)
@@ -43,14 +43,14 @@ enum class Mode : int32_t {
 };
 
 struct Reading {
-    uint32_t id;
-    int32_t temperature_mc;
-    Mode mode;
-    std::optional<pb::string<15>> label;
-    pb::repeated<float, 4> channels;
-    pb::bytes<8> token;
-    std::array<uint8_t, 6> mac;
-    std::variant<std::monostate, uint32_t, std::string_view> detail;
+    uint32_t id{};
+    int32_t temperature_mc{};
+    Mode mode{};
+    std::optional<pb::string<15>> label{};
+    pb::repeated<float, 4> channels{};
+    pb::bytes<8> token{};
+    std::array<uint8_t, 6> mac{};
+    std::variant<std::monostate, uint32_t, std::string_view> detail{};
 };
 
 } // namespace sensor
@@ -84,7 +84,7 @@ bool round_trip() {
     if (!written)
         return false;
 
-    sensor::Reading rx{};
+    sensor::Reading rx;
     if (!pb::decode(std::span(wire).first(*written), rx))
         return false;
 
@@ -96,16 +96,16 @@ bool round_trip() {
 
 ## Why micropb
 
-* **Plain C++23 types, no callbacks:** structs use `int32_t`/`uint32_t`, `enum class`, `std::optional`, `std::variant`, `pb::string<N>`, `pb::bytes<N>`, `pb::repeated<T, N>`, `std::string_view`, `std::span`, and `std::array`. No `has_x` booleans, manual union tags, integer wrapper structs, or stream callbacks.
-* **Smaller Flash footprint than NanoPB:** one non-template interpreter handles all messages from compact `constexpr` word tables in ROM (`120 B` per additional 8-field message type; `2.5–5.0 KB` smaller than NanoPB 0.4.9.3 at 32 types, GCC 16.2.1 `-Os`, x86-64, without `.eh_frame`):
+* **Plain C++23 types, no callbacks:** structs use `int32_t`/`uint32_t`, `enum class`, `std::optional`, `std::variant`, `pb::string<N>`, `pb::bytes<N>`, `pb::repeated<T, N>`, `std::string_view`, `std::span`, and `std::array`, default-initialized to their proto3 defaults. No `has_x` booleans, manual union tags, integer wrapper structs, or stream callbacks.
+* **Smaller Flash footprint than NanoPB on Arm Cortex-M:** one non-template interpreter handles all messages from compact `constexpr` word tables in ROM. Measured on Arm Cortex-M4 / Cortex-M33 (`arm-none-eabi-gcc 16.2.0 -Os -mthumb --gc-sections`; x86-64 tables in [DETAILS.md](DETAILS.md#binary-size-comparison)):
 
-  | Configuration | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Extra 8-field type |
+  | Configuration (Cortex-M4 / M33) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Extra 8-field type |
   | --- | ---: | ---: | ---: | ---: |
-  | **micropb** | **5,539 B** | **7,350 B** | **9,271 B** | 120 B |
-  | NanoPB 0.4.9.3 — fixed-size (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,405 B | 10,029 B | 11,773 B | **109 B** |
-  | NanoPB 0.4.9.3 — `pb_callback_t` (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,489 B | 10,366 B | 12,318 B | 122 B |
-  | NanoPB 0.4.9.3 — fixed-size (default flags) | 10,413 B | 12,037 B | 13,781 B | **109 B** |
-  | NanoPB 0.4.9.3 — `pb_callback_t` (default flags) | 10,497 B | 12,374 B | 14,326 B | 122 B |
+  | **micropb** | **3,614 B** | **4,902 B** | **6,222 B** | **82 B** |
+  | NanoPB 0.4.9.3 — fixed-size (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,150 B | 6,414 B | 7,774 B | 85 B |
+  | NanoPB 0.4.9.3 — `pb_callback_t` (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,210 B | 6,606 B | 8,078 B | 92 B |
+  | NanoPB 0.4.9.3 — fixed-size (default flags) | 6,616 B | 7,880 B | 9,240 B | 85 B |
+  | NanoPB 0.4.9.3 — `pb_callback_t` (default flags) | 6,676 B | 8,072 B | 9,544 B | 92 B |
 
 * **No heap, no exceptions, no RTTI, no startup code:** compiles with `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`. Tables live in `.rodata` with zero static constructors before `main()`.
 * **Compile-time schema validation:** invalid tags, duplicate `oneof` types, recursive messages, and missing scratch buffers fail at compile time with named `static_assert` diagnostics (`pb: <rule>:`).
@@ -123,14 +123,14 @@ When a field has no `max_length`, `max_size`, or `max_count` in `.options`, `pro
 
 ```cpp
 struct Batch {
-    std::string_view device;          // views `packet` directly
-    std::span<const int32_t> samples; // allocated in `scratch` on decode
+    std::string_view device{};          // views `packet` directly
+    std::span<const int32_t> samples{}; // allocated in `scratch` on decode
 };
 
 void on_packet(std::span<const uint8_t> packet) {
     uint8_t scratch[256]; // or std::array<uint8_t, 256>, std::span<uint8_t>, or pb::arena
 
-    Batch rx{};
+    Batch rx;
     if (pb::decode(packet, rx, scratch)) {
         // `rx` is valid while `packet` and `scratch` remain alive
     }
