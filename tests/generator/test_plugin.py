@@ -140,7 +140,7 @@ class CoreTest(unittest.TestCase):
 
             struct Outer {
                 Inner child = {};
-                Mode mode = {};
+                Mode mode = Mode::OFF;
                 std::string_view name = {};
                 std::span<const uint8_t> data = {};
                 int32_t delta = 0;
@@ -202,8 +202,9 @@ class CoreTest(unittest.TestCase):
         self.assertIn("enum class RxMode : int32_t {\n    FIXED = 0,\n    VARIABLE = -1,\n};", text)
 
     def test_enum_keeps_names_when_a_value_has_no_prefix(self):
-        text = header("enum color { COLOR_RED = 0; BLUE = 1; }")
+        text = header("enum color { COLOR_RED = 0; BLUE = 1; } message m { color c = 1; optional color opt = 2; }")
         self.assertIn("    COLOR_RED = 0,\n    BLUE = 1,\n", text)
+        self.assertEqual(members(text, "m"), ["color c = color::COLOR_RED;", "std::optional<color> opt = {};"])
 
     def test_enum_keeps_names_when_the_rest_is_not_an_identifier(self):
         text = header("enum size { SIZE_8 = 0; SIZE_16 = 1; }")
@@ -464,7 +465,7 @@ class StructureTest(unittest.TestCase):
             """)
         self.assertEqual(definitions(text), ["Outer_Kind", "Outer_Inner_Deep", "Outer_Inner", "Outer"])
         self.assertIn("enum class Outer_Kind : int32_t {\n    A = 0,\n    B = 1,\n};", text)
-        self.assertEqual(members(text, "Outer"), ["Outer_Inner inner = {};", "Outer_Kind kind = {};"])
+        self.assertEqual(members(text, "Outer"), ["Outer_Inner inner = {};", "Outer_Kind kind = Outer_Kind::A;"])
         self.assertEqual(field_list(text, "Outer"), ["inner = 1", "kind = 2"])
         self.assertEqual(field_list(text, "Outer_Inner"), ["deep = 1"])
         self.assertEqual(field_list(text, "Outer_Inner_Deep"), ["x = 1"])
@@ -502,7 +503,8 @@ class StructureTest(unittest.TestCase):
                 """})
         self.assertEqual(result.rc, 0, result.stderr)
         text = result.headers["a.pb.hpp"]
-        self.assertEqual(members(text, "m"), ["::lib::types::point p = {};", "::lib::types::kind k = {};", "int32_t d = 0;"])
+        self.assertEqual(members(text, "m"),
+                         ["::lib::types::point p = {};", "::lib::types::kind k = ::lib::types::kind::A;", "int32_t d = 0;"])
         self.assertEqual(includes(text), ["<stddef.h>", "<stdint.h>", "<micropb/types.hpp>", '"lib/b.pb.hpp"'])
         self.assertIn('#include <micropb/types.hpp>\n\n#include "lib/b.pb.hpp"\n\nnamespace app {', text)
         self.assertEqual(field_list(text, "app::m"), ["p = 1", "k = 2", "d = 3:ZIGZAG"])
@@ -530,7 +532,8 @@ class StructureTest(unittest.TestCase):
             message union { int32 class = 1; bool default = 2; mode namespace = 3; }
             """)
         self.assertIn("    auto_ = 0,\n    MANUAL = 1,\n", text)
-        self.assertEqual(members(text, "union_"), ["int32_t class_ = 0;", "bool default_ = false;", "mode namespace_ = {};"])
+        self.assertEqual(members(text, "union_"),
+                         ["int32_t class_ = 0;", "bool default_ = false;", "mode namespace_ = mode::auto_;"])
         self.assertEqual(field_list(text, "union_"), ["class_ = 1", "default_ = 2", "namespace_ = 3"])
 
     def test_field_name_equal_to_a_type_name(self):
@@ -594,7 +597,7 @@ class NameTest(unittest.TestCase):
             """)
         self.assertIn("    ZERO = 0,\n    NULL_ = 1,\n    EOF_ = 2,\n", text)
         self.assertEqual(members(text, "status"),
-                         ["int32_t errno_ = 0;", "bool stdin_ = false;", "Kind NULL_ = {};", "bool uint32_t_ = false;"])
+                         ["int32_t errno_ = 0;", "bool stdin_ = false;", "Kind NULL_ = Kind::ZERO;", "bool uint32_t_ = false;"])
         self.assertEqual(field_list(text, "status"), ["errno_ = 1", "stdin_ = 2", "NULL_ = 3", "uint32_t_ = 4"])
 
     def test_oneof_name_equal_to_a_type_name(self):
@@ -603,7 +606,8 @@ class NameTest(unittest.TestCase):
 
     def test_oneof_member_type_equal_to_a_field_name(self):
         text = header("enum mode { MODE_A = 0; } message m { mode mode = 1; oneof v { mode x = 4; int32 y = 5; } }")
-        self.assertEqual(members(text, "m"), ["::mode mode = {};", "std::variant<std::monostate, ::mode, int32_t> v = {};"])
+        self.assertEqual(members(text, "m"),
+                         ["::mode mode = ::mode::A;", "std::variant<std::monostate, ::mode, int32_t> v = {};"])
 
     def test_oneof_with_a_keyword_name(self):
         text = header("message m { oneof union { int32 a = 1; bool b = 2; } }")
@@ -819,7 +823,7 @@ class WarningTest(unittest.TestCase):
                                      "m.a int_size:IS_8\nm.b int_size:IS_16\nm.c int_size:IS_32\n")
         for name in "abc":
             self.assertIn(f"warning: int_size does not apply to m.{name}", stderr)
-        self.assertEqual(members(text, "m"), ["int32_t a = 0;", "e b = {};", "uint64_t c = 0;"])
+        self.assertEqual(members(text, "m"), ["int32_t a = 0;", "e b = e::A;", "uint64_t c = 0;"])
 
     def test_pointer_ignores_the_sizes(self):
         stderr, text = self.warnings("message m { repeated int32 a = 1; bytes b = 2; string c = 3; }",

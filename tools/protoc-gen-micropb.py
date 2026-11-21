@@ -410,13 +410,17 @@ def types_of(file):
     return found
 
 
-def enum_text(enum, options):
-    """The definition of an enum. The values lose the prefix `<ENUM NAME>_` when each value has it."""
-    prefix = screaming_case(enum.desc.name) + "_"
-    names = [value.name for value in enum.desc.value]
+def enum_names(desc):
+    """The C++ enumerator names of `desc`. The values lose the prefix `<ENUM NAME>_` when each value has it."""
+    prefix = screaming_case(desc.name) + "_"
+    names = [value.name for value in desc.value]
     if all(name.upper().startswith(prefix) and re.fullmatch(r"[A-Za-z]\w*", name[len(prefix):]) for name in names):
         names = [name[len(prefix):] for name in names]
+    return [ident(name) for name in names]
 
+
+def enum_text(enum, options):
+    """The definition of an enum."""
     found = options.of(enum.proto_name, enum.file.package)
     bits = (found["enum_intsize"][0] if "enum_intsize" in found else 0) or 32  # IS_DEFAULT is 0: the default, 32
     options.check_use(enum.proto_name, found, {"enum_intsize"})
@@ -429,7 +433,7 @@ def enum_text(enum, options):
                         f"enum_intsize:IS_{bits}, IS_{fits} is the smallest")
 
     lines = [f"enum class {enum.name} : int{bits}_t {{"]
-    lines += [f"    {ident(name)} = {value.number}," for name, value in zip(names, enum.desc.value)]
+    lines += [f"    {name} = {value.number}," for name, value in zip(enum_names(enum.desc), enum.desc.value)]
     return "\n".join(lines + ["};"])
 
 
@@ -536,8 +540,16 @@ class Header:
                 text = self.field_type(message, field, member_names)
                 if field.proto3_optional:
                     text = f"std::optional<{text}>"
-                default = ("{}" if field.proto3_optional or field.label == Field.LABEL_REPEATED
-                           else SCALAR_DEFAULTS.get(field.type, "{}"))
+                    default = "{}"
+                elif field.label == Field.LABEL_REPEATED:
+                    default = "{}"
+                elif field.type == Field.TYPE_ENUM:
+                    enum_desc = self.types[field.type_name].desc
+                    zero = next(name for name, value in zip(enum_names(enum_desc), enum_desc.value)
+                                if value.number == 0)
+                    default = f"{text}::{zero}"
+                else:
+                    default = SCALAR_DEFAULTS.get(field.type, "{}")
                 lines.append(f"    {text} {ident(field.name)} = {default};")
                 entries.append((ident(field.name), field.number, 0, ENCODINGS.get(field.type)))
             elif index not in done:

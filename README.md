@@ -45,7 +45,7 @@ enum class Mode : int32_t {
 struct Reading {
     uint32_t id = 0;
     int32_t temperature_mc = 0;
-    Mode mode = {};
+    Mode mode = Mode::IDLE;
     std::optional<pb::string<15>> label = {};
     pb::repeated<float, 4> channels = {};
     pb::bytes<8> token = {};

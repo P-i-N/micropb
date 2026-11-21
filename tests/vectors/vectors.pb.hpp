@@ -34,7 +34,7 @@ struct scalars {
     uint64_t fx64 = 0;
     int32_t sfx32 = 0;
     int64_t sfx64 = 0;
-    color c = {};
+    color c = color::NONE;
     int8_t i8 = 0;
     uint16_t u16 = 0;
 };

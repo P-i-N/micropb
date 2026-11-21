@@ -37,7 +37,7 @@ struct Device_Slot {
 
 struct Device {
     int32_t class_ = 0;
-    Device_State state = {};
+    Device_State state = Device_State::IDLE;
     ::features::limits limits = {};
     ::features::limits backup = {};
     uint32_t serial = 0;
@@ -57,8 +57,8 @@ struct Frame {
     Device device = {};
     Device_Slot slot = {};
     ::shared::types::Point origin = {};
-    ::shared::types::Unit unit = {};
-    RxMode mode = {};
+    ::shared::types::Unit unit = ::shared::types::Unit::NONE;
+    RxMode mode = RxMode::FIXED;
 };
 
 struct Calibration {
