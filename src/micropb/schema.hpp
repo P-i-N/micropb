@@ -71,8 +71,18 @@ inline constexpr bool is_repeated = false;
 template <typename T, std::size_t N>
 inline constexpr bool is_repeated<repeated<T, N>> = true;
 
-/// The sequence types: `std::array`, `std::span<const T>` and `pb::repeated`. `element` has no `const`. `capacity` is
-/// the size `N` of a type that has one, else 0.
+template <typename T>
+inline constexpr bool is_bytes = false;
+template <std::size_t N>
+inline constexpr bool is_bytes<bytes<N>> = true;
+
+template <typename T>
+inline constexpr bool is_string = false;
+template <std::size_t N>
+inline constexpr bool is_string<string<N>> = true;
+
+/// The sequence types: `std::array`, `std::span<const T>`, `pb::repeated` and `pb::bytes`. `element` has no `const`.
+/// `capacity` is the size `N` of a type that has one, else 0.
 template <typename T>
 struct sequence_traits
 {
@@ -104,6 +114,15 @@ struct sequence_traits<repeated<T, N>>
 	static constexpr std::size_t capacity = N;
 	static constexpr bool is_const_element = std::is_const_v<T>;
 	using element = std::remove_const_t<T>;
+};
+
+template <std::size_t N>
+struct sequence_traits<bytes<N>>
+{
+	static constexpr bool is_sequence = true;
+	static constexpr std::size_t capacity = N;
+	static constexpr bool is_const_element = false;
+	using element = std::uint8_t;
 };
 
 /// Element type of a sequence type.
@@ -178,7 +197,7 @@ template <typename T>
 		static_assert( !std::is_same_v<T, T>,
 		               "pb: zigzag_unsigned: a ZigZag (sint32, sint64) member needs a signed integer type" );
 	}
-	else if constexpr ( std::is_same_v<T, std::string_view> )
+	else if constexpr ( std::is_same_v<T, std::string_view> || detail::is_string<T> )
 	{
 		return field_kind::STRING;
 	}

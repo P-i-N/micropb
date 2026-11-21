@@ -119,6 +119,14 @@ struct blob
 	pb::repeated<std::uint8_t, 4> bytes;
 };
 
+struct owned_buffers
+{
+	pb::string<6> name;
+	pb::bytes<4> data;
+	std::optional<pb::string<4>> tag;
+	pb::repeated<pb::string<4>, 2> labels;
+};
+
 /// `pose` and `envelope` with the container type that `decode` accepts.
 struct pose_owned
 {
@@ -214,6 +222,15 @@ struct pb::fields_of<mac_only>
 template <>
 struct pb::fields_of<blob>
   : pb::field_list<blob, pb::field_at<decltype( blob::bytes ), 1, offsetof( blob, bytes )>>
+{};
+
+template <>
+struct pb::fields_of<owned_buffers>
+  : pb::field_list<owned_buffers,
+                   pb::field_at<decltype( owned_buffers::name ), 1, offsetof( owned_buffers, name )>,
+                   pb::field_at<decltype( owned_buffers::data ), 2, offsetof( owned_buffers, data )>,
+                   pb::field_at<decltype( owned_buffers::tag ), 3, offsetof( owned_buffers, tag )>,
+                   pb::field_at<decltype( owned_buffers::labels ), 4, offsetof( owned_buffers, labels )>>
 {};
 
 template <>
@@ -1234,6 +1251,70 @@ bool test_arena( std::uint8_t fill )
 	       test_arena_new_value_reset() && test_arena_new_items() && test_arena_reset() && test_arena_no_storage();
 }
 
+/// Temporary scratch arrays cannot bind to `decode` (their spans would dangle).
+template <typename M = arena_lists>
+constexpr bool can_decode_rvalue_scratch = requires( std::span<const std::uint8_t> in, M& m ) {
+	decode( in, m, std::array<std::uint8_t, 64>{} );
+};
+static_assert( !can_decode_rvalue_scratch<> );
+
+/// `decode` accepts a `std::span`, a C array, or a `std::array` directly in place of `pb::arena`.
+bool test_scratch_overloads()
+{
+	constexpr auto in = std::to_array<std::uint8_t>( { 0x0a, 0x03, 0x01, 0x02, 0x03 } );
+
+	std::uint8_t c_array[64]{};
+	arena_lists from_c{};
+	if ( !decode( bytes_of( in ), from_c, c_array ) ||
+	     !holds_items( from_c.ints, std::to_array<std::int32_t>( { 1, 2, 3 } ) ) )
+		return false;
+
+	std::array<std::uint8_t, 64> std_array{};
+	arena_lists from_std{};
+	if ( !decode( bytes_of( in ), from_std, std_array ) ||
+	     !holds_items( from_std.ints, std::to_array<std::int32_t>( { 1, 2, 3 } ) ) )
+		return false;
+
+	arena_lists from_span{};
+	if ( !decode( bytes_of( in ), from_span, std::span<std::uint8_t>( c_array ) ) ||
+	     !holds_items( from_span.ints, std::to_array<std::int32_t>( { 1, 2, 3 } ) ) )
+		return false;
+
+	std::uint8_t tiny[4]{};
+	arena_lists fail_msg{};
+	const auto full = decode( bytes_of( in ), fail_msg, tiny );
+	return !full && full.error() == error::ARENA_FULL;
+}
+
+/// `pb::string<N>` and `pb::bytes<N>` round-trip, null-terminate on decode and reset, and reject overflow.
+bool test_owned_buffers()
+{
+	owned_buffers tx{ .name = "sensor", .data = { { 1, 2, 3 } }, .tag = "", .labels = { { "a", "bc" } } };
+	std::array<std::uint8_t, 64> wire{};
+	const auto written = encode( tx, wire );
+	if ( !written )
+		return false;
+
+	// Mutate rx first to verify reset clears and null-terminates `pb::string` and `pb::bytes`.
+	owned_buffers rx{ .name = "oldval", .data = { { 9, 9, 9, 9 } }, .tag = "abcd", .labels = { { "xxxx" } } };
+	if ( !decode( std::span<const std::uint8_t>( wire ).first( *written ), rx ) )
+		return false;
+	if ( rx.name != "sensor" || std::string_view( rx.name.c_str() ) != "sensor" || rx.data != tx.data || !rx.tag ||
+	     *rx.tag != "" || rx.tag->c_str()[0] != '\0' || rx.labels.size() != 2 || rx.labels[0] != "a" ||
+	     rx.labels[1] != "bc" || rx.labels[0].c_str()[1] != '\0' )
+		return false;
+
+	// Empty wire input resets `name` to empty with `'\0'` at index 0.
+	if ( !decode( std::span<const std::uint8_t>{}, rx ) || !rx.name.empty() || rx.name.c_str()[0] != '\0' ||
+	     !rx.data.empty() || rx.tag.has_value() || !rx.labels.empty() )
+		return false;
+
+	constexpr auto long_name = std::to_array<std::uint8_t>( { 0x0a, 0x07, 't', 'o', 'o', 'l', 'o', 'n', 'g' } );
+	constexpr auto long_data = std::to_array<std::uint8_t>( { 0x12, 0x05, 1, 2, 3, 4, 5 } );
+	return fails<owned_buffers>( long_name, error::CAPACITY_EXCEEDED ) &&
+	       fails<owned_buffers>( long_data, error::CAPACITY_EXCEEDED );
+}
+
 /// A message with only `pb::repeated` fields decodes without an arena.
 bool test_no_arena_needed()
 {
@@ -1259,6 +1340,7 @@ int main()
 	  test_oneof_last_wins() && test_oneof_merge() && test_oneof_replace() && test_oneof_wrong_wire_type() &&
 	  test_decode_lists_full() && test_decode_envelope_long() && test_reuse_repeated_message() && test_reuse_oneof() &&
 	  test_decode_empty_message() && test_error_order() && test_reuse_resets_each_kind() && test_partial_result() &&
-	  test_fixed_bytes_last_wins() && test_arena( 0x00 ) && test_arena( 0xA5 ) && test_no_arena_needed();
+	  test_fixed_bytes_last_wins() && test_arena( 0x00 ) && test_arena( 0xA5 ) && test_scratch_overloads() &&
+	  test_owned_buffers() && test_no_arena_needed();
 	return ok ? 0 : 1;
 }

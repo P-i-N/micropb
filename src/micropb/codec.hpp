@@ -77,11 +77,11 @@ struct value_desc
 	std::uint16_t words;
 	union
 	{
-		/// FIXED_BYTES: the number of bytes. 0 for SCALAR and STRING.
+		/// FIXED_BYTES: the number of bytes. 0 for SCALAR.
 		std::uint32_t size;
 		/// MESSAGE: `message_table_data`, or null when `words == 0`.
 		const void* table;
-		/// REPEATED and BYTES. Null for the view `std::span<const std::uint8_t>`.
+		/// REPEATED, BYTES and `pb::string`. Null for the views `std::string_view` and `std::span<const std::uint8_t>`.
 		const sequence_desc* sequence;
 		/// OPTIONAL.
 		const optional_desc* optional;
@@ -338,30 +338,45 @@ inline constexpr span_desc span_descriptor = describe_span<S>();
 template <typename S>
 [[nodiscard]] consteval sequence_desc describe_sequence()
 {
-	using element = element_t<S>;
-	constexpr const value_desc* item = &value_descriptor<element>::value;
-	constexpr std::uint32_t item_size = sizeof( element );
-	constexpr auto capacity = static_cast<std::uint32_t>( sequence_traits<S>::capacity );
-
-	if constexpr ( is_repeated<S> )
+	if constexpr ( is_string<S> )
 	{
 		static_assert( sequence_access::items_offset<S> == 0 );
 		static_assert( sequence_access::count_offset<S> <= max_offset,
 		               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
-		return { item,
+		return { nullptr,
 		         nullptr,
-		         item_size,
-		         capacity,
+		         1,
+		         static_cast<std::uint32_t>( S::max_size ),
 		         static_cast<std::uint16_t>( sequence_access::count_offset<S> ),
 		         sequence_storage::REPEATED };
 	}
-	else if constexpr ( is_std_array<S> )
-	{
-		return { item, nullptr, item_size, capacity, 0, sequence_storage::ARRAY };
-	}
 	else
 	{
-		return { item, &span_descriptor<S>, item_size, 0, 0, sequence_storage::ACCESSOR };
+		using element = element_t<S>;
+		constexpr const value_desc* item = &value_descriptor<element>::value;
+		constexpr std::uint32_t item_size = sizeof( element );
+		constexpr auto capacity = static_cast<std::uint32_t>( sequence_traits<S>::capacity );
+
+		if constexpr ( is_repeated<S> || is_bytes<S> )
+		{
+			static_assert( sequence_access::items_offset<S> == 0 );
+			static_assert( sequence_access::count_offset<S> <= max_offset,
+			               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
+			return { item,
+			         nullptr,
+			         item_size,
+			         capacity,
+			         static_cast<std::uint16_t>( sequence_access::count_offset<S> ),
+			         sequence_storage::REPEATED };
+		}
+		else if constexpr ( is_std_array<S> )
+		{
+			return { item, nullptr, item_size, capacity, 0, sequence_storage::ARRAY };
+		}
+		else
+		{
+			return { item, &span_descriptor<S>, item_size, 0, 0, sequence_storage::ACCESSOR };
+		}
 	}
 }
 
@@ -395,13 +410,13 @@ template <typename V>
 inline constexpr variant_desc variant_descriptor{ variant_alternatives<V>::value, access_variant<V> };
 
 /// Compound descriptor of the member type `M`, or null when `M` encodes inline
-/// in a field word (`SCALAR`, `STRING`, and `std::span<const std::uint8_t>`).
+/// in a field word (`SCALAR`, `std::string_view`, and `std::span<const std::uint8_t>`).
 template <typename M>
 [[nodiscard]] consteval const value_desc* sub_desc_of()
 {
 	using U = std::remove_const_t<M>;
 	constexpr field_kind kind = kind_of<U>();
-	if constexpr ( kind == field_kind::SCALAR || kind == field_kind::STRING ||
+	if constexpr ( kind == field_kind::SCALAR || std::is_same_v<U, std::string_view> ||
 	               std::is_same_v<U, std::span<const std::uint8_t>> )
 		return nullptr;
 	else
@@ -419,7 +434,7 @@ template <typename M>
 		static_assert( code < op_string );
 		return code;
 	}
-	else if constexpr ( kind == field_kind::STRING )
+	else if constexpr ( std::is_same_v<U, std::string_view> )
 		return op_string;
 	else if constexpr ( std::is_same_v<U, std::span<const std::uint8_t>> )
 		return op_bytes_view;
@@ -598,8 +613,8 @@ template <typename T>
 
 	if constexpr ( kind == field_kind::SCALAR )
 		return { .kind = kind, .scalar = scalar_code_of<T>(), .words = 0, .size = 0 };
-	else if constexpr ( kind == field_kind::STRING )
-		return { .kind = kind, .scalar = 0, .words = 0, .size = 0 };
+	else if constexpr ( std::is_same_v<T, std::string_view> )
+		return { .kind = kind, .scalar = 0, .words = 0, .sequence = nullptr };
 	else if constexpr ( kind == field_kind::FIXED_BYTES )
 		return { .kind = kind, .scalar = 0, .words = 0, .size = static_cast<std::uint32_t>( sequence_traits<T>::capacity ) };
 	else if constexpr ( std::is_same_v<T, std::span<const std::uint8_t>> )
@@ -607,7 +622,7 @@ template <typename T>
 		// one object. A span with a static extent has a different layout: it
 		// goes through its accessor, as each other sequence.
 		return { .kind = kind, .scalar = 0, .words = 0, .sequence = nullptr };
-	else if constexpr ( kind == field_kind::BYTES || kind == field_kind::REPEATED )
+	else if constexpr ( kind == field_kind::STRING || kind == field_kind::BYTES || kind == field_kind::REPEATED )
 		return { .kind = kind, .scalar = 0, .words = 0, .sequence = &sequence_descriptor<T> };
 	else if constexpr ( kind == field_kind::MESSAGE )
 	{
@@ -692,7 +707,7 @@ constexpr value_desc value_descriptor<T>::value = describe_value<T>();
 	if ( entry.base_op < op_string )
 		return { .kind = field_kind::SCALAR, .scalar = entry.base_op, .words = 0, .size = 0 };
 	if ( entry.base_op == op_string )
-		return { .kind = field_kind::STRING, .scalar = 0, .words = 0, .size = 0 };
+		return { .kind = field_kind::STRING, .scalar = 0, .words = 0, .sequence = nullptr };
 	if ( entry.base_op == op_bytes_view )
 		return { .kind = field_kind::BYTES, .scalar = 0, .words = 0, .sequence = nullptr };
 	return *subs[entry.sub_idx];
@@ -888,12 +903,15 @@ inline void emit_value( writer& sink, std::uint32_t number, const value_desc& ty
 			}
 			break;
 		}
-		case field_kind::STRING: {
-			std::string_view text;
-			std::memcpy( static_cast<void*>( &text ), value, sizeof text );
-			emit_bytes( sink, number, { reinterpret_cast<const std::uint8_t*>( text.data() ), text.size() }, always );
-			break;
-		}
+		case field_kind::STRING:
+			if ( type.sequence == nullptr )
+			{
+				std::string_view text;
+				std::memcpy( static_cast<void*>( &text ), value, sizeof text );
+				emit_bytes( sink, number, { reinterpret_cast<const std::uint8_t*>( text.data() ), text.size() }, always );
+				break;
+			}
+			[[fallthrough]];
 		case field_kind::BYTES: {
 			std::span<const std::uint8_t> bytes;
 			if ( type.sequence == nullptr )
@@ -1033,11 +1051,18 @@ inline void reset_value( const value_desc& type, void* value )
 	{
 		case field_kind::SCALAR: std::memset( value, 0, std::size_t{ 1 } << ( type.scalar & scalar_size_mask ) ); break;
 		case field_kind::FIXED_BYTES: std::memset( value, 0, type.size ); break;
-		case field_kind::STRING: {
-			const std::string_view empty;
-			std::memcpy( value, static_cast<const void*>( &empty ), sizeof empty );
+		case field_kind::STRING:
+			if ( type.sequence == nullptr )
+			{
+				const std::string_view empty;
+				std::memcpy( value, static_cast<const void*>( &empty ), sizeof empty );
+			}
+			else
+			{
+				*static_cast<char*>( value ) = '\0';
+				*repeated_count( *type.sequence, value ) = 0;
+			}
 			break;
-		}
 		case field_kind::BYTES:
 			if ( type.sequence == nullptr )
 			{
@@ -1274,11 +1299,14 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 
 	switch ( type.kind )
 	{
-		case field_kind::STRING: {
-			const std::string_view text( reinterpret_cast<const char*>( bytes.data() ), bytes.size() );
-			std::memcpy( value, static_cast<const void*>( &text ), sizeof text );
-			break;
-		}
+		case field_kind::STRING:
+			if ( type.sequence == nullptr )
+			{
+				const std::string_view text( reinterpret_cast<const char*>( bytes.data() ), bytes.size() );
+				std::memcpy( value, static_cast<const void*>( &text ), sizeof text );
+				break;
+			}
+			[[fallthrough]];
 		case field_kind::BYTES: {
 			if ( type.sequence == nullptr )
 			{
@@ -1290,6 +1318,8 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 				return in.fail( error::CAPACITY_EXCEEDED );
 			if ( !bytes.empty() )
 				std::memcpy( value, bytes.data(), bytes.size() );
+			if ( type.kind == field_kind::STRING )
+				static_cast<char*>( value )[bytes.size()] = '\0';
 			*repeated_count( *type.sequence, value ) = bytes.size();
 			break;
 		}
@@ -1447,6 +1477,18 @@ template <typename T>
 {
 	detail::check_decodable<T>();
 	return detail::decode( detail::value_descriptor<T>::value, in, &msg, &memory );
+}
+
+/// `decode` with caller-owned scratch bytes (`std::span<std::uint8_t>`, a
+/// `std::uint8_t[N]` array, or a `std::array<std::uint8_t, N>`). `in` and
+/// `memory` must stay valid while `msg` is in use.
+template <typename T>
+[[nodiscard]] std::expected<std::size_t, error> decode( std::span<const std::uint8_t> in,
+                                                        T& msg,
+                                                        std::span<std::uint8_t> memory )
+{
+	arena pool( memory );
+	return decode( in, msg, pool );
 }
 
 /// `decode` for a message without a `std::span<const T>` repeated field, also
