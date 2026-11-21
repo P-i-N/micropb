@@ -186,6 +186,22 @@ SCALARS = {
     Field.TYPE_BYTES: "std::span<const uint8_t>",
 }
 
+SCALAR_DEFAULTS = {
+    Field.TYPE_BOOL: "false",
+    Field.TYPE_INT32: "0",
+    Field.TYPE_INT64: "0",
+    Field.TYPE_UINT32: "0",
+    Field.TYPE_UINT64: "0",
+    Field.TYPE_SINT32: "0",
+    Field.TYPE_SINT64: "0",
+    Field.TYPE_FIXED32: "0",
+    Field.TYPE_FIXED64: "0",
+    Field.TYPE_SFIXED32: "0",
+    Field.TYPE_SFIXED64: "0",
+    Field.TYPE_FLOAT: "0.0f",
+    Field.TYPE_DOUBLE: "0.0",
+}
+
 ENCODINGS = {
     Field.TYPE_SINT32: "pb::int_encoding::ZIGZAG",
     Field.TYPE_SINT64: "pb::int_encoding::ZIGZAG",
@@ -520,7 +536,9 @@ class Header:
                 text = self.field_type(message, field, member_names)
                 if field.proto3_optional:
                     text = f"std::optional<{text}>"
-                lines.append(f"    {text} {ident(field.name)}{{}};")
+                default = ("{}" if field.proto3_optional or field.label == Field.LABEL_REPEATED
+                           else SCALAR_DEFAULTS.get(field.type, "{}"))
+                lines.append(f"    {text} {ident(field.name)} = {default};")
                 entries.append((ident(field.name), field.number, 0, ENCODINGS.get(field.type)))
             elif index not in done:
                 done.add(index)
@@ -531,7 +549,7 @@ class Header:
                     if types.count(text) > 1:
                         raise self.error(f"{message.proto_name}.{name}: a oneof cannot have two members "
                                          f"of the type {text}")
-                lines.append(f"    std::variant<std::monostate, {', '.join(types)}> {ident(name)}{{}};")
+                lines.append(f"    std::variant<std::monostate, {', '.join(types)}> {ident(name)} = {{}};")
                 entries += [(ident(name), other.number, position, ENCODINGS.get(other.type))
                             for position, other in enumerate(group, 1)]
 

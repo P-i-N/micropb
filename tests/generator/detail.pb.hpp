@@ -9,12 +9,12 @@
 namespace detail {
 
 struct tag {
-    uint32_t error{};
+    uint32_t error = 0;
 };
 
 struct reader {
-    ::detail::tag tag{};
-    pb::repeated<::detail::tag, 2> repeated{};
+    ::detail::tag tag = {};
+    pb::repeated<::detail::tag, 2> repeated = {};
 };
 
 } // namespace detail
