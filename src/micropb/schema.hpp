@@ -347,12 +347,8 @@ struct variant_traits;
 template <typename First, typename... More>
 struct variant_traits<std::variant<First, More...>>
 {
-	template <typename A>
-	static constexpr size_t count =
-	  ( size_t{ std::is_same_v<A, First> } + ... + size_t{ std::is_same_v<A, More> } );
-
 	static constexpr bool monostate_first = std::is_same_v<First, std::monostate>;
-	static constexpr bool unique = count<First> == 1 && ( ( count<More> == 1 ) && ... );
+	static constexpr bool monostate_later = ( std::is_same_v<More, std::monostate> || ... );
 
 	[[nodiscard]] static consteval bool has_kind( field_kind kind )
 	{
@@ -591,9 +587,8 @@ consteval void check_member_type()
 	{
 		static_assert( variant_traits<M>::monostate_first,
 		               "pb: variant_no_monostate: the first alternative of a std::variant must be std::monostate" );
-		static_assert( variant_traits<M>::unique,
-		               "pb: variant_duplicate_alternative: each alternative of a "
-		               "std::variant must have a different type" );
+		static_assert( !variant_traits<M>::monostate_later,
+		               "pb: monostate_member: std::monostate is allowed only as the first alternative of a std::variant" );
 		static_assert( !variant_traits<M>::has_kind( field_kind::REPEATED ),
 		               "pb: variant_repeated_alternative: a repeated field cannot be a oneof alternative" );
 		static_assert( !variant_traits<M>::has_kind( field_kind::OPTIONAL ),

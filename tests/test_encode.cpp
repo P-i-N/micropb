@@ -129,6 +129,13 @@ struct const_elements
 	std::variant<std::monostate, const int32_t> choice;
 };
 
+struct same_type_oneof
+{
+	uint32_t id = 0;
+	std::variant<std::monostate, std::string_view, std::string_view, std::string_view> msg = {};
+	std::variant<std::monostate, int32_t, int32_t, int32_t> delta = {};
+};
+
 } // namespace
 
 template <>
@@ -224,6 +231,19 @@ struct pb::fields_of<const_elements>
   : pb::field_list<const_elements,
                    pb::field_at<decltype( const_elements::mac ), 1, offsetof( const_elements, mac )>,
                    pb::field_at<decltype( const_elements::choice ), 2, offsetof( const_elements, choice ), 1>>
+{};
+
+template <>
+struct pb::fields_of<same_type_oneof>
+  : pb::field_list<
+      same_type_oneof,
+      pb::field_at<decltype( same_type_oneof::id ), 1, offsetof( same_type_oneof, id )>,
+      pb::field_at<decltype( same_type_oneof::msg ), 2, offsetof( same_type_oneof, msg ), 1>,
+      pb::field_at<decltype( same_type_oneof::msg ), 3, offsetof( same_type_oneof, msg ), 2>,
+      pb::field_at<decltype( same_type_oneof::msg ), 4, offsetof( same_type_oneof, msg ), 3>,
+      pb::field_at<decltype( same_type_oneof::delta ), 5, offsetof( same_type_oneof, delta ), 1>,
+      pb::field_at<decltype( same_type_oneof::delta ), 6, offsetof( same_type_oneof, delta ), 2, pb::int_encoding::ZIGZAG>,
+      pb::field_at<decltype( same_type_oneof::delta ), 7, offsetof( same_type_oneof, delta ), 3, pb::int_encoding::FIXED>>
 {};
 
 namespace {
@@ -434,6 +454,30 @@ bool test_encode_const_nested()
 	       matches( elements, expected_elements );
 }
 
+/// Alternatives of the same C++ type in one `std::variant` encode with their distinct field numbers and encodings.
+bool test_encode_same_type_oneof()
+{
+	const same_type_oneof err{ .id = 7, .msg{ std::in_place_index<1>, "bad" } };
+	same_type_oneof info{ .id = 7 };
+	info.msg.emplace<2>( "ok" );
+	same_type_oneof html{ .id = 7 };
+	html.msg.emplace<3>( "<b>" );
+
+	same_type_oneof raw{};
+	raw.delta.emplace<1>( -2 );
+	same_type_oneof zz{};
+	zz.delta.emplace<2>( -2 );
+	same_type_oneof fx{};
+	fx.delta.emplace<3>( -2 );
+
+	return matches( err, std::array<uint8_t, 7>{ 0x08, 0x07, 0x12, 0x03, 0x62, 0x61, 0x64 } ) &&
+	       matches( info, std::array<uint8_t, 6>{ 0x08, 0x07, 0x1a, 0x02, 0x6f, 0x6b } ) &&
+	       matches( html, std::array<uint8_t, 7>{ 0x08, 0x07, 0x22, 0x03, 0x3c, 0x62, 0x3e } ) &&
+	       matches( raw, std::array<uint8_t, 11>{ 0x28, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01 } ) &&
+	       matches( zz, std::array<uint8_t, 2>{ 0x30, 0x03 } ) &&
+	       matches( fx, std::array<uint8_t, 5>{ 0x3d, 0xfe, 0xff, 0xff, 0xff } );
+}
+
 } // namespace
 
 int main()
@@ -446,6 +490,6 @@ int main()
 	                test_encode_spans() && test_encode_too_small() && test_encode_order() &&
 	                test_encode_unsigned_enum() && test_encode_empty_message() && test_encode_deep() &&
 	                test_encode_each_short_buffer() && test_encode_span_and_bytes() && test_encode_fixed_extent_span() &&
-	                test_encode_const_nested();
+	                test_encode_const_nested() && test_encode_same_type_oneof();
 	return ok ? 0 : 1;
 }

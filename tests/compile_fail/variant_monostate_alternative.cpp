@@ -6,7 +6,7 @@
 
 struct msg
 {
-	std::variant<std::monostate, int32_t, int32_t> v;
+	std::variant<std::monostate, int32_t, std::monostate> v;
 };
 
 template <>

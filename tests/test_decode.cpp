@@ -198,6 +198,14 @@ struct fragile_items
 	std::span<const fragile> items;
 };
 
+struct same_type_oneof
+{
+	uint32_t id = 0;
+	std::variant<std::monostate, std::string_view, std::string_view, std::string_view> msg = {};
+	std::variant<std::monostate, int32_t, int32_t, int32_t> delta = {};
+	std::variant<std::monostate, inner, inner> sub = {};
+};
+
 } // namespace
 
 template <>
@@ -309,6 +317,21 @@ struct pb::fields_of<fragile> : pb::field_list<fragile,
 template <>
 struct pb::fields_of<fragile_items>
   : pb::field_list<fragile_items, pb::field_at<decltype( fragile_items::items ), 1, offsetof( fragile_items, items )>>
+{};
+
+template <>
+struct pb::fields_of<same_type_oneof>
+  : pb::field_list<
+      same_type_oneof,
+      pb::field_at<decltype( same_type_oneof::id ), 1, offsetof( same_type_oneof, id )>,
+      pb::field_at<decltype( same_type_oneof::msg ), 2, offsetof( same_type_oneof, msg ), 1>,
+      pb::field_at<decltype( same_type_oneof::msg ), 3, offsetof( same_type_oneof, msg ), 2>,
+      pb::field_at<decltype( same_type_oneof::msg ), 4, offsetof( same_type_oneof, msg ), 3>,
+      pb::field_at<decltype( same_type_oneof::delta ), 5, offsetof( same_type_oneof, delta ), 1>,
+      pb::field_at<decltype( same_type_oneof::delta ), 6, offsetof( same_type_oneof, delta ), 2, pb::int_encoding::ZIGZAG>,
+      pb::field_at<decltype( same_type_oneof::delta ), 7, offsetof( same_type_oneof, delta ), 3, pb::int_encoding::FIXED>,
+      pb::field_at<decltype( same_type_oneof::sub ), 8, offsetof( same_type_oneof, sub ), 1>,
+      pb::field_at<decltype( same_type_oneof::sub ), 9, offsetof( same_type_oneof, sub ), 2>>
 {};
 
 namespace {
@@ -1324,6 +1347,44 @@ bool test_no_arena_needed()
 	return result && message.ints.size() == 2 && message.ints[1] == 2;
 }
 
+/// Alternatives of the same C++ type in one `std::variant` select by 1-based index; same tag merges, other tag resets.
+bool test_same_type_oneof()
+{
+	same_type_oneof rx{};
+	constexpr auto info_wire = std::to_array<uint8_t>( { 0x08, 0x07, 0x1a, 0x02, 'o', 'k' } );
+	constexpr auto err_then_html =
+	  std::to_array<uint8_t>( { 0x12, 0x03, 'b', 'a', 'd', 0x22, 0x03, '<', 'b', '>' } );
+	if ( !decode( bytes_of( info_wire ), rx ) || rx.id != 7 || rx.msg.index() != 2 ||
+	     *std::get_if<2>( &rx.msg ) != "ok" )
+		return false;
+	if ( !decode( bytes_of( err_then_html ), rx ) || rx.msg.index() != 3 || *std::get_if<3>( &rx.msg ) != "<b>" )
+		return false;
+
+	constexpr auto raw_wire =
+	  std::to_array<uint8_t>( { 0x28, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01 } );
+	constexpr auto zz_wire = std::to_array<uint8_t>( { 0x30, 0x03 } );
+	constexpr auto fx_wire = std::to_array<uint8_t>( { 0x3d, 0xfe, 0xff, 0xff, 0xff } );
+	if ( !decode( bytes_of( raw_wire ), rx ) || rx.delta.index() != 1 || *std::get_if<1>( &rx.delta ) != -2 )
+		return false;
+	if ( !decode( bytes_of( zz_wire ), rx ) || rx.delta.index() != 2 || *std::get_if<2>( &rx.delta ) != -2 )
+		return false;
+	if ( !decode( bytes_of( fx_wire ), rx ) || rx.delta.index() != 3 || *std::get_if<3>( &rx.delta ) != -2 )
+		return false;
+
+	// Two records of tag 8 merge into alternative 1; tag 8 followed by tag 9 switches to alternative 2 and resets x.
+	constexpr auto same_tag_merge =
+	  std::to_array<uint8_t>( { 0x42, 0x02, 0x08, 0x05, 0x42, 0x04, 0x12, 0x02, 'h', 'i' } );
+	constexpr auto diff_tag_replace =
+	  std::to_array<uint8_t>( { 0x42, 0x02, 0x08, 0x05, 0x4a, 0x04, 0x12, 0x02, 'h', 'i' } );
+	if ( !decode( bytes_of( same_tag_merge ), rx ) || rx.sub.index() != 1 || std::get_if<1>( &rx.sub )->x != 5 ||
+	     std::get_if<1>( &rx.sub )->label != "hi" )
+		return false;
+	if ( !decode( bytes_of( diff_tag_replace ), rx ) || rx.sub.index() != 2 || std::get_if<2>( &rx.sub )->x != 0 ||
+	     std::get_if<2>( &rx.sub )->label != "hi" )
+		return false;
+	return true;
+}
+
 } // namespace
 
 int main()
@@ -1341,6 +1402,6 @@ int main()
 	  test_decode_lists_full() && test_decode_envelope_long() && test_reuse_repeated_message() && test_reuse_oneof() &&
 	  test_decode_empty_message() && test_error_order() && test_reuse_resets_each_kind() && test_partial_result() &&
 	  test_fixed_bytes_last_wins() && test_arena( 0x00 ) && test_arena( 0xA5 ) && test_scratch_overloads() &&
-	  test_owned_buffers() && test_no_arena_needed();
+	  test_owned_buffers() && test_no_arena_needed() && test_same_type_oneof();
 	return ok ? 0 : 1;
 }
