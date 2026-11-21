@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+// Covers the rules of protoc-gen-micropb that vectors.proto does not use.
+package features;
+
+import "shared.proto";
+
+enum RxMode {
+  RX_MODE_FIXED = 0;
+  RX_MODE_VARIABLE = 1;
+}
+
+// `Device` and `Device.Slot` are defined after this message.
+message Frame {
+  Device device = 1;
+  Device.Slot slot = 2;
+  shared.types.Point origin = 3;
+  shared.types.Unit unit = 4;
+  RxMode mode = 5;
+}
+
+message limits {
+  int32 low = 1;
+  int32 high = 2;
+}
+
+message Device {
+  message Slot {
+    uint32 index = 1;
+    bytes key = 2;
+  }
+  enum State {
+    STATE_IDLE = 0;
+    STATE_BUSY = 1;
+  }
+
+  int32 class = 1;    // A C++ keyword.
+  State state = 2;
+  limits limits = 3;  // The field name is equal to the type name.
+  limits backup = 4;
+  uint32 serial = 10;
+  int32 offset = 11;
+  optional bytes token = 12;
+  optional Slot spare = 13;
+  repeated Slot slots = 14;
+  repeated State history = 15;
+  repeated int32 trims = 16;
+  sint32 trim_delta = 17;
+  repeated sint64 history_delta = 18;
+  oneof event {
+    uint32 code = 20;
+    string text = 22;
+    Slot moved = 25;
+  }
+  bool ready = 26;
+}
+
+// Encode only: `fixed_count` gives a `std::array`.
+message Calibration {
+  repeated float gains = 1;
+  bytes id = 2;
+}
+
+// Encode only: `type:FT_POINTER` gives a `std::span<const T>`, also in a oneof alternative.
+message Batch {
+  repeated Device.Slot slots = 1;
+  repeated sint32 deltas = 2;
+  bytes blob = 3;
+}
+
+message Report {
+  oneof body {
+    uint32 code = 1;
+    Batch batch = 2;
+  }
+}
+
+// Alternatives of one C++ type in a oneof use the generated 1-based index constants.
+message Log {
+  uint32 id = 1;
+  oneof msg {
+    string err = 2;
+    string info = 3;
+    string html = 4;
+  }
+}

@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+// Types that features.proto imports from another package.
+package shared.types;
+
+enum Unit {
+  UNIT_NONE = 0;
+  UNIT_METER = 1;
+}
+
+message Point {
+  sint32 x = 1;
+  sint32 y = 2;
+}
