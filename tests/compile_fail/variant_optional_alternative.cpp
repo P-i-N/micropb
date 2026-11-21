@@ -1,13 +1,13 @@
-#include <cstddef>
-#include <cstdint>
 #include <optional>
+#include <stddef.h>
+#include <stdint.h>
 #include <variant>
 
 #include <micropb/codec.hpp>
 
 struct msg
 {
-	std::variant<std::monostate, std::optional<std::int32_t>> v;
+	std::variant<std::monostate, std::optional<int32_t>> v;
 };
 
 template <>

@@ -1,9 +1,9 @@
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <optional>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 #include <string_view>
 #include <variant>
 
@@ -16,8 +16,8 @@ using K = pb::field_kind;
 
 struct plain
 {
-	std::uint8_t a;
-	std::uint32_t b;
+	uint8_t a;
+	uint32_t b;
 	double c;
 };
 
@@ -26,23 +26,23 @@ struct nothing
 
 struct holder
 {
-	std::uint32_t id;
+	uint32_t id;
 	plain child;
 	std::optional<float> maybe;
 	pb::repeated<float, 4> floats;
-	pb::repeated<std::uint8_t, 16> blob;
-	std::array<std::uint8_t, 6> mac;
-	std::span<const std::int32_t> view;
+	pb::repeated<uint8_t, 16> blob;
+	std::array<uint8_t, 6> mac;
+	std::span<const int32_t> view;
 	std::string_view name;
 	nothing none;
 	std::variant<std::monostate, plain, float> choice;
 };
 
-enum class small : std::uint8_t
+enum class small : uint8_t
 {
 	ZERO
 };
-enum class level : std::int32_t
+enum class level : int32_t
 {
 	ZERO
 };
@@ -83,17 +83,17 @@ constexpr const d::value_desc& p = d::value_descriptor<plain>::value;
 constexpr const d::value_desc& h = d::value_descriptor<holder>::value;
 
 template <typename Table>
-consteval d::field_entry entry_at( std::size_t index )
+consteval d::field_entry entry_at( size_t index )
 {
-	std::size_t pos = 0;
+	size_t pos = 0;
 	d::field_entry entry{};
-	for ( std::size_t i = 0; i <= index; ++i )
+	for ( size_t i = 0; i <= index; ++i )
 		entry = d::decode_entry( Table::value.words.data(), pos );
 	return entry;
 }
 
 template <typename Table>
-consteval d::value_desc type_at( std::size_t index )
+consteval d::value_desc type_at( size_t index )
 {
 	const d::value_desc* const* subs = nullptr;
 	if constexpr ( Table::layout.subs_n > 0 )
@@ -109,7 +109,7 @@ static_assert( entry_at<plain_table>( 0 ).offset == 0 && entry_at<plain_table>( 
                entry_at<plain_table>( 2 ).offset == 8 );
 static_assert( entry_at<plain_table>( 2 ).number == 3 && type_at<plain_table>( 2 ).kind == K::SCALAR &&
                entry_at<plain_table>( 0 ).alternative == 0 );
-static_assert( type_at<plain_table>( 1 ).scalar == d::scalar_code_of<std::uint32_t>() );
+static_assert( type_at<plain_table>( 1 ).scalar == d::scalar_code_of<uint32_t>() );
 
 // `holder`: 11 1-word entries, with the numbers 1 5 6 7 8 9 10 11 12 13 14, and 8 deduplicated compound pointers.
 static_assert( h.kind == K::MESSAGE && h.scalar == 8 && h.words == 11 );
@@ -127,7 +127,7 @@ static_assert( type_at<holder_table>( 4 ).kind == K::BYTES && type_at<holder_tab
 static_assert( type_at<holder_table>( 5 ).kind == K::FIXED_BYTES && type_at<holder_table>( 5 ).size == 6 );
 static_assert( type_at<holder_table>( 6 ).kind == K::REPEATED &&
                type_at<holder_table>( 6 ).sequence->storage == d::sequence_storage::ACCESSOR &&
-               type_at<holder_table>( 6 ).sequence->element == &d::value_descriptor<std::int32_t>::value );
+               type_at<holder_table>( 6 ).sequence->element == &d::value_descriptor<int32_t>::value );
 static_assert( type_at<holder_table>( 7 ).kind == K::STRING );
 static_assert( type_at<holder_table>( 8 ).kind == K::MESSAGE && type_at<holder_table>( 8 ).words == 0 );
 static_assert( entry_at<holder_table>( 9 ).alternative == 1 && entry_at<holder_table>( 10 ).alternative == 2 &&
@@ -137,17 +137,17 @@ static_assert( entry_at<holder_table>( 9 ).alternative == 1 && entry_at<holder_t
                type_at<holder_table>( 9 ).variant->alternatives[1] == &d::value_descriptor<plain>::value &&
                type_at<holder_table>( 9 ).variant->alternatives[2] == &d::value_descriptor<float>::value );
 
-static_assert( d::value_descriptor<std::span<const std::uint8_t>>::value.kind == K::BYTES &&
-               d::value_descriptor<std::span<const std::uint8_t>>::value.sequence == nullptr );
+static_assert( d::value_descriptor<std::span<const uint8_t>>::value.kind == K::BYTES &&
+               d::value_descriptor<std::span<const uint8_t>>::value.sequence == nullptr );
 static_assert( d::value_descriptor<std::array<float, 3>>::value.sequence->storage == d::sequence_storage::ARRAY &&
                d::value_descriptor<std::array<float, 3>>::value.sequence->capacity == 3 );
 
 static_assert( d::scalar_code_of<bool>() == ( 0 | d::scalar_bool ) );
-static_assert( d::scalar_code_of<std::int8_t>() == ( 0 | d::scalar_signed ) );
-static_assert( d::scalar_code_of<std::uint16_t>() == 1 && d::scalar_code_of<std::uint64_t>() == 3 );
-static_assert( d::scalar_code_of<std::int32_t, pb::int_encoding::ZIGZAG>() == ( 2 | d::scalar_signed | d::scalar_zigzag ) );
+static_assert( d::scalar_code_of<int8_t>() == ( 0 | d::scalar_signed ) );
+static_assert( d::scalar_code_of<uint16_t>() == 1 && d::scalar_code_of<uint64_t>() == 3 );
+static_assert( d::scalar_code_of<int32_t, pb::int_encoding::ZIGZAG>() == ( 2 | d::scalar_signed | d::scalar_zigzag ) );
 static_assert( d::scalar_code_of<float>() == ( 2 | d::scalar_fixed ) &&
-               d::value_descriptor<std::int64_t, pb::int_encoding::FIXED>::value.scalar == ( 3 | d::scalar_fixed ) );
+               d::value_descriptor<int64_t, pb::int_encoding::FIXED>::value.scalar == ( 3 | d::scalar_fixed ) );
 static_assert( d::scalar_code_of<small>() == ( 0 | d::scalar_enum ) );
 static_assert( d::scalar_code_of<level>() == ( 2 | d::scalar_enum | d::scalar_signed ) );
 
@@ -198,9 +198,9 @@ bool test_variant_accessor()
 
 bool test_sequence_accessor()
 {
-	constexpr std::array<std::int32_t, 3> items{ 1, 2, 3 };
-	std::span<const std::int32_t> view( items );
-	const d::sequence_desc& view_desc = *d::value_descriptor<std::span<const std::int32_t>>::value.sequence;
+	constexpr std::array<int32_t, 3> items{ 1, 2, 3 };
+	std::span<const int32_t> view( items );
+	const d::sequence_desc& view_desc = *d::value_descriptor<std::span<const int32_t>>::value.sequence;
 	const d::span_desc& span = *view_desc.span;
 	const d::sequence_view a = span.access( &view );
 	if ( a.count != 3 || a.data != items.data() )
@@ -210,10 +210,10 @@ bool test_sequence_accessor()
 		return false;
 
 	// Only a `std::span<const T>` has a binder: `decode` sets it to a block in the arena.
-	std::array<std::int32_t, 2> block{ 5, 6 };
+	std::array<int32_t, 2> block{ 5, 6 };
 	span.bind( &view, block.data(), 2 );
-	return view.data() == block.data() && view.size() == 2 && span.element_align == alignof( std::int32_t ) &&
-	       span.construct == &d::construct_item<std::int32_t> && span.reserve == &d::reserve &&
+	return view.data() == block.data() && view.size() == 2 && span.element_align == alignof( int32_t ) &&
+	       span.construct == &d::construct_item<int32_t> && span.reserve == &d::reserve &&
 	       d::value_descriptor<pb::repeated<float, 4>>::value.sequence->span == nullptr &&
 	       d::value_descriptor<std::array<float, 2>>::value.sequence->span == nullptr;
 }
@@ -223,16 +223,16 @@ bool test_sequence_accessor()
 bool test_block_bound()
 {
 	// A block with the capacity 1 and 2 items: a span that `decode` did not bind.
-	alignas( std::size_t ) std::array<unsigned char, sizeof( std::size_t ) + 2 * sizeof( std::int32_t )> block{};
-	const std::size_t capacity = 1;
+	alignas( size_t ) std::array<unsigned char, sizeof( size_t ) + 2 * sizeof( int32_t )> block{};
+	const size_t capacity = 1;
 	std::memcpy( block.data(), &capacity, sizeof capacity );
-	const auto* first = reinterpret_cast<const std::int32_t*>( block.data() + sizeof( std::size_t ) );
-	std::span<const std::int32_t> view( first, 2 );
+	const auto* first = reinterpret_cast<const int32_t*>( block.data() + sizeof( size_t ) );
+	std::span<const int32_t> view( first, 2 );
 
-	const d::sequence_desc& desc = *d::value_descriptor<std::span<const std::int32_t>>::value.sequence;
-	std::array<std::uint8_t, 64> storage{};
+	const d::sequence_desc& desc = *d::value_descriptor<std::span<const int32_t>>::value.sequence;
+	std::array<uint8_t, 64> storage{};
 	pb::arena memory( storage );
-	constexpr std::array<std::uint8_t, 1> value{ 0x05 };
+	constexpr std::array<uint8_t, 1> value{ 0x05 };
 	const pb::field_key key{ 1, pb::wire_type::VARINT };
 
 	pb::reader record( value );
@@ -246,13 +246,13 @@ bool test_block_bound()
 
 ////////////////////////////////////////////////////////////////////////////////
 
-enum class mode : std::uint8_t
+enum class mode : uint8_t
 {
 	OFF,
 	ON,
 	MAX = 200
 };
-enum class grade : std::int32_t
+enum class grade : int32_t
 {
 	LOW = -5,
 	ZERO = 0,
@@ -261,9 +261,9 @@ enum class grade : std::int32_t
 
 struct inner
 {
-	std::int32_t x;
+	int32_t x;
 	std::string_view label;
-	std::int64_t z;
+	int64_t z;
 };
 
 struct pose
@@ -274,47 +274,47 @@ struct pose
 
 struct ping
 {
-	std::uint32_t seq;
+	uint32_t seq;
 };
 
-using choice = std::variant<std::monostate, pose, ping, std::uint32_t>;
+using choice = std::variant<std::monostate, pose, ping, uint32_t>;
 
 /// One member of each kind, with the storage types that `decode` accepts.
 struct all
 {
 	bool flag;
-	std::int8_t i8;
-	std::int16_t i16;
-	std::int32_t i32;
-	std::int64_t i64;
-	std::uint8_t u8;
-	std::uint16_t u16;
-	std::uint32_t u32;
-	std::uint64_t u64;
-	std::int32_t s32;
-	std::int64_t s64;
-	std::uint32_t fx32;
-	std::uint64_t fx64;
-	std::int32_t sfx32;
-	std::int64_t sfx64;
+	int8_t i8;
+	int16_t i16;
+	int32_t i32;
+	int64_t i64;
+	uint8_t u8;
+	uint16_t u16;
+	uint32_t u32;
+	uint64_t u64;
+	int32_t s32;
+	int64_t s64;
+	uint32_t fx32;
+	uint64_t fx64;
+	int32_t sfx32;
+	int64_t sfx64;
 	float f;
 	double d;
 	mode m;
 	grade g;
 	std::string_view name;
-	std::span<const std::uint8_t> view;
-	std::array<std::uint8_t, 6> mac;
-	pb::repeated<std::uint8_t, 16> blob;
+	std::span<const uint8_t> view;
+	std::array<uint8_t, 6> mac;
+	pb::repeated<uint8_t, 16> blob;
 	inner child;
-	std::optional<std::int32_t> maybe;
+	std::optional<int32_t> maybe;
 	std::optional<inner> maybe_child;
-	pb::repeated<std::int32_t, 8> ints;
-	pb::repeated<std::int32_t, 4> zz;
+	pb::repeated<int32_t, 8> ints;
+	pb::repeated<int32_t, 4> zz;
 	pb::repeated<double, 2> ds;
 	pb::repeated<inner, 3> items;
 	pb::repeated<std::string_view, 3> names;
 	choice payload;
-	std::int16_t tail;
+	int16_t tail;
 };
 
 /// The same message, with the storage types that only `encode` accepts in the
@@ -322,38 +322,38 @@ struct all
 struct all_views
 {
 	bool flag;
-	std::int8_t i8;
-	std::int16_t i16;
-	std::int32_t i32;
-	std::int64_t i64;
-	std::uint8_t u8;
-	std::uint16_t u16;
-	std::uint32_t u32;
-	std::uint64_t u64;
-	std::int32_t s32;
-	std::int64_t s64;
-	std::uint32_t fx32;
-	std::uint64_t fx64;
-	std::int32_t sfx32;
-	std::int64_t sfx64;
+	int8_t i8;
+	int16_t i16;
+	int32_t i32;
+	int64_t i64;
+	uint8_t u8;
+	uint16_t u16;
+	uint32_t u32;
+	uint64_t u64;
+	int32_t s32;
+	int64_t s64;
+	uint32_t fx32;
+	uint64_t fx64;
+	int32_t sfx32;
+	int64_t sfx64;
 	float f;
 	double d;
 	mode m;
 	grade g;
 	std::string_view name;
-	std::span<const std::uint8_t> view;
-	std::array<std::uint8_t, 6> mac;
-	pb::repeated<std::uint8_t, 16> blob;
+	std::span<const uint8_t> view;
+	std::array<uint8_t, 6> mac;
+	pb::repeated<uint8_t, 16> blob;
 	inner child;
-	std::optional<std::int32_t> maybe;
+	std::optional<int32_t> maybe;
 	std::optional<inner> maybe_child;
-	std::span<const std::int32_t> ints;
-	std::span<const std::int32_t> zz;
+	std::span<const int32_t> ints;
+	std::span<const int32_t> zz;
 	std::array<double, 2> ds;
 	pb::repeated<inner, 3> items;
 	pb::repeated<std::string_view, 3> names;
 	choice payload;
-	std::int16_t tail;
+	int16_t tail;
 };
 
 } // namespace
@@ -458,9 +458,9 @@ struct pb::fields_of<all_views>
 
 namespace {
 
-constexpr std::array<std::uint8_t, 3> raw{ 9, 8, 7 };
-constexpr std::array<std::int32_t, 3> int_values{ 1, -1, 100000 };
-constexpr std::array<std::int32_t, 2> zz_values{ -1, 2 };
+constexpr std::array<uint8_t, 3> raw{ 9, 8, 7 };
+constexpr std::array<int32_t, 3> int_values{ 1, -1, 100000 };
+constexpr std::array<int32_t, 2> zz_values{ -1, 2 };
 
 template <typename R, typename V>
 void append_all( R& sequence, const V& values )
@@ -481,11 +481,11 @@ void fill_common( T& v )
 	v.u8 = 200;
 	v.u16 = 65535;
 	v.u32 = 300;
-	v.u64 = ~std::uint64_t{ 0 };
+	v.u64 = ~uint64_t{ 0 };
 	v.s32 = -4;
-	v.s64 = std::int64_t{ 1 } << 40;
+	v.s64 = int64_t{ 1 } << 40;
 	v.fx32 = 7;
-	v.fx64 = std::uint64_t{ 1 } << 40;
+	v.fx64 = uint64_t{ 1 } << 40;
 	v.sfx32 = -8;
 	v.sfx64 = -9;
 	v.f = -0.0f;
@@ -495,7 +495,7 @@ void fill_common( T& v )
 	v.name = "hello";
 	v.view = raw;
 	v.mac = { 1, 2, 3, 4, 5, 6 };
-	append_all( v.blob, std::array<std::uint8_t, 4>{ 1, 2, 3, 4 } );
+	append_all( v.blob, std::array<uint8_t, 4>{ 1, 2, 3, 4 } );
 	v.child = { 5, "c", -6 };
 	v.maybe = 0;
 	v.maybe_child = inner{};
@@ -504,7 +504,7 @@ void fill_common( T& v )
 	v.tail = -7;
 }
 
-using buffer = std::array<std::uint8_t, 512>;
+using buffer = std::array<uint8_t, 512>;
 
 /// `encode`, `decode` and `encode` again give the same bytes, and `encoded_size` agrees.
 bool round_trips( const all& value )
@@ -515,7 +515,7 @@ bool round_trips( const all& value )
 		return false;
 
 	all back{};
-	const auto used = pb::decode( std::span<const std::uint8_t>( first ).first( *size ), back );
+	const auto used = pb::decode( std::span<const uint8_t>( first ).first( *size ), back );
 	if ( !used || *used != *size )
 		return false;
 
@@ -558,7 +558,7 @@ bool test_all_kinds()
 	append_all( where.pos, std::array<float, 3>{ 1, 2, 3 } );
 	append_all( where.rot, std::array<float, 4>{ 0, 0, 0, 1 } );
 
-	const choice payloads[]{ std::monostate{}, where, ping{ 0 }, std::uint32_t{ 0 } };
+	const choice payloads[]{ std::monostate{}, where, ping{ 0 }, uint32_t{ 0 } };
 	for ( const choice& payload : payloads )
 	{
 		value.payload = payload;
@@ -573,38 +573,38 @@ bool test_all_kinds()
 
 namespace {
 
-template <std::size_t I>
+template <size_t I>
 struct alt_tag
 {
-	std::uint32_t v;
+	uint32_t v;
 };
 
 template <typename Seq>
 struct wide_variant_msg;
 
-template <std::size_t... I>
+template <size_t... I>
 struct wide_variant_msg<std::index_sequence<I...>>
 {
 	using variant_t = std::variant<std::monostate, alt_tag<I>...>;
 	variant_t first;
-	std::variant<std::monostate, std::int32_t, double> second;
-	pb::repeated<std::uint8_t, 4100> pad;
-	std::uint32_t far_scalar;
-	std::uint32_t max_tag_scalar;
+	std::variant<std::monostate, int32_t, double> second;
+	pb::repeated<uint8_t, 4100> pad;
+	uint32_t far_scalar;
+	uint32_t max_tag_scalar;
 };
 
 using wide_msg = wide_variant_msg<std::make_index_sequence<33>>;
 
 } // namespace
 
-template <std::size_t I>
+template <size_t I>
 struct pb::fields_of<alt_tag<I>> : pb::field_list<alt_tag<I>, pb::field_at<decltype( alt_tag<I>::v ), 1, 0>>
 {};
 
-template <std::size_t... I>
+template <size_t... I>
 pb::field_list<
   wide_msg,
-  pb::field_at<decltype( wide_msg::first ), static_cast<std::uint32_t>( I + 1 ), offsetof( wide_msg, first ), I + 1>...,
+  pb::field_at<decltype( wide_msg::first ), static_cast<uint32_t>( I + 1 ), offsetof( wide_msg, first ), I + 1>...,
   pb::field_at<decltype( wide_msg::second ), 100, offsetof( wide_msg, second ), 1>,
   pb::field_at<decltype( wide_msg::second ), 101, offsetof( wide_msg, second ), 2>,
   pb::field_at<decltype( wide_msg::pad ), 200, offsetof( wide_msg, pad )>,
@@ -634,15 +634,15 @@ bool test_wide_entries()
 	tx.far_scalar = 777;
 	tx.max_tag_scalar = 999;
 
-	std::array<std::uint8_t, 128> wire{};
+	std::array<uint8_t, 128> wire{};
 	const auto n = pb::encode( tx, wire );
 	if ( !n || pb::encoded_size( tx ) != *n )
 		return false;
 
 	wide_msg rx{};
 	rx.first.emplace<1>( alt_tag<0>{ 9 } );
-	rx.second = std::int32_t{ 5 };
-	if ( !pb::decode( std::span<const std::uint8_t>( wire ).first( *n ), rx ) )
+	rx.second = int32_t{ 5 };
+	if ( !pb::decode( std::span<const uint8_t>( wire ).first( *n ), rx ) )
 		return false;
 
 	const auto* a33 = std::get_if<33>( &rx.first );
@@ -653,9 +653,9 @@ bool test_wide_entries()
 
 struct encoded_compounds
 {
-	std::optional<std::int32_t> opt_zz;
-	std::optional<std::uint32_t> opt_fx;
-	std::variant<std::monostate, std::int32_t, std::uint32_t> oneof_enc;
+	std::optional<int32_t> opt_zz;
+	std::optional<uint32_t> opt_fx;
+	std::variant<std::monostate, int32_t, uint32_t> oneof_enc;
 };
 
 } // namespace
@@ -678,29 +678,29 @@ bool test_encoded_compounds()
 	// field 1 (varint zigzag -1 -> 0x01): 0x08 0x01
 	// field 2 (fixed32 0x04030201):       0x15 0x01 0x02 0x03 0x04
 	// field 3 (varint zigzag -2 -> 0x03): 0x18 0x03
-	constexpr auto expected_a = std::to_array<std::uint8_t>( { 0x08, 0x01, 0x15, 0x01, 0x02, 0x03, 0x04, 0x18, 0x03 } );
-	encoded_compounds tx_a{ .opt_zz = -1, .opt_fx = 0x04030201u, .oneof_enc = std::int32_t{ -2 } };
-	std::array<std::uint8_t, 16> out_a{};
+	constexpr auto expected_a = std::to_array<uint8_t>( { 0x08, 0x01, 0x15, 0x01, 0x02, 0x03, 0x04, 0x18, 0x03 } );
+	encoded_compounds tx_a{ .opt_zz = -1, .opt_fx = 0x04030201u, .oneof_enc = int32_t{ -2 } };
+	std::array<uint8_t, 16> out_a{};
 	const auto n_a = pb::encode( tx_a, out_a );
 	if ( !n_a || *n_a != expected_a.size() || !std::equal( expected_a.begin(), expected_a.end(), out_a.begin() ) )
 		return false;
 
 	encoded_compounds rx_a{};
 	if ( !pb::decode( expected_a, rx_a ) || rx_a.opt_zz != -1 || rx_a.opt_fx != 0x04030201u ||
-	     !std::holds_alternative<std::int32_t>( rx_a.oneof_enc ) || std::get<std::int32_t>( rx_a.oneof_enc ) != -2 )
+	     !std::holds_alternative<int32_t>( rx_a.oneof_enc ) || std::get<int32_t>( rx_a.oneof_enc ) != -2 )
 		return false;
 
 	// field 4 (fixed32 0x89ABCDEF): 0x25 0xEF 0xCD 0xAB 0x89
-	constexpr auto expected_b = std::to_array<std::uint8_t>( { 0x25, 0xEF, 0xCD, 0xAB, 0x89 } );
-	encoded_compounds tx_b{ .opt_zz = std::nullopt, .opt_fx = std::nullopt, .oneof_enc = std::uint32_t{ 0x89ABCDEFu } };
-	std::array<std::uint8_t, 16> out_b{};
+	constexpr auto expected_b = std::to_array<uint8_t>( { 0x25, 0xEF, 0xCD, 0xAB, 0x89 } );
+	encoded_compounds tx_b{ .opt_zz = std::nullopt, .opt_fx = std::nullopt, .oneof_enc = uint32_t{ 0x89ABCDEFu } };
+	std::array<uint8_t, 16> out_b{};
 	const auto n_b = pb::encode( tx_b, out_b );
 	if ( !n_b || *n_b != expected_b.size() || !std::equal( expected_b.begin(), expected_b.end(), out_b.begin() ) )
 		return false;
 
 	if ( !pb::decode( expected_b, rx_a ) || rx_a.opt_zz.has_value() || rx_a.opt_fx.has_value() ||
-	     !std::holds_alternative<std::uint32_t>( rx_a.oneof_enc ) ||
-	     std::get<std::uint32_t>( rx_a.oneof_enc ) != 0x89ABCDEFu )
+	     !std::holds_alternative<uint32_t>( rx_a.oneof_enc ) ||
+	     std::get<uint32_t>( rx_a.oneof_enc ) != 0x89ABCDEFu )
 		return false;
 	return true;
 }

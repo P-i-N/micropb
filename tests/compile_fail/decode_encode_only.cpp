@@ -1,12 +1,12 @@
 #include <array>
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/codec.hpp>
 
 struct msg
 {
-	std::array<std::int32_t, 2> ints;
+	std::array<int32_t, 2> ints;
 };
 
 template <>

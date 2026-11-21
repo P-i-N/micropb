@@ -1,5 +1,5 @@
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/codec.hpp>
 
@@ -7,7 +7,7 @@ struct msg
 {
 	msg() {}
 
-	std::int32_t a;
+	int32_t a;
 };
 
 template <>

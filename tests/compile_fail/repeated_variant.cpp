@@ -1,13 +1,13 @@
 #include <array>
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 #include <variant>
 
 #include <micropb/codec.hpp>
 
 struct msg
 {
-	std::array<std::variant<std::monostate, std::int32_t>, 2> v;
+	std::array<std::variant<std::monostate, int32_t>, 2> v;
 };
 
 template <>

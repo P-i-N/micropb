@@ -80,7 +80,7 @@ bool round_trip() {
         .detail = uint32_t{3600},
     };
 
-    const auto written = pb::encode(tx, wire); // std::expected<std::size_t, pb::error>
+    const auto written = pb::encode(tx, wire); // std::expected<size_t, pb::error>
     if (!written)
         return false;
 
@@ -155,23 +155,23 @@ void on_packet(std::span<const uint8_t> packet) {
 
 ```cpp
 template <typename T>
-[[nodiscard]] std::size_t pb::encoded_size(const T& msg);
+[[nodiscard]] size_t pb::encoded_size(const T& msg);
 
 template <typename T>
-[[nodiscard]] std::expected<std::size_t, pb::error> pb::encode(
-    const T& msg, std::span<std::uint8_t> out);
+[[nodiscard]] std::expected<size_t, pb::error> pb::encode(
+    const T& msg, std::span<uint8_t> out);
 
 template <typename T>
-[[nodiscard]] std::expected<std::size_t, pb::error> pb::decode(
-    std::span<const std::uint8_t> in, T& msg);
+[[nodiscard]] std::expected<size_t, pb::error> pb::decode(
+    std::span<const uint8_t> in, T& msg);
 
 template <typename T>
-[[nodiscard]] std::expected<std::size_t, pb::error> pb::decode(
-    std::span<const std::uint8_t> in, T& msg, std::span<std::uint8_t> memory);
+[[nodiscard]] std::expected<size_t, pb::error> pb::decode(
+    std::span<const uint8_t> in, T& msg, std::span<uint8_t> memory);
 
 template <typename T>
-[[nodiscard]] std::expected<std::size_t, pb::error> pb::decode(
-    std::span<const std::uint8_t> in, T& msg, pb::arena& memory);
+[[nodiscard]] std::expected<size_t, pb::error> pb::decode(
+    std::span<const uint8_t> in, T& msg, pb::arena& memory);
 ```
 
 ## Integration & code generation

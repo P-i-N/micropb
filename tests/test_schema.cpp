@@ -1,7 +1,7 @@
 #include <array>
-#include <cstdint>
 #include <optional>
 #include <span>
+#include <stdint.h>
 #include <string_view>
 #include <variant>
 
@@ -21,14 +21,14 @@ struct pose
 
 consteval bool test_kinds()
 {
-	return kind_of<std::int32_t>() == field_kind::SCALAR && kind_of<std::string_view>() == field_kind::STRING &&
+	return kind_of<int32_t>() == field_kind::SCALAR && kind_of<std::string_view>() == field_kind::STRING &&
 	       kind_of<string<16>>() == field_kind::STRING &&
-	       kind_of<std::span<const std::uint8_t>>() == field_kind::BYTES &&
+	       kind_of<std::span<const uint8_t>>() == field_kind::BYTES &&
 	       kind_of<bytes<16>>() == field_kind::BYTES &&
-	       kind_of<std::array<std::uint8_t, 6>>() == field_kind::FIXED_BYTES &&
+	       kind_of<std::array<uint8_t, 6>>() == field_kind::FIXED_BYTES &&
 	       kind_of<repeated<float, 4>>() == field_kind::REPEATED && kind_of<pose>() == field_kind::MESSAGE &&
 	       kind_of<std::optional<int>>() == field_kind::OPTIONAL &&
-	       kind_of<repeated<std::uint8_t, 4>>() == field_kind::BYTES &&
+	       kind_of<repeated<uint8_t, 4>>() == field_kind::BYTES &&
 	       kind_of<repeated<bytes<8>, 4>>() == field_kind::REPEATED &&
 	       kind_of<repeated<string<8>, 4>>() == field_kind::REPEATED &&
 	       kind_of<std::span<const float>>() == field_kind::REPEATED &&
@@ -39,15 +39,15 @@ consteval bool test_kinds()
 consteval bool test_wire_types()
 {
 	return wire_type_of<float>() == wire_type::FIXED32 && wire_type_of<double>() == wire_type::FIXED64 &&
-	       wire_type_of<std::int64_t, int_encoding::FIXED>() == wire_type::FIXED64 &&
-	       wire_type_of<std::int8_t>() == wire_type::VARINT && wire_type_of<bool>() == wire_type::VARINT &&
-	       wire_type_of<std::int32_t, int_encoding::ZIGZAG>() == wire_type::VARINT &&
-	       wire_type_of<std::uint32_t, int_encoding::FIXED>() == wire_type::FIXED32;
+	       wire_type_of<int64_t, int_encoding::FIXED>() == wire_type::FIXED64 &&
+	       wire_type_of<int8_t>() == wire_type::VARINT && wire_type_of<bool>() == wire_type::VARINT &&
+	       wire_type_of<int32_t, int_encoding::ZIGZAG>() == wire_type::VARINT &&
+	       wire_type_of<uint32_t, int_encoding::FIXED>() == wire_type::FIXED32;
 }
 
 consteval bool test_packed()
 {
-	return is_packed<float>() && is_packed<std::int64_t>() && !is_packed<std::string_view>() && !is_packed<pose>();
+	return is_packed<float>() && is_packed<int64_t>() && !is_packed<std::string_view>() && !is_packed<pose>();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -59,8 +59,8 @@ static_assert( test_packed() );
 } // namespace
 
 // A `std::span` of elements that are not `const` is not a sequence type.
-static_assert( !pb::detail::sequence_traits<std::span<std::int32_t>>::is_sequence &&
-               pb::detail::sequence_traits<std::span<const std::int32_t>>::is_sequence );
+static_assert( !pb::detail::sequence_traits<std::span<int32_t>>::is_sequence &&
+               pb::detail::sequence_traits<std::span<const int32_t>>::is_sequence );
 
 int main()
 {

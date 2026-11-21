@@ -1,12 +1,12 @@
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/codec.hpp>
 
 struct msg
 {
-	std::int32_t a;
-	std::int32_t b;
+	int32_t a;
+	int32_t b;
 };
 
 template <>

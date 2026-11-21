@@ -1,7 +1,7 @@
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <optional>
+#include <stddef.h>
+#include <stdint.h>
 #include <variant>
 
 #include <micropb/micropb.hpp>
@@ -9,8 +9,8 @@
 // The member `a` is in the list two times.
 struct msg
 {
-	std::int32_t a;
-	std::int32_t b;
+	int32_t a;
+	int32_t b;
 };
 
 template <>

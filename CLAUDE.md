@@ -75,7 +75,7 @@ These are hard limits. If a task requires you to cross a limit, stop and tell me
 
 ## Code
 
-No heap, no exceptions, and no RTTI anywhere in `src/micropb/`. The library builds with `-fno-exceptions -fno-rtti`. Return errors as values (`std::expected<std::size_t, pb::error>`). Storage has a fixed capacity (`pb::repeated<T, N>`) or comes from the caller (`pb::span_buffer<T>`, views into the input). `.clang-format` controls formatting.
+No heap, no exceptions, and no RTTI anywhere in `src/micropb/`. The library builds with `-fno-exceptions -fno-rtti`. Return errors as values (`std::expected<size_t, pb::error>`). Storage has a fixed capacity (`pb::repeated<T, N>`) or comes from the caller (`pb::span_buffer<T>`, views into the input). `.clang-format` controls formatting.
 
 Code size is a requirement. A change to the interpreter or to the descriptors must not make the size report (`cmake --build <dir> --target size_report`) worse without a reason. Give the numbers before and after. Do not prove a size or speed claim by reading the code.
 
@@ -110,20 +110,20 @@ Example style:
 
 #include <algorithm>
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/types.hpp>
 
 namespace pb::detail {
 
 /// Largest varint in bytes.
-static constexpr std::size_t max_varint_size = 10;
+static constexpr size_t max_varint_size = 10;
 
 /// Bytes that the value of a field takes after its key. 0 for a length-delimited field
 /// and for an input that is not complete.
-[[nodiscard]] constexpr std::size_t value_size( wire_type type, std::span<const std::uint8_t> in ) noexcept
+[[nodiscard]] constexpr size_t value_size( wire_type type, std::span<const uint8_t> in ) noexcept
 {
 	if ( in.empty() )
 		return 0;
@@ -133,8 +133,8 @@ static constexpr std::size_t max_varint_size = 10;
 		case wire_type::FIXED64: return 8;
 		case wire_type::FIXED32: return 4;
 		case wire_type::VARINT: {
-			const std::size_t count = std::min( in.size(), max_varint_size );
-			for ( std::size_t i = 0; i < count; ++i )
+			const size_t count = std::min( in.size(), max_varint_size );
+			for ( size_t i = 0; i < count; ++i )
 			{
 				if ( ( in[i] & 0x80 ) == 0 )
 					return i + 1;
@@ -153,15 +153,15 @@ namespace pb {
 
 /// Bytes with a fixed capacity and a count. Decode copies into it; it does not allocate.
 /// It is not a view: a copy of the struct copies the bytes.
-template <std::size_t N>
+template <size_t N>
 struct byte_buffer
 {
-	using value_type = std::uint8_t;
+	using value_type = uint8_t;
 
-	static constexpr std::size_t capacity = N;
+	static constexpr size_t capacity = N;
 
 	/// Appends one byte. Returns false when the buffer is full.
-	[[nodiscard]] constexpr bool push_back( std::uint8_t value ) noexcept
+	[[nodiscard]] constexpr bool push_back( uint8_t value ) noexcept
 	{
 		if ( _count == N )
 			return false;
@@ -169,14 +169,14 @@ struct byte_buffer
 		return true;
 	}
 
-	[[nodiscard]] constexpr std::span<const std::uint8_t> bytes() const noexcept { return { _items.data(), _count }; }
+	[[nodiscard]] constexpr std::span<const uint8_t> bytes() const noexcept { return { _items.data(), _count }; }
 
 private:
-	std::array<std::uint8_t, N> _items{};
-	std::size_t _count = 0;
+	std::array<uint8_t, N> _items{};
+	size_t _count = 0;
 };
 
-static_assert( sizeof( byte_buffer<8> ) == 8 + sizeof( std::size_t ) );
+static_assert( sizeof( byte_buffer<8> ) == 8 + sizeof( size_t ) );
 
 } // namespace pb
 ```

@@ -1,9 +1,9 @@
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <optional>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 #include <string_view>
 #include <type_traits>
 #include <variant>
@@ -37,15 +37,15 @@ constexpr bool test_bytes()
 		return false;
 
 	const bytes<8> from_c{ { 0x10, 0x20 } };
-	const bytes<4> from_array( std::array<std::uint8_t, 2>{ 0x10, 0x20 } );
-	if ( b != from_c || b != from_array || b != std::span<const std::uint8_t>( from_array ) )
+	const bytes<4> from_array( std::array<uint8_t, 2>{ 0x10, 0x20 } );
+	if ( b != from_c || b != from_array || b != std::span<const uint8_t>( from_array ) )
 		return false;
 
-	const std::array<std::uint8_t, 5> too_long{ 1, 2, 3, 4, 5 };
+	const std::array<uint8_t, 5> too_long{ 1, 2, 3, 4, 5 };
 	if ( b.assign( too_long ) || b.size() != 2 )
 		return false;
 
-	const std::array<std::uint8_t, 3> three{ 7, 8, 9 };
+	const std::array<uint8_t, 3> three{ 7, 8, 9 };
 	if ( !b.assign( three ) || b.size() != 3 || b[2] != 9 )
 		return false;
 
@@ -89,8 +89,8 @@ constexpr bool test_string()
 
 constexpr bool test_arena_empty()
 {
-	std::array<std::uint8_t, 16> storage{};
-	arena a{ std::span<std::uint8_t>( storage ) };
+	std::array<uint8_t, 16> storage{};
+	arena a{ std::span<uint8_t>( storage ) };
 	if ( a.used() != 0 || a.capacity() != 16 )
 		return false;
 	a.clear();
@@ -99,32 +99,32 @@ constexpr bool test_arena_empty()
 
 bool test_arena_allocate()
 {
-	alignas( 8 ) std::array<std::uint8_t, 64> storage{};
-	arena a{ std::span<std::uint8_t>( storage ) };
+	alignas( 8 ) std::array<uint8_t, 64> storage{};
+	arena a{ std::span<uint8_t>( storage ) };
 	if ( a.allocate( 3, 1 ) == nullptr || a.used() != 3 )
 		return false;
 	void* p = a.allocate( 8, 8 );
-	if ( p == nullptr || reinterpret_cast<std::uintptr_t>( p ) % 8 != 0 )
+	if ( p == nullptr || reinterpret_cast<uintptr_t>( p ) % 8 != 0 )
 		return false;
 	return a.used() >= 3 + 8 && a.used() <= 3 + 7 + 8;
 }
 
 bool test_arena_odd_start()
 {
-	alignas( 8 ) std::array<std::uint8_t, 65> storage{};
-	arena a{ std::span<std::uint8_t>( storage ).subspan( 1 ) };
+	alignas( 8 ) std::array<uint8_t, 65> storage{};
+	arena a{ std::span<uint8_t>( storage ).subspan( 1 ) };
 	void* p = a.allocate( 8, 8 );
-	if ( p == nullptr || reinterpret_cast<std::uintptr_t>( p ) % 8 != 0 )
+	if ( p == nullptr || reinterpret_cast<uintptr_t>( p ) % 8 != 0 )
 		return false;
-	const auto address = reinterpret_cast<std::uintptr_t>( p );
-	const auto first = reinterpret_cast<std::uintptr_t>( storage.data() );
+	const auto address = reinterpret_cast<uintptr_t>( p );
+	const auto first = reinterpret_cast<uintptr_t>( storage.data() );
 	return address >= first + 1 && address + 8 <= first + storage.size();
 }
 
 bool test_arena_full()
 {
-	std::array<std::uint8_t, 16> storage{};
-	arena a{ std::span<std::uint8_t>( storage ) };
+	std::array<uint8_t, 16> storage{};
+	arena a{ std::span<uint8_t>( storage ) };
 	if ( a.allocate( 16, 1 ) == nullptr )
 		return false;
 	if ( a.allocate( 1, 1 ) != nullptr || a.used() != 16 )
@@ -135,8 +135,8 @@ bool test_arena_full()
 
 bool test_arena_overflow()
 {
-	alignas( 8 ) std::array<std::uint8_t, 64> storage{};
-	arena a{ std::span<std::uint8_t>( storage ) };
+	alignas( 8 ) std::array<uint8_t, 64> storage{};
+	arena a{ std::span<uint8_t>( storage ) };
 	if ( a.allocate( SIZE_MAX, 1 ) != nullptr || a.used() != 0 )
 		return false;
 	if ( a.allocate( 1, 1 ) == nullptr )
@@ -154,7 +154,7 @@ static_assert( std::is_trivially_copyable_v<repeated<int, 4>> && std::is_trivial
 static_assert( std::is_trivially_copyable_v<bytes<8>> && std::is_trivially_destructible_v<bytes<8>> );
 static_assert( std::is_trivially_copyable_v<string<8>> && std::is_trivially_destructible_v<string<8>> );
 static_assert( !std::is_constructible_v<string<4>, const char ( & )[6]> );
-static_assert( !std::is_constructible_v<bytes<4>, const std::uint8_t ( & )[5]> );
+static_assert( !std::is_constructible_v<bytes<4>, const uint8_t ( & )[5]> );
 
 } // namespace
 

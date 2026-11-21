@@ -1,13 +1,13 @@
 #include <array>
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/codec.hpp>
 
 // The elements of a fixed-length bytes array are `const`: encode-only.
 struct msg
 {
-	std::array<const std::uint8_t, 6> mac{};
+	std::array<const uint8_t, 6> mac{};
 };
 
 template <>

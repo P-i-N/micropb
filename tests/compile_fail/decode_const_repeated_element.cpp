@@ -1,12 +1,12 @@
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/codec.hpp>
 
 // The elements of a `pb::repeated` are `const`: encode-only.
 struct msg
 {
-	pb::repeated<const std::int32_t, 2> ints;
+	pb::repeated<const int32_t, 2> ints;
 };
 
 template <>

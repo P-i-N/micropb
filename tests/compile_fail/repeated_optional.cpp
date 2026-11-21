@@ -1,12 +1,12 @@
-#include <cstddef>
-#include <cstdint>
 #include <optional>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/codec.hpp>
 
 struct msg
 {
-	pb::repeated<std::optional<std::int32_t>, 2> v;
+	pb::repeated<std::optional<int32_t>, 2> v;
 };
 
 template <>

@@ -1,15 +1,15 @@
-#include <cstddef>
-#include <cstdint>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/micropb.hpp>
 
 // A repeated field in a std::span with a static extent is encode-only.
-constexpr std::int32_t storage[2]{};
+constexpr int32_t storage[2]{};
 
 struct msg
 {
-	std::span<const std::int32_t, 2> ints{ storage };
+	std::span<const int32_t, 2> ints{ storage };
 };
 
 template <>

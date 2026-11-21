@@ -1,8 +1,8 @@
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <optional>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 #include <string_view>
 #include <type_traits>
 #include <variant>
@@ -13,18 +13,18 @@ namespace manual {
 
 struct inner
 {
-	std::int32_t x;
+	int32_t x;
 	std::string_view label;
 };
 
 struct message
 {
-	std::uint32_t id;
+	uint32_t id;
 	pb::repeated<float, 3> values;
 	std::optional<inner> child;
-	std::variant<std::monostate, inner, std::uint32_t> choice;
-	std::array<std::uint8_t, 4> key;
-	std::int32_t delta;
+	std::variant<std::monostate, inner, uint32_t> choice;
+	std::array<uint8_t, 4> key;
+	int32_t delta;
 };
 
 struct empty
@@ -33,7 +33,7 @@ struct empty
 struct shared_offset
 {
 	[[no_unique_address]] empty e;
-	std::variant<std::monostate, std::int32_t, float> choice;
+	std::variant<std::monostate, int32_t, float> choice;
 };
 
 /// Encode only: a `std::array` of a type that is not a byte, and a `const` member.
@@ -46,10 +46,10 @@ struct fixed
 /// `const` members of each kind: encode only.
 struct constants
 {
-	const std::uint32_t id;
-	const std::optional<std::int32_t> maybe;
-	const std::variant<std::monostate, std::uint32_t, float> choice;
-	const pb::repeated<std::uint8_t, 4> data;
+	const uint32_t id;
+	const std::optional<int32_t> maybe;
+	const std::variant<std::monostate, uint32_t, float> choice;
+	const pb::repeated<uint8_t, 4> data;
 	const std::string_view name;
 };
 
@@ -63,7 +63,7 @@ struct spans
 /// Encode only: the element of a span has a `const` member, so it has no default constructor.
 struct const_item
 {
-	const std::int32_t a;
+	const int32_t a;
 };
 
 struct const_items
@@ -74,7 +74,7 @@ struct const_items
 /// A message that contains itself. The codec rejects it (`recursive_message`).
 struct tree
 {
-	std::int32_t id;
+	int32_t id;
 	std::span<const tree> children;
 };
 
@@ -230,7 +230,7 @@ static_assert( layout.entries[0].number == 1 && layout.entries[1].number == 2 &&
                layout.entries[3].number == 4 && layout.entries[4].number == 5 && layout.entries[5].number == 10 &&
                layout.entries[6].number == 11 );
 static_assert( layout.entries[2].offset == offsetof( manual::message, key ) && layout.entries[2].alternative == 0 &&
-               layout.subs[layout.entries[2].sub_idx] == &d::value_descriptor<std::array<std::uint8_t, 4>>::value );
+               layout.subs[layout.entries[2].sub_idx] == &d::value_descriptor<std::array<uint8_t, 4>>::value );
 static_assert( layout.entries[5].offset == offsetof( manual::message, choice ) && layout.entries[5].alternative == 1 &&
                layout.entries[6].alternative == 2 &&
                layout.subs[layout.entries[6].sub_idx] == &d::value_descriptor<decltype( manual::message::choice )>::value );
@@ -249,17 +249,17 @@ static_assert( d::is_recursive<manual::var_node>() && d::is_recursive<manual::va
 static_assert( d::needs_arena<manual::spans>() && !d::needs_arena<manual::message>() &&
                !d::needs_arena<manual::inner>() && !d::needs_arena<manual::empty>() );
 
-template <typename T, std::size_t N>
-bool encodes_to( const T& message, const std::array<std::uint8_t, N>& wire )
+template <typename T, size_t N>
+bool encodes_to( const T& message, const std::array<uint8_t, N>& wire )
 {
-	std::array<std::uint8_t, N> out{};
-	const auto size = pb::encode( message, std::span<std::uint8_t>( out ) );
+	std::array<uint8_t, N> out{};
+	const auto size = pb::encode( message, std::span<uint8_t>( out ) );
 	return pb::encoded_size( message ) == N && size && *size == N && out == wire;
 }
 
 /// `id: 7 values: [1] key: "\001\002\003\004" delta: -1 child { x: 2 } second: 9`, hand-encoded.
 constexpr auto message_wire =
-  std::to_array<std::uint8_t>( { 0x08, 0x07, 0x12, 0x04, 0x00, 0x00, 0x80, 0x3f, 0x1a, 0x04, 0x01,
+  std::to_array<uint8_t>( { 0x08, 0x07, 0x12, 0x04, 0x00, 0x00, 0x80, 0x3f, 0x1a, 0x04, 0x01,
 	                               0x02, 0x03, 0x04, 0x20, 0x01, 0x2a, 0x02, 0x08, 0x02, 0x58, 0x09 } );
 
 bool test_encode()
@@ -267,19 +267,19 @@ bool test_encode()
 	manual::message message{};
 	message.id = 7;
 	message.child = manual::inner{ 2, {} };
-	message.choice = std::uint32_t{ 9 };
+	message.choice = uint32_t{ 9 };
 	message.key = { 1, 2, 3, 4 };
 	message.delta = -1;
 	return message.values.push_back( 1.0f ) && encodes_to( message, message_wire ) &&
-	       encodes_to( manual::empty{}, std::array<std::uint8_t, 0>{} ) &&
-	       encodes_to( manual::inner{ 1, "a" }, std::array<std::uint8_t, 5>{ 0x08, 0x01, 0x12, 0x01, 0x61 } );
+	       encodes_to( manual::empty{}, std::array<uint8_t, 0>{} ) &&
+	       encodes_to( manual::inner{ 1, "a" }, std::array<uint8_t, 5>{ 0x08, 0x01, 0x12, 0x01, 0x61 } );
 }
 
 bool test_decode()
 {
 	manual::message message{};
-	const auto size = pb::decode( std::span<const std::uint8_t>( message_wire ), message );
-	const auto* second = std::get_if<std::uint32_t>( &message.choice );
+	const auto size = pb::decode( std::span<const uint8_t>( message_wire ), message );
+	const auto* second = std::get_if<uint32_t>( &message.choice );
 	return size && *size == message_wire.size() && message.id == 7 && message.values.size() == 1 &&
 	       message.values[0] == 1.0f && message.child && message.child->x == 2 && second && *second == 9 &&
 	       message.key[3] == 4 && message.delta == -1 && encodes_to( message, message_wire );
@@ -288,10 +288,10 @@ bool test_decode()
 /// A different alternative of the oneof: `first { x: 3 label: "b" }`.
 bool test_decode_message_alternative()
 {
-	const auto wire = std::to_array<std::uint8_t>( { 0x1a, 0x00, 0x52, 0x05, 0x08, 0x03, 0x12, 0x01, 0x62 } );
+	const auto wire = std::to_array<uint8_t>( { 0x1a, 0x00, 0x52, 0x05, 0x08, 0x03, 0x12, 0x01, 0x62 } );
 	manual::message message{};
-	message.choice = std::uint32_t{ 1 };
-	const auto size = pb::decode( std::span<const std::uint8_t>( wire ), message );
+	message.choice = uint32_t{ 1 };
+	const auto size = pb::decode( std::span<const uint8_t>( wire ), message );
 	const auto* first = std::get_if<manual::inner>( &message.choice );
 	return size && first && first->x == 3 && first->label == "b";
 }
@@ -301,17 +301,17 @@ bool test_decode_spans()
 {
 	const std::array<manual::inner, 2> items{ manual::inner{ 1, "a" }, { 2, {} } };
 	const std::array<float, 3> values{ 1.0f, -2.5f, 0.0f };
-	std::array<std::uint8_t, 64> wire{};
-	const auto size = pb::encode( manual::spans{ items, values }, std::span<std::uint8_t>( wire ) );
+	std::array<uint8_t, 64> wire{};
+	const auto size = pb::encode( manual::spans{ items, values }, std::span<uint8_t>( wire ) );
 	if ( !size )
 		return false;
 
-	std::array<std::uint8_t, 256> storage{};
+	std::array<uint8_t, 256> storage{};
 	pb::arena memory( storage );
 	manual::spans message{};
-	const auto decoded = pb::decode( std::span<const std::uint8_t>( wire ).first( *size ), message, memory );
-	std::array<std::uint8_t, 64> again{};
-	const auto resized = pb::encode( message, std::span<std::uint8_t>( again ) );
+	const auto decoded = pb::decode( std::span<const uint8_t>( wire ).first( *size ), message, memory );
+	std::array<uint8_t, 64> again{};
+	const auto resized = pb::encode( message, std::span<uint8_t>( again ) );
 	return decoded && *decoded == *size && message.items.size() == 2 && message.items[0].x == 1 &&
 	       message.items[0].label == "a" && message.items[1].x == 2 && message.items[1].label.empty() &&
 	       message.values.size() == 3 && message.values[0] == 1.0f && message.values[1] == -2.5f &&
@@ -322,7 +322,7 @@ bool test_encode_only()
 {
 	const manual::fixed fixed{ { 1.0f, 2.0f }, { 3, {} } };
 	return encodes_to( fixed,
-	                   std::array<std::uint8_t, 14>{
+	                   std::array<uint8_t, 14>{
 	                     0x0a, 0x08, 0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x00, 0x40, 0x12, 0x02, 0x08, 0x03 } );
 }
 
@@ -334,13 +334,13 @@ bool test_const_span_element()
 	const manual::const_item values[2]{ { 1 }, { 2 } };
 	return desc.span->construct == nullptr &&
 	       encodes_to( manual::const_items{ values },
-	                   std::array<std::uint8_t, 8>{ 0x0a, 0x02, 0x08, 0x01, 0x0a, 0x02, 0x08, 0x02 } );
+	                   std::array<uint8_t, 8>{ 0x0a, 0x02, 0x08, 0x01, 0x0a, 0x02, 0x08, 0x02 } );
 }
 
 bool test_const_members()
 {
-	const manual::constants constants{ 7, 3, std::uint32_t{ 9 }, {}, "a" };
-	return encodes_to( constants, std::array<std::uint8_t, 9>{ 0x08, 0x07, 0x10, 0x03, 0x18, 0x09, 0x32, 0x01, 0x61 } );
+	const manual::constants constants{ 7, 3, uint32_t{ 9 }, {}, "a" };
+	return encodes_to( constants, std::array<uint8_t, 9>{ 0x08, 0x07, 0x10, 0x03, 0x18, 0x09, 0x32, 0x01, 0x61 } );
 }
 
 } // namespace

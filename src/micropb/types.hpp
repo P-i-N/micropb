@@ -2,9 +2,9 @@
 
 #include <algorithm>
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 #include <string_view>
 
 namespace pb {
@@ -31,7 +31,7 @@ enum class error
 };
 
 /// Wire types of proto3 that this library supports. It does not support the group types (3, 4).
-enum class wire_type : std::uint8_t
+enum class wire_type : uint8_t
 {
 	VARINT = 0,
 	FIXED64 = 1,
@@ -42,7 +42,7 @@ enum class wire_type : std::uint8_t
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Wire encoding of an integer field, element, optional value or oneof alternative.
-enum class int_encoding : std::uint8_t
+enum class int_encoding : uint8_t
 {
 	VARINT,
 	ZIGZAG,
@@ -55,9 +55,9 @@ enum class int_encoding : std::uint8_t
 /// offset of the member in bytes, the 1-based `std::variant` alternative index
 /// (0 for plain members), and the wire encoding for integer scalars.
 template <typename M,
-          std::uint32_t Number,
-          std::size_t Offset,
-          std::size_t Alternative = 0,
+          uint32_t Number,
+          size_t Offset,
+          size_t Alternative = 0,
           int_encoding Encoding = int_encoding::VARINT>
 struct field_at
 {};
@@ -85,22 +85,22 @@ struct sequence_access;
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Sequence that keeps up to `N` items in the object. Does not allocate.
-template <typename T, std::size_t N>
+template <typename T, size_t N>
 struct repeated
 {
-	static constexpr std::size_t max_size = N;
+	static constexpr size_t max_size = N;
 
 	constexpr repeated() = default;
 
-	template <std::size_t M>
+	template <size_t M>
 		requires( M <= N )
 	constexpr repeated( const T ( &items )[M] ) : _count( M )
 	{
 		std::copy_n( items, M, _items.data() );
 	}
 
-	[[nodiscard]] constexpr std::size_t size() const noexcept { return _count; }
-	[[nodiscard]] constexpr std::size_t capacity() const noexcept { return N; }
+	[[nodiscard]] constexpr size_t size() const noexcept { return _count; }
+	[[nodiscard]] constexpr size_t capacity() const noexcept { return N; }
 	[[nodiscard]] constexpr bool empty() const noexcept { return _count == 0; }
 
 	[[nodiscard]] constexpr T* data() noexcept { return _items.data(); }
@@ -112,8 +112,8 @@ struct repeated
 	[[nodiscard]] constexpr const T* end() const noexcept { return _items.data() + _count; }
 
 	/// `index` must be less than `size()`.
-	[[nodiscard]] constexpr T& operator[]( std::size_t index ) noexcept { return _items[index]; }
-	[[nodiscard]] constexpr const T& operator[]( std::size_t index ) const noexcept { return _items[index]; }
+	[[nodiscard]] constexpr T& operator[]( size_t index ) noexcept { return _items[index]; }
+	[[nodiscard]] constexpr const T& operator[]( size_t index ) const noexcept { return _items[index]; }
 
 	[[nodiscard]] constexpr std::span<T> span() noexcept { return { _items.data(), _count }; }
 	[[nodiscard]] constexpr std::span<const T> span() const noexcept { return { _items.data(), _count }; }
@@ -130,7 +130,7 @@ struct repeated
 
 	constexpr void clear() noexcept { _count = 0; }
 
-	template <std::size_t M>
+	template <size_t M>
 	[[nodiscard]] constexpr bool operator==( const repeated<T, M>& other ) const
 	{
 		return _count == other.size() && std::equal( begin(), end(), other.begin() );
@@ -140,53 +140,53 @@ private:
 	friend struct detail::sequence_access;
 
 	std::array<T, N> _items;
-	std::size_t _count = 0;
+	size_t _count = 0;
 };
 
 /// Byte sequence that keeps up to `N` bytes in the object. Does not allocate.
-template <std::size_t N>
+template <size_t N>
 struct bytes
 {
-	static constexpr std::size_t max_size = N;
+	static constexpr size_t max_size = N;
 
 	constexpr bytes() = default;
 
-	template <std::size_t M>
+	template <size_t M>
 		requires( M <= N )
-	constexpr bytes( const std::uint8_t ( &data )[M] ) noexcept : _count( M )
+	constexpr bytes( const uint8_t ( &data )[M] ) noexcept : _count( M )
 	{
 		std::copy_n( data, M, _items.data() );
 	}
 
-	template <std::size_t M>
+	template <size_t M>
 		requires( M <= N )
-	constexpr bytes( const std::array<std::uint8_t, M>& data ) noexcept : _count( M )
+	constexpr bytes( const std::array<uint8_t, M>& data ) noexcept : _count( M )
 	{
 		std::copy_n( data.data(), M, _items.data() );
 	}
 
-	[[nodiscard]] constexpr std::size_t size() const noexcept { return _count; }
-	[[nodiscard]] constexpr std::size_t capacity() const noexcept { return N; }
+	[[nodiscard]] constexpr size_t size() const noexcept { return _count; }
+	[[nodiscard]] constexpr size_t capacity() const noexcept { return N; }
 	[[nodiscard]] constexpr bool empty() const noexcept { return _count == 0; }
 
-	[[nodiscard]] constexpr std::uint8_t* data() noexcept { return _items.data(); }
-	[[nodiscard]] constexpr const std::uint8_t* data() const noexcept { return _items.data(); }
+	[[nodiscard]] constexpr uint8_t* data() noexcept { return _items.data(); }
+	[[nodiscard]] constexpr const uint8_t* data() const noexcept { return _items.data(); }
 
-	[[nodiscard]] constexpr std::uint8_t* begin() noexcept { return _items.data(); }
-	[[nodiscard]] constexpr std::uint8_t* end() noexcept { return _items.data() + _count; }
-	[[nodiscard]] constexpr const std::uint8_t* begin() const noexcept { return _items.data(); }
-	[[nodiscard]] constexpr const std::uint8_t* end() const noexcept { return _items.data() + _count; }
+	[[nodiscard]] constexpr uint8_t* begin() noexcept { return _items.data(); }
+	[[nodiscard]] constexpr uint8_t* end() noexcept { return _items.data() + _count; }
+	[[nodiscard]] constexpr const uint8_t* begin() const noexcept { return _items.data(); }
+	[[nodiscard]] constexpr const uint8_t* end() const noexcept { return _items.data() + _count; }
 
 	/// `index` must be less than `size()`.
-	[[nodiscard]] constexpr std::uint8_t& operator[]( std::size_t index ) noexcept { return _items[index]; }
-	[[nodiscard]] constexpr const std::uint8_t& operator[]( std::size_t index ) const noexcept { return _items[index]; }
+	[[nodiscard]] constexpr uint8_t& operator[]( size_t index ) noexcept { return _items[index]; }
+	[[nodiscard]] constexpr const uint8_t& operator[]( size_t index ) const noexcept { return _items[index]; }
 
-	[[nodiscard]] constexpr std::span<std::uint8_t> span() noexcept { return { _items.data(), _count }; }
-	[[nodiscard]] constexpr std::span<const std::uint8_t> span() const noexcept { return { _items.data(), _count }; }
-	[[nodiscard]] constexpr operator std::span<const std::uint8_t>() const noexcept { return span(); }
+	[[nodiscard]] constexpr std::span<uint8_t> span() noexcept { return { _items.data(), _count }; }
+	[[nodiscard]] constexpr std::span<const uint8_t> span() const noexcept { return { _items.data(), _count }; }
+	[[nodiscard]] constexpr operator std::span<const uint8_t>() const noexcept { return span(); }
 
 	/// Returns `false` and does not add `byte` when full.
-	[[nodiscard]] constexpr bool push_back( std::uint8_t byte ) noexcept
+	[[nodiscard]] constexpr bool push_back( uint8_t byte ) noexcept
 	{
 		if ( _count == N )
 			return false;
@@ -196,7 +196,7 @@ struct bytes
 	}
 
 	/// Copies `data` into the buffer. Returns `false` without changing the buffer when `data.size() > N`.
-	[[nodiscard]] constexpr bool assign( std::span<const std::uint8_t> data ) noexcept
+	[[nodiscard]] constexpr bool assign( std::span<const uint8_t> data ) noexcept
 	{
 		if ( data.size() > N )
 			return false;
@@ -208,13 +208,13 @@ struct bytes
 
 	constexpr void clear() noexcept { _count = 0; }
 
-	template <std::size_t M>
+	template <size_t M>
 	[[nodiscard]] constexpr bool operator==( const bytes<M>& other ) const noexcept
 	{
 		return _count == other.size() && std::equal( begin(), end(), other.begin() );
 	}
 
-	[[nodiscard]] friend constexpr bool operator==( const bytes& a, std::span<const std::uint8_t> b ) noexcept
+	[[nodiscard]] friend constexpr bool operator==( const bytes& a, std::span<const uint8_t> b ) noexcept
 	{
 		return a.size() == b.size() && std::equal( a.begin(), a.end(), b.begin() );
 	}
@@ -222,15 +222,15 @@ struct bytes
 private:
 	friend struct detail::sequence_access;
 
-	std::array<std::uint8_t, N> _items;
-	std::size_t _count = 0;
+	std::array<uint8_t, N> _items;
+	size_t _count = 0;
 };
 
 /// Null-terminated text that keeps up to `N` bytes (plus a trailing `'\0'`) in the object. Does not allocate.
-template <std::size_t N>
+template <size_t N>
 struct string
 {
-	static constexpr std::size_t max_size = N;
+	static constexpr size_t max_size = N;
 
 	constexpr string() noexcept
 	{
@@ -245,7 +245,7 @@ struct string
 	}
 
 	/// Copies characters from `text` up to the first `'\0'` (at most `M - 1` bytes).
-	template <std::size_t M>
+	template <size_t M>
 		requires( M >= 1 && M - 1 <= N )
 	constexpr string( const char ( &text )[M] ) noexcept
 	{
@@ -254,14 +254,14 @@ struct string
 			_items.fill( '\0' );
 		}
 		const char* stop = std::find( text, text + ( M - 1 ), '\0' );
-		_count = static_cast<std::size_t>( stop - text );
+		_count = static_cast<size_t>( stop - text );
 		std::copy_n( text, _count, _items.data() );
 		_items[_count] = '\0';
 	}
 
-	[[nodiscard]] constexpr std::size_t size() const noexcept { return _count; }
-	[[nodiscard]] constexpr std::size_t length() const noexcept { return _count; }
-	[[nodiscard]] constexpr std::size_t capacity() const noexcept { return N; }
+	[[nodiscard]] constexpr size_t size() const noexcept { return _count; }
+	[[nodiscard]] constexpr size_t length() const noexcept { return _count; }
+	[[nodiscard]] constexpr size_t capacity() const noexcept { return N; }
 	[[nodiscard]] constexpr bool empty() const noexcept { return _count == 0; }
 
 	[[nodiscard]] constexpr const char* c_str() const noexcept { return _items.data(); }
@@ -274,8 +274,8 @@ struct string
 	[[nodiscard]] constexpr const char* end() const noexcept { return _items.data() + _count; }
 
 	/// `index` must be less than `size()`.
-	[[nodiscard]] constexpr char& operator[]( std::size_t index ) noexcept { return _items[index]; }
-	[[nodiscard]] constexpr const char& operator[]( std::size_t index ) const noexcept { return _items[index]; }
+	[[nodiscard]] constexpr char& operator[]( size_t index ) noexcept { return _items[index]; }
+	[[nodiscard]] constexpr const char& operator[]( size_t index ) const noexcept { return _items[index]; }
 
 	[[nodiscard]] constexpr std::string_view view() const noexcept { return { _items.data(), _count }; }
 	[[nodiscard]] constexpr operator std::string_view() const noexcept { return view(); }
@@ -309,7 +309,7 @@ struct string
 		_items[0] = '\0';
 	}
 
-	template <std::size_t M>
+	template <size_t M>
 	[[nodiscard]] constexpr bool operator==( const string<M>& other ) const noexcept
 	{
 		return view() == other.view();
@@ -324,7 +324,7 @@ private:
 	friend struct detail::sequence_access;
 
 	std::array<char, N + 1> _items;
-	std::size_t _count = 0;
+	size_t _count = 0;
 };
 
 /// Memory for the items of repeated fields that `decode` makes. The caller owns
@@ -332,33 +332,33 @@ private:
 /// and never frees one block: `clear()` frees all. Does not allocate.
 struct arena
 {
-	constexpr explicit arena( std::span<std::uint8_t> storage ) : _storage( storage ) {}
+	constexpr explicit arena( std::span<uint8_t> storage ) : _storage( storage ) {}
 
 	/// Bytes that the blocks use, with the padding for alignment.
-	[[nodiscard]] constexpr std::size_t used() const { return _used; }
-	[[nodiscard]] constexpr std::size_t capacity() const { return _storage.size(); }
+	[[nodiscard]] constexpr size_t used() const { return _used; }
+	[[nodiscard]] constexpr size_t capacity() const { return _storage.size(); }
 
 	/// Frees all blocks. Each message that `decode` wrote with this arena is then not valid.
 	constexpr void clear() { _used = 0; }
 
 	/// A block of `size` bytes at a multiple of `alignment`, or null when the
 	/// storage is too small. `alignment` is a power of 2.
-	[[nodiscard]] void* allocate( std::size_t size, std::size_t alignment )
+	[[nodiscard]] void* allocate( size_t size, size_t alignment )
 	{
-		const auto address = reinterpret_cast<std::uintptr_t>( _storage.data() ) + _used;
-		const std::size_t padding = ( ( address + alignment - 1 ) & ~( alignment - 1 ) ) - address;
-		const std::size_t remaining = _storage.size() - _used;
+		const auto address = reinterpret_cast<uintptr_t>( _storage.data() ) + _used;
+		const size_t padding = ( ( address + alignment - 1 ) & ~( alignment - 1 ) ) - address;
+		const size_t remaining = _storage.size() - _used;
 		if ( padding > remaining || size > remaining - padding )
 			return nullptr;
 
-		std::uint8_t* block = _storage.data() + _used + padding;
+		uint8_t* block = _storage.data() + _used + padding;
 		_used += padding + size;
 		return block;
 	}
 
 private:
-	std::span<std::uint8_t> _storage;
-	std::size_t _used = 0;
+	std::span<uint8_t> _storage;
+	size_t _used = 0;
 };
 
 } // namespace pb

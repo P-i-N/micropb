@@ -1,7 +1,7 @@
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <optional>
+#include <stddef.h>
+#include <stdint.h>
 #include <variant>
 
 #include <micropb/micropb.hpp>
@@ -9,7 +9,7 @@
 // Only a `std::variant` member has an alternative index.
 struct msg
 {
-	std::int32_t a;
+	int32_t a;
 };
 
 template <>

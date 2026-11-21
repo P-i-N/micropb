@@ -1,12 +1,12 @@
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 #include <variant>
 
 #include <micropb/codec.hpp>
 
 struct msg
 {
-	std::variant<std::monostate, std::int32_t, float> v;
+	std::variant<std::monostate, int32_t, float> v;
 };
 
 // A `std::variant` member needs one entry for each alternative, with the index 1 or more.

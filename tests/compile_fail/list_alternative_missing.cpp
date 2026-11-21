@@ -1,7 +1,7 @@
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <optional>
+#include <stddef.h>
+#include <stdint.h>
 #include <variant>
 
 #include <micropb/micropb.hpp>
@@ -9,7 +9,7 @@
 // The list has no entry for the alternative 1, so the codec would not see it.
 struct msg
 {
-	std::variant<std::monostate, std::int32_t, float> v;
+	std::variant<std::monostate, int32_t, float> v;
 };
 
 template <>

@@ -1,10 +1,10 @@
 #pragma once
 
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <optional>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 #include <string_view>
 #include <variant>
 
@@ -13,7 +13,7 @@
 /// C++ mirrors of `vectors.proto`. The encode, decode and compatibility tests share them.
 namespace messages {
 
-enum class color : std::int32_t
+enum class color : int32_t
 {
 	NONE,
 	RED,
@@ -23,52 +23,52 @@ enum class color : std::int32_t
 
 struct scalars
 {
-	std::int32_t i32;
-	std::int64_t i64;
-	std::uint32_t u32;
-	std::uint64_t u64;
-	std::int32_t s32;
-	std::int64_t s64;
+	int32_t i32;
+	int64_t i64;
+	uint32_t u32;
+	uint64_t u64;
+	int32_t s32;
+	int64_t s64;
 	bool flag;
 	float f;
 	double d;
-	std::uint32_t fx32;
-	std::uint64_t fx64;
-	std::int32_t sfx32;
-	std::int64_t sfx64;
+	uint32_t fx32;
+	uint64_t fx64;
+	int32_t sfx32;
+	int64_t sfx64;
 	color c;
-	std::int8_t i8;
-	std::uint16_t u16;
+	int8_t i8;
+	uint16_t u16;
 };
 
 struct text
 {
 	std::string_view name;
-	std::span<const std::uint8_t> data;
-	std::array<std::uint8_t, 6> mac;
+	std::span<const uint8_t> data;
+	std::array<uint8_t, 6> mac;
 };
 
 struct inner
 {
-	std::int32_t x;
+	int32_t x;
 	std::string_view label;
 };
 
 struct outer
 {
 	inner child;
-	std::optional<std::int32_t> maybe;
+	std::optional<int32_t> maybe;
 	std::optional<inner> maybe_child;
-	std::int32_t gap;
+	int32_t gap;
 };
 
 struct lists
 {
-	pb::repeated<std::int32_t, 8> ints;
+	pb::repeated<int32_t, 8> ints;
 	pb::repeated<float, 8> floats;
 	pb::repeated<std::string_view, 8> names;
 	pb::repeated<inner, 8> items;
-	pb::repeated<std::int64_t, 8> zz;
+	pb::repeated<int64_t, 8> zz;
 };
 
 struct pose
@@ -79,12 +79,12 @@ struct pose
 
 struct ping
 {
-	std::uint32_t seq;
+	uint32_t seq;
 };
 
 struct envelope
 {
-	std::uint32_t id;
+	uint32_t id;
 	std::variant<std::monostate, pose, ping, text> payload;
 };
 

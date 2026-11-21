@@ -5,11 +5,11 @@
 #include <algorithm>
 #include <array>
 #include <bit>
-#include <cstddef>
-#include <cstdint>
 #include <functional>
 #include <optional>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 #include <string_view>
 #include <variant>
 
@@ -22,14 +22,14 @@ namespace {
 using namespace cases;
 using namespace messages;
 
-template <std::size_t N>
-constexpr std::span<const std::uint8_t> bytes_of( const std::array<std::uint8_t, N>& array )
+template <size_t N>
+constexpr std::span<const uint8_t> bytes_of( const std::array<uint8_t, N>& array )
 {
 	return array;
 }
 
 template <typename T>
-bool fails( std::span<const std::uint8_t> in, error expected )
+bool fails( std::span<const uint8_t> in, error expected )
 {
 	T message{};
 	const auto result = decode( in, message );
@@ -45,8 +45,8 @@ bool same( const scalars& a, const scalars& b )
 {
 	return a.i32 == b.i32 && a.i64 == b.i64 && a.u32 == b.u32 && a.u64 == b.u64 && a.s32 == b.s32 &&
 	       a.s64 == b.s64 && a.flag == b.flag &&
-	       std::bit_cast<std::uint32_t>( a.f ) == std::bit_cast<std::uint32_t>( b.f ) &&
-	       std::bit_cast<std::uint64_t>( a.d ) == std::bit_cast<std::uint64_t>( b.d ) && a.fx32 == b.fx32 &&
+	       std::bit_cast<uint32_t>( a.f ) == std::bit_cast<uint32_t>( b.f ) &&
+	       std::bit_cast<uint64_t>( a.d ) == std::bit_cast<uint64_t>( b.d ) && a.fx32 == b.fx32 &&
 	       a.fx64 == b.fx64 && a.sfx32 == b.sfx32 && a.sfx64 == b.sfx64 && a.c == b.c && a.i8 == b.i8 &&
 	       a.u16 == b.u16;
 }
@@ -64,7 +64,7 @@ bool same( const outer& a, const outer& b )
 
 bool same_bits( float a, float b )
 {
-	return std::bit_cast<std::uint32_t>( a ) == std::bit_cast<std::uint32_t>( b );
+	return std::bit_cast<uint32_t>( a ) == std::bit_cast<uint32_t>( b );
 }
 
 template <typename S, typename F>
@@ -82,8 +82,8 @@ bool same( const lists& a, const lists& b )
 }
 
 /// `decode` reads `in` into a `T` that equals `expected`.
-template <typename T, std::size_t N>
-bool decodes( const std::array<std::uint8_t, N>& in, const T& expected )
+template <typename T, size_t N>
+bool decodes( const std::array<uint8_t, N>& in, const T& expected )
 {
 	T message{};
 	const auto result = decode( bytes_of( in ), message );
@@ -92,14 +92,14 @@ bool decodes( const std::array<std::uint8_t, N>& in, const T& expected )
 
 struct narrow
 {
-	std::int32_t i32;
-	std::int8_t i8;
-	std::uint16_t u16;
+	int32_t i32;
+	int8_t i8;
+	uint16_t u16;
 	bool flag;
-	std::int32_t s32;
+	int32_t s32;
 };
 
-enum class small : std::uint8_t
+enum class small : uint8_t
 {
 	ZERO
 };
@@ -111,12 +111,12 @@ struct small_enum
 
 struct mac_only
 {
-	std::array<std::uint8_t, 6> mac;
+	std::array<uint8_t, 6> mac;
 };
 
 struct blob
 {
-	pb::repeated<std::uint8_t, 4> bytes;
+	pb::repeated<uint8_t, 4> bytes;
 };
 
 struct owned_buffers
@@ -136,13 +136,13 @@ struct pose_owned
 
 struct envelope_owned
 {
-	std::uint32_t id;
+	uint32_t id;
 	std::variant<std::monostate, pose_owned, ping, text> payload;
 };
 
 struct ints_only
 {
-	pb::repeated<std::int32_t, 8> ints;
+	pb::repeated<int32_t, 8> ints;
 };
 
 struct floats_only
@@ -153,7 +153,7 @@ struct floats_only
 /// Repeated fields as spans: `decode` puts their items in a `pb::arena`.
 struct arena_lists
 {
-	std::span<const std::int32_t> ints;
+	std::span<const int32_t> ints;
 	std::span<const std::string_view> names;
 	std::span<const float> floats;
 };
@@ -171,25 +171,25 @@ struct arena_holder
 struct arena_choices
 {
 	std::optional<arena_lists> maybe;
-	std::variant<std::monostate, arena_lists, std::uint32_t> choice;
+	std::variant<std::monostate, arena_lists, uint32_t> choice;
 };
 
 struct arena_aligned
 {
-	std::span<const std::int8_t> small;
+	std::span<const int8_t> small;
 	std::span<const double> wide;
 };
 
 struct byte_lists
 {
-	std::span<const std::span<const std::uint8_t>> blobs;
+	std::span<const std::span<const uint8_t>> blobs;
 };
 
 /// Members with bytes that are not all valid: a `bool`, the flag of a `std::optional`, the index of a `std::variant`.
 struct fragile
 {
-	std::optional<std::int32_t> o;
-	std::variant<std::monostate, std::uint32_t, float> c;
+	std::optional<int32_t> o;
+	std::variant<std::monostate, uint32_t, float> c;
 	bool flag;
 };
 
@@ -319,18 +319,18 @@ static_assert( detail::needs_arena<arena_lists>() && detail::needs_arena<arena_i
                detail::needs_arena<arena_holder>() && detail::needs_arena<arena_choices>() &&
                detail::needs_arena<byte_lists>() );
 
-inline constexpr std::size_t canary_size = 16;
-inline constexpr std::uint8_t canary = 0xA5;
+inline constexpr size_t canary_size = 16;
+inline constexpr uint8_t canary = 0xA5;
 
 /// The bytes in the arena storage before `decode`. The arena tests run with 0x00 and with 0xA5: `decode` must
 /// not read an item that it did not make.
-std::uint8_t arena_fill = 0x00;
+uint8_t arena_fill = 0x00;
 
 /// Storage of a `pb::arena` of `size` bytes, `offset` bytes after an address that is aligned for each type. The
 /// storage holds `arena_fill`. The 16 canary bytes (0xA5) after the arena storage must not change.
 struct guarded
 {
-	explicit guarded( std::size_t size, std::size_t offset = 0 ) : _first( offset ), _size( size )
+	explicit guarded( size_t size, size_t offset = 0 ) : _first( offset ), _size( size )
 	{
 		std::fill_n( _bytes.begin() + offset, size, arena_fill );
 		std::fill_n( _bytes.begin() + offset + size, canary_size, canary );
@@ -341,24 +341,24 @@ struct guarded
 	[[nodiscard]] bool intact() const
 	{
 		const auto* first = _bytes.data() + _first + _size;
-		return std::all_of( first, first + canary_size, []( std::uint8_t b ) { return b == canary; } );
+		return std::all_of( first, first + canary_size, []( uint8_t b ) { return b == canary; } );
 	}
 
 	/// `true` when `data` points into the arena storage.
 	[[nodiscard]] bool holds( const void* data ) const
 	{
-		const auto address = reinterpret_cast<std::uintptr_t>( data );
-		const auto first = reinterpret_cast<std::uintptr_t>( _bytes.data() + _first );
+		const auto address = reinterpret_cast<uintptr_t>( data );
+		const auto first = reinterpret_cast<uintptr_t>( _bytes.data() + _first );
 		return address >= first && address < first + _size;
 	}
 
 private:
-	alignas( std::max_align_t ) std::array<std::uint8_t, 1024> _bytes{};
-	std::size_t _first;
-	std::size_t _size;
+	alignas( max_align_t ) std::array<uint8_t, 1024> _bytes{};
+	size_t _first;
+	size_t _size;
 };
 
-template <typename T, std::size_t N>
+template <typename T, size_t N>
 bool holds_items( std::span<const T> items, const std::array<T, N>& expected )
 {
 	return std::equal( items.begin(), items.end(), expected.begin(), expected.end() );
@@ -367,9 +367,9 @@ bool holds_items( std::span<const T> items, const std::array<T, N>& expected )
 /// Items of the caller, with a value before them that looks like a block capacity.
 struct caller_items
 {
-	std::size_t fake_capacity;
-	std::array<std::int32_t, 2> items;
-	std::array<std::int32_t, 4> after;
+	size_t fake_capacity;
+	std::array<int32_t, 2> items;
+	std::array<int32_t, 4> after;
 };
 
 caller_items caller{ 100, { 10, 11 }, {} };
@@ -377,8 +377,8 @@ caller_items caller{ 100, { 10, 11 }, {} };
 /// Default member initializers: `decode` resets a value that it makes, so they have no effect.
 struct defaulted
 {
-	std::span<const std::int32_t> v{ caller.items };
-	std::int32_t x = 7;
+	std::span<const int32_t> v{ caller.items };
+	int32_t x = 7;
 };
 
 struct defaulted_optional
@@ -388,7 +388,7 @@ struct defaulted_optional
 
 struct defaulted_choice
 {
-	std::variant<std::monostate, defaulted, std::uint32_t> c;
+	std::variant<std::monostate, defaulted, uint32_t> c;
 };
 
 } // namespace
@@ -418,22 +418,22 @@ namespace {
 /// Bytes of one varint field.
 struct varint_field
 {
-	constexpr varint_field( std::uint8_t key, std::uint64_t value )
+	constexpr varint_field( uint8_t key, uint64_t value )
 	{
 		_data[_size++] = key;
 		while ( value >= 0x80 )
 		{
-			_data[_size++] = static_cast<std::uint8_t>( value | 0x80 );
+			_data[_size++] = static_cast<uint8_t>( value | 0x80 );
 			value >>= 7;
 		}
-		_data[_size++] = static_cast<std::uint8_t>( value );
+		_data[_size++] = static_cast<uint8_t>( value );
 	}
 
-	constexpr std::span<const std::uint8_t> span() const { return std::span( _data ).first( _size ); }
+	constexpr std::span<const uint8_t> span() const { return std::span( _data ).first( _size ); }
 
 private:
-	std::array<std::uint8_t, 16> _data{};
-	std::size_t _size = 0;
+	std::array<uint8_t, 16> _data{};
+	size_t _size = 0;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -495,14 +495,14 @@ bool test_reset()
 
 bool test_last_wins()
 {
-	constexpr std::array<std::uint8_t, 4> in{ 0x08, 0x01, 0x08, 0x02 };
+	constexpr std::array<uint8_t, 4> in{ 0x08, 0x01, 0x08, 0x02 };
 	return decodes( in, inner{ 2, {} } );
 }
 
 bool test_merge()
 {
-	constexpr std::array<std::uint8_t, 9> in{ 0x0a, 0x02, 0x08, 0x01, 0x0a, 0x03, 0x12, 0x01, 'a' };
-	constexpr std::array<std::uint8_t, 9> optional_in{ 0x1a, 0x02, 0x08, 0x01, 0x1a, 0x03, 0x12, 0x01, 'a' };
+	constexpr std::array<uint8_t, 9> in{ 0x0a, 0x02, 0x08, 0x01, 0x0a, 0x03, 0x12, 0x01, 'a' };
+	constexpr std::array<uint8_t, 9> optional_in{ 0x1a, 0x02, 0x08, 0x01, 0x1a, 0x03, 0x12, 0x01, 'a' };
 
 	outer merged{};
 	outer merged_optional{};
@@ -514,7 +514,7 @@ bool test_merge()
 
 bool test_unknown_skip()
 {
-	constexpr std::array<std::uint8_t, 2 * 21 + 2> in{ 0x28, 0x01,                            // field 5, varint
+	constexpr std::array<uint8_t, 2 * 21 + 2> in{ 0x28, 0x01,                            // field 5, varint
 	                                                   0x31, 1,    2,   3,   4,   5, 6, 7, 8, // field 6, fixed64
 	                                                   0x3a, 0x03, 'a', 'b', 'c',             // field 7, length-delimited
 	                                                   0x45, 1,    2,   3,   4,               // field 8, fixed32
@@ -530,20 +530,20 @@ bool test_unknown_skip()
 
 bool test_wrong_wire_type()
 {
-	constexpr std::array<std::uint8_t, 5> fixed{ 0x0d, 1, 2, 3, 4 };
-	constexpr std::array<std::uint8_t, 5> as_string{ 0x0a, 0x03, 'a', 'b', 'c' };
+	constexpr std::array<uint8_t, 5> fixed{ 0x0d, 1, 2, 3, 4 };
+	constexpr std::array<uint8_t, 5> as_string{ 0x0a, 0x03, 'a', 'b', 'c' };
 	return decodes( fixed, inner{} ) && decodes( as_string, inner{} );
 }
 
 bool test_wrong_wire_type_optional()
 {
-	constexpr std::array<std::uint8_t, 5> in{ 0x15, 1, 2, 3, 4 };
+	constexpr std::array<uint8_t, 5> in{ 0x15, 1, 2, 3, 4 };
 	return decodes( in, outer{} );
 }
 
 bool test_narrowing()
 {
-	constexpr std::uint64_t wide = ( std::uint64_t{ 1 } << 40 ) + 7;
+	constexpr uint64_t wide = ( uint64_t{ 1 } << 40 ) + 7;
 	narrow a{};
 	narrow b{};
 	narrow c{};
@@ -553,25 +553,25 @@ bool test_narrowing()
 	const bool ok_b = decode( varint_field( 0x10, 300 ).span(), b ).has_value();
 	const bool ok_c = decode( varint_field( 0x18, 70000 ).span(), c ).has_value();
 	const bool ok_d = decode( varint_field( 0x20, 2 ).span(), d ).has_value();
-	const bool ok_e = decode( varint_field( 0x28, ( std::uint64_t{ 3 } << 32 ) + 3 ).span(), e ).has_value();
+	const bool ok_e = decode( varint_field( 0x28, ( uint64_t{ 3 } << 32 ) + 3 ).span(), e ).has_value();
 	return ok_a && a.i32 == 7 && ok_b && b.i8 == 44 && ok_c && c.u16 == 4464 && ok_d && d.flag && ok_e && e.s32 == -2;
 }
 
-/// An enum is `int32` on the wire. The decoder truncates the varint to `std::int32_t`, then converts it to the
-/// enum. 300 becomes 44 in an enum with `std::uint8_t` as its underlying type.
+/// An enum is `int32` on the wire. The decoder truncates the varint to `int32_t`, then converts it to the
+/// enum. 300 becomes 44 in an enum with `uint8_t` as its underlying type.
 bool test_narrow_enum()
 {
 	small_enum message{};
 	const bool ok = decode( varint_field( 0x08, 300 ).span(), message ).has_value();
-	return ok && static_cast<std::uint8_t>( message.e ) == 44;
+	return ok && static_cast<uint8_t>( message.e ) == 44;
 }
 
 bool test_fixed_bytes()
 {
-	constexpr std::array<std::uint8_t, 6> four{ 0x0a, 0x04, 1, 2, 3, 4 };
-	constexpr std::array<std::uint8_t, 9> seven{ 0x0a, 0x07, 1, 2, 3, 4, 5, 6, 7 };
-	constexpr std::array<std::uint8_t, 7> five{ 0x0a, 0x05, 1, 2, 3, 4, 5 };
-	constexpr std::array<std::uint8_t, 6> padded{ 1, 2, 3, 4, 0, 0 };
+	constexpr std::array<uint8_t, 6> four{ 0x0a, 0x04, 1, 2, 3, 4 };
+	constexpr std::array<uint8_t, 9> seven{ 0x0a, 0x07, 1, 2, 3, 4, 5, 6, 7 };
+	constexpr std::array<uint8_t, 7> five{ 0x0a, 0x05, 1, 2, 3, 4, 5 };
+	constexpr std::array<uint8_t, 6> padded{ 1, 2, 3, 4, 0, 0 };
 
 	mac_only message{ { 9, 9, 9, 9, 9, 9 } };
 	const auto result = decode( bytes_of( four ), message );
@@ -581,7 +581,7 @@ bool test_fixed_bytes()
 
 bool test_repeated_bytes()
 {
-	constexpr std::array<std::uint8_t, 6> in{ 0x0a, 0x04, 1, 2, 3, 4 };
+	constexpr std::array<uint8_t, 6> in{ 0x0a, 0x04, 1, 2, 3, 4 };
 	blob message{};
 	const auto result = decode( bytes_of( in ), message );
 	return result && message.bytes.size() == 4 && message.bytes[3] == 4;
@@ -589,13 +589,13 @@ bool test_repeated_bytes()
 
 bool test_errors()
 {
-	constexpr std::array<std::uint8_t, 1> truncated{ 0x08 };
-	constexpr std::array<std::uint8_t, 1> wire_type{ 0x0B };
-	constexpr std::array<std::uint8_t, 1> tag{ 0x00 };
-	constexpr std::array<std::uint8_t, 12> varint{
+	constexpr std::array<uint8_t, 1> truncated{ 0x08 };
+	constexpr std::array<uint8_t, 1> wire_type{ 0x0B };
+	constexpr std::array<uint8_t, 1> tag{ 0x00 };
+	constexpr std::array<uint8_t, 12> varint{
 		0x08, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01
 	};
-	constexpr std::array<std::uint8_t, 3> submessage{ 0x0a, 0x01, 0x08 };
+	constexpr std::array<uint8_t, 3> submessage{ 0x0a, 0x01, 0x08 };
 	return fails<inner>( bytes_of( truncated ), error::TRUNCATED ) &&
 	       fails<inner>( bytes_of( wire_type ), error::INVALID_WIRE_TYPE ) &&
 	       fails<inner>( bytes_of( tag ), error::INVALID_TAG ) &&
@@ -621,7 +621,7 @@ bool same( const envelope_owned& a, const envelope_owned& b )
 	return true;
 }
 
-template <std::size_t N>
+template <size_t N>
 constexpr pb::repeated<float, N> floats_of( const std::array<float, N>& values )
 {
 	return repeated_of<pb::repeated<float, N>>( values );
@@ -669,7 +669,7 @@ bool test_decode_envelope_long()
 
 bool test_unpacked_scalars()
 {
-	constexpr std::array<std::uint8_t, 6> in{ 0x08, 10, 0x08, 20, 0x08, 30 };
+	constexpr std::array<uint8_t, 6> in{ 0x08, 10, 0x08, 20, 0x08, 30 };
 	ints_only message{};
 	const auto result = decode( bytes_of( in ), message );
 	return result && message.ints.size() == 3 && message.ints[0] == 10 && message.ints[1] == 20 && message.ints[2] == 30;
@@ -677,7 +677,7 @@ bool test_unpacked_scalars()
 
 bool test_mixed_packing()
 {
-	constexpr std::array<std::uint8_t, 6> in{ 0x0a, 0x02, 1, 2, 0x08, 3 };
+	constexpr std::array<uint8_t, 6> in{ 0x0a, 0x02, 1, 2, 0x08, 3 };
 	ints_only message{};
 	const auto result = decode( bytes_of( in ), message );
 	return result && message.ints.size() == 3 && message.ints[0] == 1 && message.ints[1] == 2 && message.ints[2] == 3;
@@ -685,10 +685,10 @@ bool test_mixed_packing()
 
 bool test_capacity()
 {
-	constexpr std::array<std::uint8_t, 11> packed{ 0x0a, 9, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
-	constexpr std::array<std::uint8_t, 18> unpacked{ 0x08, 1,    0x08, 2,    0x08, 3,    0x08, 4,    0x08,
+	constexpr std::array<uint8_t, 11> packed{ 0x0a, 9, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+	constexpr std::array<uint8_t, 18> unpacked{ 0x08, 1,    0x08, 2,    0x08, 3,    0x08, 4,    0x08,
 	                                                 5,    0x08, 6,    0x08, 7,    0x08, 8,    0x08, 9 };
-	constexpr std::array<std::uint8_t, 10> eight{ 0x0a, 8, 1, 2, 3, 4, 5, 6, 7, 8 };
+	constexpr std::array<uint8_t, 10> eight{ 0x0a, 8, 1, 2, 3, 4, 5, 6, 7, 8 };
 	ints_only message{};
 	const auto result = decode( bytes_of( eight ), message );
 	return fails<ints_only>( bytes_of( packed ), error::CAPACITY_EXCEEDED ) &&
@@ -697,13 +697,13 @@ bool test_capacity()
 
 bool test_packed_bad_length()
 {
-	constexpr std::array<std::uint8_t, 7> in{ 0x0a, 0x05, 0, 0, 0x80, 0x3f, 0 };
+	constexpr std::array<uint8_t, 7> in{ 0x0a, 0x05, 0, 0, 0x80, 0x3f, 0 };
 	return fails<floats_only>( bytes_of( in ), error::TRUNCATED );
 }
 
 bool test_repeated_wrong_wire_type()
 {
-	constexpr std::array<std::uint8_t, 5> in{ 0x0d, 1, 2, 3, 4 };
+	constexpr std::array<uint8_t, 5> in{ 0x0d, 1, 2, 3, 4 };
 	ints_only message{};
 	const auto result = decode( bytes_of( in ), message );
 	return result && message.ints.empty();
@@ -711,7 +711,7 @@ bool test_repeated_wrong_wire_type()
 
 bool test_repeated_message_no_merge()
 {
-	constexpr std::array<std::uint8_t, 6> in{ 0x22, 0x02, 0x08, 0x01, 0x22, 0x00 };
+	constexpr std::array<uint8_t, 6> in{ 0x22, 0x02, 0x08, 0x01, 0x22, 0x00 };
 	lists message{};
 	const auto result = decode( bytes_of( in ), message );
 	return result && message.items.size() == 2 && message.items[0].x == 1 && message.items[1].x == 0;
@@ -719,7 +719,7 @@ bool test_repeated_message_no_merge()
 
 bool test_oneof_last_wins()
 {
-	std::array<std::uint8_t, 2 + vectors::envelope_pose.size()> in{ 0x1a, 0x00 };
+	std::array<uint8_t, 2 + vectors::envelope_pose.size()> in{ 0x1a, 0x00 };
 	std::copy( vectors::envelope_pose.begin(), vectors::envelope_pose.end(), in.begin() + 2 );
 
 	envelope_owned message{};
@@ -729,7 +729,7 @@ bool test_oneof_last_wins()
 
 bool test_oneof_merge()
 {
-	constexpr std::array<std::uint8_t, 8> in{ 0x1a, 0x02, 0x08, 0x01, 0x1a, 0x00, 0x08, 0x05 };
+	constexpr std::array<uint8_t, 8> in{ 0x1a, 0x02, 0x08, 0x01, 0x1a, 0x00, 0x08, 0x05 };
 	envelope_owned message{};
 	const auto result = decode( bytes_of( in ), message );
 	const auto* active = std::get_if<ping>( &message.payload );
@@ -738,7 +738,7 @@ bool test_oneof_merge()
 
 bool test_oneof_replace()
 {
-	constexpr std::array<std::uint8_t, 10> in{ 0x1a, 0x02, 0x08, 0x07, 0x12, 0x00, 0x1a, 0x00, 0x08, 0x01 };
+	constexpr std::array<uint8_t, 10> in{ 0x1a, 0x02, 0x08, 0x07, 0x12, 0x00, 0x1a, 0x00, 0x08, 0x01 };
 	envelope_owned message{};
 	const auto result = decode( bytes_of( in ), message );
 	const auto* active = std::get_if<ping>( &message.payload );
@@ -747,7 +747,7 @@ bool test_oneof_replace()
 
 bool test_oneof_wrong_wire_type()
 {
-	constexpr std::array<std::uint8_t, 7> in{ 0x1a, 0x00, 0x15, 1, 2, 3, 4 };
+	constexpr std::array<uint8_t, 7> in{ 0x1a, 0x00, 0x15, 1, 2, 3, 4 };
 	envelope_owned message{};
 	const auto result = decode( bytes_of( in ), message );
 	return result && std::holds_alternative<ping>( message.payload );
@@ -756,8 +756,8 @@ bool test_oneof_wrong_wire_type()
 /// The reset before `decode` only sets the count of a sequence to 0. The decoder must reset each new element.
 bool test_reuse_repeated_message()
 {
-	constexpr std::array<std::uint8_t, 7> first{ 0x22, 0x05, 0x08, 0x01, 0x12, 0x01, 'a' };
-	constexpr std::array<std::uint8_t, 2> second{ 0x22, 0x00 };
+	constexpr std::array<uint8_t, 7> first{ 0x22, 0x05, 0x08, 0x01, 0x12, 0x01, 'a' };
+	constexpr std::array<uint8_t, 2> second{ 0x22, 0x00 };
 	lists message{};
 	const auto a = decode( bytes_of( first ), message );
 	const bool filled = a && message.items.size() == 1 && message.items[0].x == 1 && message.items[0].label == "a";
@@ -769,8 +769,8 @@ bool test_reuse_repeated_message()
 /// A second `decode` into the same object does not keep the alternative or its values.
 bool test_reuse_oneof()
 {
-	constexpr std::array<std::uint8_t, 4> first{ 0x1a, 0x02, 0x08, 0x07 };
-	constexpr std::array<std::uint8_t, 2> second{ 0x1a, 0x00 };
+	constexpr std::array<uint8_t, 4> first{ 0x1a, 0x02, 0x08, 0x07 };
+	constexpr std::array<uint8_t, 2> second{ 0x1a, 0x00 };
 	envelope_owned message{};
 	const auto a = decode( bytes_of( first ), message );
 	const auto* seven = std::get_if<ping>( &message.payload );
@@ -780,7 +780,7 @@ bool test_reuse_oneof()
 	const auto* zero = std::get_if<ping>( &message.payload );
 	const bool replaced = b && zero && zero->seq == 0;
 
-	const auto c = decode( std::span<const std::uint8_t>(), message );
+	const auto c = decode( std::span<const uint8_t>(), message );
 	return filled && replaced && c && std::holds_alternative<std::monostate>( message.payload );
 }
 
@@ -790,7 +790,7 @@ struct nothing
 struct holds_nothing
 {
 	nothing n;
-	std::uint32_t x;
+	uint32_t x;
 };
 
 } // namespace
@@ -811,18 +811,18 @@ namespace {
 /// A message type without fields skips all its input.
 bool test_decode_empty_message()
 {
-	constexpr std::array<std::uint8_t, 6> in{ 0x0a, 0x02, 0x08, 0x05, 0x10, 0x01 };
+	constexpr std::array<uint8_t, 6> in{ 0x0a, 0x02, 0x08, 0x05, 0x10, 0x01 };
 	holds_nothing message{};
 	nothing alone{};
-	return decode( bytes_of( in ), message ) && message.x == 1 && decode( std::span<const std::uint8_t>(), alone );
+	return decode( bytes_of( in ), message ) && message.x == 1 && decode( std::span<const uint8_t>(), alone );
 }
 
 /// The decoder examines the capacity before it reads an element.
 bool test_error_order()
 {
-	constexpr std::array<std::uint8_t, 3> bad{ 0x22, 0x01, 0x08 };
-	std::array<std::uint8_t, 8 * 2 + 3> full{};
-	for ( std::size_t i = 0; i < 8; ++i )
+	constexpr std::array<uint8_t, 3> bad{ 0x22, 0x01, 0x08 };
+	std::array<uint8_t, 8 * 2 + 3> full{};
+	for ( size_t i = 0; i < 8; ++i )
 		full[2 * i] = 0x22;
 	std::copy( bad.begin(), bad.end(), full.begin() + 16 );
 	return fails<lists>( bytes_of( bad ), error::TRUNCATED ) &&
@@ -836,14 +836,14 @@ bool test_reuse_resets_each_kind()
 	text words{};
 	const auto a = decode( bytes_of( vectors::text_short ), words );
 	const bool filled = a && words.name == "hi" && !words.data.empty() && words.mac == mac;
-	const auto b = decode( std::span<const std::uint8_t>(), words );
+	const auto b = decode( std::span<const uint8_t>(), words );
 	const bool cleared = b && words.name.empty() && words.data.empty() && words.data.data() == nullptr &&
-	                     words.mac == std::array<std::uint8_t, 6>{};
+	                     words.mac == std::array<uint8_t, 6>{};
 
 	outer nested{};
 	const auto c = decode( bytes_of( vectors::outer_set ), nested );
 	const bool set = c && nested.child.x == 1 && nested.maybe && nested.maybe_child && nested.gap == 3;
-	const auto d = decode( std::span<const std::uint8_t>(), nested );
+	const auto d = decode( std::span<const uint8_t>(), nested );
 	return filled && cleared && set && d && nested.child.x == 0 && !nested.maybe && !nested.maybe_child &&
 	       nested.gap == 0;
 }
@@ -852,17 +852,17 @@ bool test_reuse_resets_each_kind()
 /// that failed.
 bool test_partial_result()
 {
-	constexpr std::array<std::uint8_t, 4> scalar{ 0x08, 0x05, 0x08, 0x80 };
+	constexpr std::array<uint8_t, 4> scalar{ 0x08, 0x05, 0x08, 0x80 };
 	inner one{};
 	const auto a = decode( bytes_of( scalar ), one );
 	const bool kept = !a && a.error() == error::TRUNCATED && one.x == 5;
 
-	constexpr std::array<std::uint8_t, 4> packed{ 0x0a, 0x02, 0x01, 0x80 };
+	constexpr std::array<uint8_t, 4> packed{ 0x0a, 0x02, 0x01, 0x80 };
 	ints_only numbers{};
 	const auto b = decode( bytes_of( packed ), numbers );
 	const bool one_item = !b && b.error() == error::TRUNCATED && numbers.ints.size() == 1 && numbers.ints[0] == 1;
 
-	constexpr std::array<std::uint8_t, 3> element{ 0x22, 0x01, 0x08 };
+	constexpr std::array<uint8_t, 3> element{ 0x22, 0x01, 0x08 };
 	lists messages{};
 	const auto c = decode( bytes_of( element ), messages );
 	return kept && one_item && !c && messages.items.empty();
@@ -871,8 +871,8 @@ bool test_partial_result()
 /// A second occurrence of a fixed-length bytes field replaces the first. A shorter one leaves no old bytes.
 bool test_fixed_bytes_last_wins()
 {
-	constexpr std::array<std::uint8_t, 12> in{ 0x0a, 0x06, 1, 2, 3, 4, 5, 6, 0x0a, 0x02, 9, 9 };
-	constexpr std::array<std::uint8_t, 6> expected{ 9, 9, 0, 0, 0, 0 };
+	constexpr std::array<uint8_t, 12> in{ 0x0a, 0x06, 1, 2, 3, 4, 5, 6, 0x0a, 0x02, 9, 9 };
+	constexpr std::array<uint8_t, 6> expected{ 9, 9, 0, 0, 0, 0 };
 	mac_only message{};
 	return decode( bytes_of( in ), message ) && message.mac == expected;
 }
@@ -881,7 +881,7 @@ bool test_fixed_bytes_last_wins()
 
 /// `ints: [1, 2] names: "a" floats: [1]`
 constexpr auto arena_wire =
-  std::to_array<std::uint8_t>( { 0x0a, 0x02, 0x01, 0x02, 0x12, 0x01, 'a', 0x1a, 0x04, 0x00, 0x00, 0x80, 0x3f } );
+  std::to_array<uint8_t>( { 0x0a, 0x02, 0x01, 0x02, 0x12, 0x01, 'a', 0x1a, 0x04, 0x00, 0x00, 0x80, 0x3f } );
 
 /// An arena of exactly `used()` bytes decodes the message. One byte less is `ARENA_FULL`.
 bool test_arena_exact()
@@ -892,7 +892,7 @@ bool test_arena_exact()
 	if ( !decode( bytes_of( arena_wire ), a, measure ) )
 		return false;
 
-	const std::size_t used = measure.used();
+	const size_t used = measure.used();
 	guarded exact_storage( used );
 	pb::arena exact = exact_storage.memory();
 	arena_lists b{};
@@ -903,7 +903,7 @@ bool test_arena_exact()
 	arena_lists c{};
 	const auto full = decode( bytes_of( arena_wire ), c, small );
 	return fits && *fits == arena_wire.size() && exact.used() == used &&
-	       holds_items( b.ints, std::to_array<std::int32_t>( { 1, 2 } ) ) &&
+	       holds_items( b.ints, std::to_array<int32_t>( { 1, 2 } ) ) &&
 	       holds_items( b.names, std::to_array<std::string_view>( { "a" } ) ) &&
 	       holds_items( b.floats, std::to_array<float>( { 1.0f } ) ) && !full && full.error() == error::ARENA_FULL &&
 	       measure_storage.intact() && exact_storage.intact() && small_storage.intact();
@@ -914,10 +914,10 @@ bool test_arena_exact()
 bool test_arena_mixed_records()
 {
 	// ints: [1, 2] names: "a" ints: 3 names: "" ints: [4] names: "bc" ints: 5
-	constexpr auto in = std::to_array<std::uint8_t>( { 0x0a, 0x02, 0x01, 0x02, 0x12, 0x01, 'a', 0x08, 0x03, 0x12,
+	constexpr auto in = std::to_array<uint8_t>( { 0x0a, 0x02, 0x01, 0x02, 0x12, 0x01, 'a', 0x08, 0x03, 0x12,
 	                                                   0x00, 0x0a, 0x01, 0x04, 0x12, 0x02, 'b', 'c',  0x08, 0x05 } );
 	// ints: [1, 2, 3, 4, 5] names: "a" names: "" names: "bc"
-	constexpr auto sorted = std::to_array<std::uint8_t>(
+	constexpr auto sorted = std::to_array<uint8_t>(
 	  { 0x0a, 0x05, 0x01, 0x02, 0x03, 0x04, 0x05, 0x12, 0x01, 'a', 0x12, 0x00, 0x12, 0x02, 'b', 'c' } );
 
 	guarded storage( 512 );
@@ -930,7 +930,7 @@ bool test_arena_mixed_records()
 	arena_lists one_record{};
 	const auto again = decode( bytes_of( sorted ), one_record, sorted_memory );
 	return result && *result == in.size() &&
-	       holds_items( message.ints, std::to_array<std::int32_t>( { 1, 2, 3, 4, 5 } ) ) &&
+	       holds_items( message.ints, std::to_array<int32_t>( { 1, 2, 3, 4, 5 } ) ) &&
 	       holds_items( message.names, std::to_array<std::string_view>( { "a", "", "bc" } ) ) && message.floats.empty() &&
 	       again && memory.used() == sorted_memory.used() && storage.intact() && sorted_storage.intact();
 }
@@ -939,7 +939,7 @@ bool test_arena_mixed_records()
 bool test_arena_nested_repeated()
 {
 	// items { ints: [1, 2] names: "a" } items { ints: [3] } items { }
-	constexpr auto in = std::to_array<std::uint8_t>(
+	constexpr auto in = std::to_array<uint8_t>(
 	  { 0x0a, 0x07, 0x0a, 0x02, 0x01, 0x02, 0x12, 0x01, 'a', 0x0a, 0x03, 0x0a, 0x01, 0x03, 0x0a, 0x00 } );
 
 	guarded storage( 512 );
@@ -949,12 +949,12 @@ bool test_arena_nested_repeated()
 	if ( !result || message.items.size() != 3 )
 		return false;
 
-	std::array<std::uint8_t, in.size()> out{};
-	const auto encoded = encode( message, std::span<std::uint8_t>( out ) );
+	std::array<uint8_t, in.size()> out{};
+	const auto encoded = encode( message, std::span<uint8_t>( out ) );
 	const arena_lists& first = message.items[0];
-	return holds_items( first.ints, std::to_array<std::int32_t>( { 1, 2 } ) ) &&
+	return holds_items( first.ints, std::to_array<int32_t>( { 1, 2 } ) ) &&
 	       holds_items( first.names, std::to_array<std::string_view>( { "a" } ) ) &&
-	       holds_items( message.items[1].ints, std::to_array<std::int32_t>( { 3 } ) ) && message.items[1].names.empty() &&
+	       holds_items( message.items[1].ints, std::to_array<int32_t>( { 3 } ) ) && message.items[1].names.empty() &&
 	       message.items[2].ints.empty() && storage.holds( first.ints.data() ) && encoded && *encoded == in.size() &&
 	       out == in && storage.intact();
 }
@@ -963,14 +963,14 @@ bool test_arena_nested_repeated()
 bool test_arena_merge()
 {
 	// child { ints: [1, 2] } child { ints: [3] names: "x" }
-	constexpr auto in = std::to_array<std::uint8_t>(
+	constexpr auto in = std::to_array<uint8_t>(
 	  { 0x0a, 0x04, 0x0a, 0x02, 0x01, 0x02, 0x0a, 0x06, 0x0a, 0x01, 0x03, 0x12, 0x01, 'x' } );
 
 	guarded storage( 512 );
 	pb::arena memory = storage.memory();
 	arena_holder message{};
 	const auto result = decode( bytes_of( in ), message, memory );
-	return result && holds_items( message.child.ints, std::to_array<std::int32_t>( { 1, 2, 3 } ) ) &&
+	return result && holds_items( message.child.ints, std::to_array<int32_t>( { 1, 2, 3 } ) ) &&
 	       holds_items( message.child.names, std::to_array<std::string_view>( { "x" } ) ) && storage.intact();
 }
 
@@ -978,7 +978,7 @@ bool test_arena_merge()
 bool test_arena_oneof_and_optional()
 {
 	// maybe { ints: [7] } choice { ints: [8, 9] names: "c" }
-	constexpr auto in = std::to_array<std::uint8_t>(
+	constexpr auto in = std::to_array<uint8_t>(
 	  { 0x0a, 0x03, 0x0a, 0x01, 0x07, 0x12, 0x07, 0x0a, 0x02, 0x08, 0x09, 0x12, 0x01, 'c' } );
 
 	guarded storage( 512 );
@@ -986,8 +986,8 @@ bool test_arena_oneof_and_optional()
 	arena_choices message{};
 	const auto result = decode( bytes_of( in ), message, memory );
 	const auto* chosen = std::get_if<arena_lists>( &message.choice );
-	return result && message.maybe && holds_items( message.maybe->ints, std::to_array<std::int32_t>( { 7 } ) ) &&
-	       chosen && holds_items( chosen->ints, std::to_array<std::int32_t>( { 8, 9 } ) ) &&
+	return result && message.maybe && holds_items( message.maybe->ints, std::to_array<int32_t>( { 7 } ) ) &&
+	       chosen && holds_items( chosen->ints, std::to_array<int32_t>( { 8, 9 } ) ) &&
 	       holds_items( chosen->names, std::to_array<std::string_view>( { "c" } ) ) && storage.intact();
 }
 
@@ -996,15 +996,15 @@ bool test_arena_alignment()
 {
 	// small: [1, 2, 3] wide: [1.5, -2]
 	constexpr auto in =
-	  std::to_array<std::uint8_t>( { 0x0a, 0x03, 0x01, 0x02, 0x03, 0x12, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00,
+	  std::to_array<uint8_t>( { 0x0a, 0x03, 0x01, 0x02, 0x03, 0x12, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00,
 		                               0x00, 0xf8, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0 } );
 
 	guarded storage( 512, 1 );
 	pb::arena memory = storage.memory();
 	arena_aligned message{};
 	const auto result = decode( bytes_of( in ), message, memory );
-	const auto wide = reinterpret_cast<std::uintptr_t>( message.wide.data() );
-	return result && holds_items( message.small, std::to_array<std::int8_t>( { 1, 2, 3 } ) ) &&
+	const auto wide = reinterpret_cast<uintptr_t>( message.wide.data() );
+	return result && holds_items( message.small, std::to_array<int8_t>( { 1, 2, 3 } ) ) &&
 	       holds_items( message.wide, std::to_array<double>( { 1.5, -2.0 } ) ) && wide % alignof( double ) == 0 &&
 	       storage.holds( message.small.data() ) && storage.holds( message.wide.data() ) && storage.intact();
 }
@@ -1013,7 +1013,7 @@ bool test_arena_alignment()
 bool test_arena_byte_lists()
 {
 	// blobs: "abc" blobs: "" blobs: ""
-	constexpr auto in = std::to_array<std::uint8_t>( { 0x0a, 0x03, 'a', 'b', 'c', 0x0a, 0x00, 0x0a, 0x02, 0x01, 0x02 } );
+	constexpr auto in = std::to_array<uint8_t>( { 0x0a, 0x03, 'a', 'b', 'c', 0x0a, 0x00, 0x0a, 0x02, 0x01, 0x02 } );
 
 	guarded storage( 256 );
 	pb::arena memory = storage.memory();
@@ -1024,12 +1024,12 @@ bool test_arena_byte_lists()
 
 	const auto* first = in.data();
 	const auto* last = in.data() + in.size();
-	const auto in_input = [&]( std::span<const std::uint8_t> blob ) {
+	const auto in_input = [&]( std::span<const uint8_t> blob ) {
 		return blob.data() >= first && blob.data() <= last;
 	};
 	const auto& blobs = message.blobs;
-	return holds_items( blobs[0], std::to_array<std::uint8_t>( { 'a', 'b', 'c' } ) ) && blobs[1].empty() &&
-	       holds_items( blobs[2], std::to_array<std::uint8_t>( { 0x01, 0x02 } ) ) && blobs[0].data() == in.data() + 2 &&
+	return holds_items( blobs[0], std::to_array<uint8_t>( { 'a', 'b', 'c' } ) ) && blobs[1].empty() &&
+	       holds_items( blobs[2], std::to_array<uint8_t>( { 0x01, 0x02 } ) ) && blobs[0].data() == in.data() + 2 &&
 	       blobs[2].data() == in.data() + 9 && in_input( blobs[1] ) && storage.holds( blobs.data() ) && storage.intact();
 }
 
@@ -1038,19 +1038,19 @@ bool test_arena_byte_lists()
 bool test_arena_bad_packed()
 {
 	// A block: the capacity, then the items.
-	constexpr auto no_end = std::to_array<std::uint8_t>( { 0x0a, 0x03, 0x01, 0x02, 0x80 } );
-	guarded varint_storage( sizeof( std::size_t ) + 2 * sizeof( std::int32_t ) );
+	constexpr auto no_end = std::to_array<uint8_t>( { 0x0a, 0x03, 0x01, 0x02, 0x80 } );
+	guarded varint_storage( sizeof( size_t ) + 2 * sizeof( int32_t ) );
 	pb::arena varint_memory = varint_storage.memory();
 	arena_lists varints{};
 	const auto a = decode( bytes_of( no_end ), varints, varint_memory );
 
-	constexpr auto six = std::to_array<std::uint8_t>( { 0x1a, 0x06, 0x00, 0x00, 0x80, 0x3f, 0x00, 0x00 } );
-	guarded fixed_storage( sizeof( std::size_t ) + sizeof( float ) );
+	constexpr auto six = std::to_array<uint8_t>( { 0x1a, 0x06, 0x00, 0x00, 0x80, 0x3f, 0x00, 0x00 } );
+	guarded fixed_storage( sizeof( size_t ) + sizeof( float ) );
 	pb::arena fixed_memory = fixed_storage.memory();
 	arena_lists fixed{};
 	const auto b = decode( bytes_of( six ), fixed, fixed_memory );
 
-	return !a && a.error() == error::TRUNCATED && holds_items( varints.ints, std::to_array<std::int32_t>( { 1, 2 } ) ) &&
+	return !a && a.error() == error::TRUNCATED && holds_items( varints.ints, std::to_array<int32_t>( { 1, 2 } ) ) &&
 	       varint_storage.intact() && !b && b.error() == error::TRUNCATED &&
 	       holds_items( fixed.floats, std::to_array<float>( { 1.0f } ) ) && fixed_storage.intact();
 }
@@ -1058,7 +1058,7 @@ bool test_arena_bad_packed()
 /// A packed record whose length is larger than the remaining input is `TRUNCATED`. `decode` takes no block for it.
 bool test_arena_huge_length()
 {
-	constexpr auto in = std::to_array<std::uint8_t>( { 0x0a, 0xff, 0xff, 0xff, 0x0f, 0x01, 0x02, 0x03 } );
+	constexpr auto in = std::to_array<uint8_t>( { 0x0a, 0xff, 0xff, 0xff, 0x0f, 0x01, 0x02, 0x03 } );
 	guarded storage( 512 );
 	pb::arena memory = storage.memory();
 	arena_lists message{};
@@ -1071,9 +1071,9 @@ bool test_arena_huge_length()
 bool test_arena_invalid_varint()
 {
 	constexpr auto varint =
-	  std::to_array<std::uint8_t>( { 0x08, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01 } );
+	  std::to_array<uint8_t>( { 0x08, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01 } );
 	constexpr auto length =
-	  std::to_array<std::uint8_t>( { 0x12, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01 } );
+	  std::to_array<uint8_t>( { 0x12, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01 } );
 	guarded storage( 512 );
 	pb::arena memory = storage.memory();
 	arena_lists a{};
@@ -1087,13 +1087,13 @@ bool test_arena_invalid_varint()
 /// An error in the third element of a span field: the span has the two items before it, in the arena.
 bool test_arena_error_mid_field()
 {
-	constexpr auto in = std::to_array<std::uint8_t>( { 0x08, 0x01, 0x08, 0x02, 0x08, 0x80 } );
+	constexpr auto in = std::to_array<uint8_t>( { 0x08, 0x01, 0x08, 0x02, 0x08, 0x80 } );
 	guarded storage( 512 );
 	pb::arena memory = storage.memory();
 	arena_lists message{};
 	const auto result = decode( bytes_of( in ), message, memory );
 	return !result && result.error() == error::TRUNCATED &&
-	       holds_items( message.ints, std::to_array<std::int32_t>( { 1, 2 } ) ) && storage.holds( message.ints.data() ) &&
+	       holds_items( message.ints, std::to_array<int32_t>( { 1, 2 } ) ) && storage.holds( message.ints.data() ) &&
 	       storage.intact();
 }
 
@@ -1101,19 +1101,19 @@ bool test_arena_error_mid_field()
 bool test_arena_two_messages()
 {
 	// ints: [1, 2]
-	constexpr auto first = std::to_array<std::uint8_t>( { 0x0a, 0x02, 0x01, 0x02 } );
+	constexpr auto first = std::to_array<uint8_t>( { 0x0a, 0x02, 0x01, 0x02 } );
 	// ints: [3, 4] names: "z"
-	constexpr auto second = std::to_array<std::uint8_t>( { 0x0a, 0x02, 0x03, 0x04, 0x12, 0x01, 'z' } );
+	constexpr auto second = std::to_array<uint8_t>( { 0x0a, 0x02, 0x03, 0x04, 0x12, 0x01, 'z' } );
 
 	guarded storage( 512 );
 	pb::arena memory = storage.memory();
 	arena_lists a{};
 	arena_lists b{};
 	const auto ra = decode( bytes_of( first ), a, memory );
-	const std::size_t used = memory.used();
+	const size_t used = memory.used();
 	const auto rb = decode( bytes_of( second ), b, memory );
-	return ra && rb && memory.used() > used && holds_items( a.ints, std::to_array<std::int32_t>( { 1, 2 } ) ) &&
-	       holds_items( b.ints, std::to_array<std::int32_t>( { 3, 4 } ) ) &&
+	return ra && rb && memory.used() > used && holds_items( a.ints, std::to_array<int32_t>( { 1, 2 } ) ) &&
+	       holds_items( b.ints, std::to_array<int32_t>( { 3, 4 } ) ) &&
 	       holds_items( b.names, std::to_array<std::string_view>( { "z" } ) ) && storage.intact();
 }
 
@@ -1121,12 +1121,12 @@ bool test_arena_two_messages()
 bool test_arena_order()
 {
 	// ints: [1, 2, 3] names: "a" names: "b" floats: [1]
-	constexpr auto in_order = std::to_array<std::uint8_t>(
+	constexpr auto in_order = std::to_array<uint8_t>(
 	  { 0x0a, 0x03, 0x01, 0x02, 0x03, 0x12, 0x01, 'a', 0x12, 0x01, 'b', 0x1a, 0x04, 0x00, 0x00, 0x80, 0x3f } );
 	// floats: [1] names: "a" ints: [1, 2, 3] names: "b"
-	constexpr auto reversed = std::to_array<std::uint8_t>(
+	constexpr auto reversed = std::to_array<uint8_t>(
 	  { 0x1a, 0x04, 0x00, 0x00, 0x80, 0x3f, 0x12, 0x01, 'a', 0x0a, 0x03, 0x01, 0x02, 0x03, 0x12, 0x01, 'b' } );
-	constexpr std::size_t blocks = 3;
+	constexpr size_t blocks = 3;
 
 	guarded storage_a( 512 );
 	pb::arena memory_a = storage_a.memory();
@@ -1136,10 +1136,10 @@ bool test_arena_order()
 	arena_lists b{};
 	const auto ra = decode( bytes_of( in_order ), a, memory_a );
 	const auto rb = decode( bytes_of( reversed ), b, memory_b );
-	const std::size_t difference =
+	const size_t difference =
 	  memory_a.used() > memory_b.used() ? memory_a.used() - memory_b.used() : memory_b.used() - memory_a.used();
-	return ra && rb && difference <= blocks * ( alignof( std::max_align_t ) - 1 ) &&
-	       holds_items( b.ints, std::to_array<std::int32_t>( { 1, 2, 3 } ) ) &&
+	return ra && rb && difference <= blocks * ( alignof( max_align_t ) - 1 ) &&
+	       holds_items( b.ints, std::to_array<int32_t>( { 1, 2, 3 } ) ) &&
 	       holds_items( b.names, std::to_array<std::string_view>( { "a", "b" } ) ) &&
 	       holds_items( b.floats, std::to_array<float>( { 1.0f } ) ) && storage_a.intact() && storage_b.intact();
 }
@@ -1148,9 +1148,9 @@ bool test_arena_order()
 bool test_arena_wrong_wire_type()
 {
 	// ints: 5, field 1 as fixed32, ints: 6
-	constexpr auto in = std::to_array<std::uint8_t>( { 0x08, 0x05, 0x0d, 0x01, 0x02, 0x03, 0x04, 0x08, 0x06 } );
+	constexpr auto in = std::to_array<uint8_t>( { 0x08, 0x05, 0x0d, 0x01, 0x02, 0x03, 0x04, 0x08, 0x06 } );
 	// ints: 5 ints: 6
-	constexpr auto without = std::to_array<std::uint8_t>( { 0x08, 0x05, 0x08, 0x06 } );
+	constexpr auto without = std::to_array<uint8_t>( { 0x08, 0x05, 0x08, 0x06 } );
 
 	guarded storage( 512 );
 	pb::arena memory = storage.memory();
@@ -1161,7 +1161,7 @@ bool test_arena_wrong_wire_type()
 	pb::arena without_memory = without_storage.memory();
 	arena_lists expected{};
 	const auto again = decode( bytes_of( without ), expected, without_memory );
-	return result && again && holds_items( message.ints, std::to_array<std::int32_t>( { 5, 6 } ) ) &&
+	return result && again && holds_items( message.ints, std::to_array<int32_t>( { 5, 6 } ) ) &&
 	       memory.used() == without_memory.used() && storage.intact() && without_storage.intact();
 }
 
@@ -1171,7 +1171,7 @@ bool test_arena_wrong_wire_type()
 bool test_arena_new_value_reset()
 {
 	// o { v: [1, 2, 3] }, and c { v: [1, 2, 3] }
-	constexpr auto in = std::to_array<std::uint8_t>( { 0x0a, 0x05, 0x0a, 0x03, 0x01, 0x02, 0x03 } );
+	constexpr auto in = std::to_array<uint8_t>( { 0x0a, 0x05, 0x0a, 0x03, 0x01, 0x02, 0x03 } );
 	guarded storage( 512 );
 	pb::arena memory = storage.memory();
 	defaulted_optional a{};
@@ -1180,11 +1180,11 @@ bool test_arena_new_value_reset()
 	const auto rb = decode( bytes_of( in ), b, memory );
 	const auto* chosen = std::get_if<defaulted>( &b.c );
 
-	const bool caller_unchanged = caller.fake_capacity == 100 && caller.items == std::array<std::int32_t, 2>{ 10, 11 } &&
-	                              caller.after == std::array<std::int32_t, 4>{};
-	return ra && a.o && holds_items( a.o->v, std::to_array<std::int32_t>( { 1, 2, 3 } ) ) &&
+	const bool caller_unchanged = caller.fake_capacity == 100 && caller.items == std::array<int32_t, 2>{ 10, 11 } &&
+	                              caller.after == std::array<int32_t, 4>{};
+	return ra && a.o && holds_items( a.o->v, std::to_array<int32_t>( { 1, 2, 3 } ) ) &&
 	       storage.holds( a.o->v.data() ) && a.o->x == 0 && rb && chosen &&
-	       holds_items( chosen->v, std::to_array<std::int32_t>( { 1, 2, 3 } ) ) && storage.holds( chosen->v.data() ) &&
+	       holds_items( chosen->v, std::to_array<int32_t>( { 1, 2, 3 } ) ) && storage.holds( chosen->v.data() ) &&
 	       chosen->x == 0 && caller_unchanged && storage.intact();
 }
 
@@ -1193,7 +1193,7 @@ bool test_arena_new_items()
 {
 	// items { } items { o: 5 } items { c: 7 flag: true }
 	constexpr auto in =
-	  std::to_array<std::uint8_t>( { 0x0a, 0x00, 0x0a, 0x02, 0x08, 0x05, 0x0a, 0x04, 0x10, 0x07, 0x20, 0x01 } );
+	  std::to_array<uint8_t>( { 0x0a, 0x00, 0x0a, 0x02, 0x08, 0x05, 0x0a, 0x04, 0x10, 0x07, 0x20, 0x01 } );
 	guarded storage( 512 );
 	pb::arena memory = storage.memory();
 	fragile_items message{};
@@ -1203,7 +1203,7 @@ bool test_arena_new_items()
 
 	const fragile& empty = message.items[0];
 	const fragile& with_o = message.items[1];
-	const auto* chosen = std::get_if<std::uint32_t>( &message.items[2].c );
+	const auto* chosen = std::get_if<uint32_t>( &message.items[2].c );
 	return !empty.o && empty.c.index() == 0 && !empty.flag && with_o.o == 5 && with_o.c.index() == 0 && !with_o.flag &&
 	       !message.items[2].o && chosen && *chosen == 7 && message.items[2].flag && storage.intact();
 }
@@ -1212,35 +1212,35 @@ bool test_arena_new_items()
 /// not free the first blocks.
 bool test_arena_reset()
 {
-	constexpr auto in = std::to_array<std::uint8_t>( { 0x0a, 0x04, 0x0a, 0x02, 0x01, 0x02 } );
+	constexpr auto in = std::to_array<uint8_t>( { 0x0a, 0x04, 0x0a, 0x02, 0x01, 0x02 } );
 
 	guarded storage( 512 );
 	pb::arena memory = storage.memory();
 	arena_holder message{};
 	const auto first = decode( bytes_of( in ), message, memory );
-	const bool filled = first && holds_items( message.child.ints, std::to_array<std::int32_t>( { 1, 2 } ) );
-	const std::size_t used = memory.used();
+	const bool filled = first && holds_items( message.child.ints, std::to_array<int32_t>( { 1, 2 } ) );
+	const size_t used = memory.used();
 
-	const auto second = decode( std::span<const std::uint8_t>(), message, memory );
+	const auto second = decode( std::span<const uint8_t>(), message, memory );
 	return filled && second && message.child.ints.empty() && memory.used() == used && storage.intact();
 }
 
 /// An arena of capacity 0 gives `ARENA_FULL` for a span field with one item. A message without items needs no block.
 bool test_arena_no_storage()
 {
-	constexpr auto one = std::to_array<std::uint8_t>( { 0x0a, 0x01, 0x05 } );
+	constexpr auto one = std::to_array<uint8_t>( { 0x0a, 0x01, 0x05 } );
 
 	guarded storage( 0 );
 	pb::arena memory = storage.memory();
 	arena_lists message{};
 	const auto full = decode( bytes_of( one ), message, memory );
-	const auto none = decode( std::span<const std::uint8_t>(), message, memory );
+	const auto none = decode( std::span<const uint8_t>(), message, memory );
 	return !full && full.error() == error::ARENA_FULL && none && message.ints.empty() && memory.used() == 0 &&
 	       storage.intact();
 }
 
 /// The arena tests, with the arena storage filled with `fill` before each `decode`.
-bool test_arena( std::uint8_t fill )
+bool test_arena( uint8_t fill )
 {
 	arena_fill = fill;
 	return test_arena_exact() && test_arena_mixed_records() && test_arena_nested_repeated() && test_arena_merge() &&
@@ -1253,34 +1253,34 @@ bool test_arena( std::uint8_t fill )
 
 /// Temporary scratch arrays cannot bind to `decode` (their spans would dangle).
 template <typename M = arena_lists>
-constexpr bool can_decode_rvalue_scratch = requires( std::span<const std::uint8_t> in, M& m ) {
-	decode( in, m, std::array<std::uint8_t, 64>{} );
+constexpr bool can_decode_rvalue_scratch = requires( std::span<const uint8_t> in, M& m ) {
+	decode( in, m, std::array<uint8_t, 64>{} );
 };
 static_assert( !can_decode_rvalue_scratch<> );
 
 /// `decode` accepts a `std::span`, a C array, or a `std::array` directly in place of `pb::arena`.
 bool test_scratch_overloads()
 {
-	constexpr auto in = std::to_array<std::uint8_t>( { 0x0a, 0x03, 0x01, 0x02, 0x03 } );
+	constexpr auto in = std::to_array<uint8_t>( { 0x0a, 0x03, 0x01, 0x02, 0x03 } );
 
-	std::uint8_t c_array[64]{};
+	uint8_t c_array[64]{};
 	arena_lists from_c{};
 	if ( !decode( bytes_of( in ), from_c, c_array ) ||
-	     !holds_items( from_c.ints, std::to_array<std::int32_t>( { 1, 2, 3 } ) ) )
+	     !holds_items( from_c.ints, std::to_array<int32_t>( { 1, 2, 3 } ) ) )
 		return false;
 
-	std::array<std::uint8_t, 64> std_array{};
+	std::array<uint8_t, 64> std_array{};
 	arena_lists from_std{};
 	if ( !decode( bytes_of( in ), from_std, std_array ) ||
-	     !holds_items( from_std.ints, std::to_array<std::int32_t>( { 1, 2, 3 } ) ) )
+	     !holds_items( from_std.ints, std::to_array<int32_t>( { 1, 2, 3 } ) ) )
 		return false;
 
 	arena_lists from_span{};
-	if ( !decode( bytes_of( in ), from_span, std::span<std::uint8_t>( c_array ) ) ||
-	     !holds_items( from_span.ints, std::to_array<std::int32_t>( { 1, 2, 3 } ) ) )
+	if ( !decode( bytes_of( in ), from_span, std::span<uint8_t>( c_array ) ) ||
+	     !holds_items( from_span.ints, std::to_array<int32_t>( { 1, 2, 3 } ) ) )
 		return false;
 
-	std::uint8_t tiny[4]{};
+	uint8_t tiny[4]{};
 	arena_lists fail_msg{};
 	const auto full = decode( bytes_of( in ), fail_msg, tiny );
 	return !full && full.error() == error::ARENA_FULL;
@@ -1290,14 +1290,14 @@ bool test_scratch_overloads()
 bool test_owned_buffers()
 {
 	owned_buffers tx{ .name = "sensor", .data = { { 1, 2, 3 } }, .tag = "", .labels = { { "a", "bc" } } };
-	std::array<std::uint8_t, 64> wire{};
+	std::array<uint8_t, 64> wire{};
 	const auto written = encode( tx, wire );
 	if ( !written )
 		return false;
 
 	// Mutate rx first to verify reset clears and null-terminates `pb::string` and `pb::bytes`.
 	owned_buffers rx{ .name = "oldval", .data = { { 9, 9, 9, 9 } }, .tag = "abcd", .labels = { { "xxxx" } } };
-	if ( !decode( std::span<const std::uint8_t>( wire ).first( *written ), rx ) )
+	if ( !decode( std::span<const uint8_t>( wire ).first( *written ), rx ) )
 		return false;
 	if ( rx.name != "sensor" || std::string_view( rx.name.c_str() ) != "sensor" || rx.data != tx.data || !rx.tag ||
 	     *rx.tag != "" || rx.tag->c_str()[0] != '\0' || rx.labels.size() != 2 || rx.labels[0] != "a" ||
@@ -1305,12 +1305,12 @@ bool test_owned_buffers()
 		return false;
 
 	// Empty wire input resets `name` to empty with `'\0'` at index 0.
-	if ( !decode( std::span<const std::uint8_t>{}, rx ) || !rx.name.empty() || rx.name.c_str()[0] != '\0' ||
+	if ( !decode( std::span<const uint8_t>{}, rx ) || !rx.name.empty() || rx.name.c_str()[0] != '\0' ||
 	     !rx.data.empty() || rx.tag.has_value() || !rx.labels.empty() )
 		return false;
 
-	constexpr auto long_name = std::to_array<std::uint8_t>( { 0x0a, 0x07, 't', 'o', 'o', 'l', 'o', 'n', 'g' } );
-	constexpr auto long_data = std::to_array<std::uint8_t>( { 0x12, 0x05, 1, 2, 3, 4, 5 } );
+	constexpr auto long_name = std::to_array<uint8_t>( { 0x0a, 0x07, 't', 'o', 'o', 'l', 'o', 'n', 'g' } );
+	constexpr auto long_data = std::to_array<uint8_t>( { 0x12, 0x05, 1, 2, 3, 4, 5 } );
 	return fails<owned_buffers>( long_name, error::CAPACITY_EXCEEDED ) &&
 	       fails<owned_buffers>( long_data, error::CAPACITY_EXCEEDED );
 }
@@ -1318,7 +1318,7 @@ bool test_owned_buffers()
 /// A message with only `pb::repeated` fields decodes without an arena.
 bool test_no_arena_needed()
 {
-	constexpr auto in = std::to_array<std::uint8_t>( { 0x0a, 0x02, 0x01, 0x02 } );
+	constexpr auto in = std::to_array<uint8_t>( { 0x0a, 0x02, 0x01, 0x02 } );
 	ints_only message{};
 	const auto result = decode( bytes_of( in ), message );
 	return result && message.ints.size() == 2 && message.ints[1] == 2;

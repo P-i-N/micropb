@@ -1,14 +1,14 @@
-#include <cstddef>
-#include <cstdint>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/codec.hpp>
 
-constexpr std::uint8_t storage[6]{};
+constexpr uint8_t storage[6]{};
 
 struct msg
 {
-	std::span<const std::uint8_t, 6> mac{ storage };
+	std::span<const uint8_t, 6> mac{ storage };
 };
 
 template <>

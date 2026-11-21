@@ -1,11 +1,11 @@
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/codec.hpp>
 
 struct inner
 {
-	std::int32_t x;
+	int32_t x;
 };
 
 struct msg

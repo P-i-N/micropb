@@ -2,10 +2,10 @@
 
 #include <algorithm>
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <optional>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -19,7 +19,7 @@ namespace pb {
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Category of a member type. It sets how the codec writes and reads the member.
-enum class field_kind : std::uint8_t
+enum class field_kind : uint8_t
 {
 	SCALAR,
 	STRING,
@@ -33,9 +33,9 @@ enum class field_kind : std::uint8_t
 
 namespace detail {
 
-inline constexpr std::uint32_t reserved_first = 19000;
-inline constexpr std::uint32_t reserved_last = 19999;
-inline constexpr std::size_t max_offset = 65535;
+inline constexpr uint32_t reserved_first = 19000;
+inline constexpr uint32_t reserved_last = 19999;
+inline constexpr size_t max_offset = 65535;
 
 template <typename T, typename... U>
 inline constexpr bool is_one_of = ( std::is_same_v<T, U> || ... );
@@ -52,33 +52,33 @@ inline constexpr bool is_variant<std::variant<A...>> = true;
 
 template <typename T>
 inline constexpr bool is_std_array = false;
-template <typename T, std::size_t N>
+template <typename T, size_t N>
 inline constexpr bool is_std_array<std::array<T, N>> = true;
 
 template <typename T>
 inline constexpr bool is_std_span = false;
-template <typename T, std::size_t E>
+template <typename T, size_t E>
 inline constexpr bool is_std_span<std::span<T, E>> = true;
 
 /// A `std::span` with a static extent.
 template <typename T>
 inline constexpr bool is_fixed_span = false;
-template <typename T, std::size_t E>
+template <typename T, size_t E>
 inline constexpr bool is_fixed_span<std::span<T, E>> = E != std::dynamic_extent;
 
 template <typename T>
 inline constexpr bool is_repeated = false;
-template <typename T, std::size_t N>
+template <typename T, size_t N>
 inline constexpr bool is_repeated<repeated<T, N>> = true;
 
 template <typename T>
 inline constexpr bool is_bytes = false;
-template <std::size_t N>
+template <size_t N>
 inline constexpr bool is_bytes<bytes<N>> = true;
 
 template <typename T>
 inline constexpr bool is_string = false;
-template <std::size_t N>
+template <size_t N>
 inline constexpr bool is_string<string<N>> = true;
 
 /// The sequence types: `std::array`, `std::span<const T>`, `pb::repeated` and `pb::bytes`. `element` has no `const`.
@@ -89,40 +89,40 @@ struct sequence_traits
 	static constexpr bool is_sequence = false;
 };
 
-template <typename T, std::size_t N>
+template <typename T, size_t N>
 struct sequence_traits<std::array<T, N>>
 {
 	static constexpr bool is_sequence = true;
-	static constexpr std::size_t capacity = N;
+	static constexpr size_t capacity = N;
 	static constexpr bool is_const_element = std::is_const_v<T>;
 	using element = std::remove_const_t<T>;
 };
 
-template <typename T, std::size_t E>
+template <typename T, size_t E>
 struct sequence_traits<std::span<T, E>>
 {
 	static constexpr bool is_sequence = std::is_const_v<T>;
-	static constexpr std::size_t capacity = 0;
+	static constexpr size_t capacity = 0;
 	static constexpr bool is_const_element = false;
 	using element = std::remove_const_t<T>;
 };
 
-template <typename T, std::size_t N>
+template <typename T, size_t N>
 struct sequence_traits<repeated<T, N>>
 {
 	static constexpr bool is_sequence = true;
-	static constexpr std::size_t capacity = N;
+	static constexpr size_t capacity = N;
 	static constexpr bool is_const_element = std::is_const_v<T>;
 	using element = std::remove_const_t<T>;
 };
 
-template <std::size_t N>
+template <size_t N>
 struct sequence_traits<bytes<N>>
 {
 	static constexpr bool is_sequence = true;
-	static constexpr std::size_t capacity = N;
+	static constexpr size_t capacity = N;
 	static constexpr bool is_const_element = false;
-	using element = std::uint8_t;
+	using element = uint8_t;
 };
 
 /// Element type of a sequence type.
@@ -132,7 +132,7 @@ using element_t = typename sequence_traits<T>::element;
 /// A standard integer type: any integer type by size and sign, but not `bool` and not the character types.
 /// Only the sizes 1, 2, 4 and 8 map to the wire: `__int128`, which `-std=gnu++23` makes integral, does not.
 /// The rule does not accept a volatile-qualified type: the codec reads and writes through `memcpy`, without
-/// `volatile`. `std::int32_t` is `int` on a PC and `long` on `arm-none-eabi`. The rule accepts both.
+/// `volatile`. `int32_t` is `int` on a PC and `long` on `arm-none-eabi`. The rule accepts both.
 template <typename T>
 [[nodiscard]] consteval bool is_standard_integer()
 {
@@ -175,7 +175,7 @@ template <typename T>
 	}
 	else if constexpr ( detail::sequence_traits<T>::is_sequence )
 	{
-		if constexpr ( !std::is_same_v<detail::element_t<T>, std::uint8_t> )
+		if constexpr ( !std::is_same_v<detail::element_t<T>, uint8_t> )
 			return field_kind::REPEATED;
 		else if constexpr ( detail::is_std_array<T> )
 			return field_kind::FIXED_BYTES;
@@ -241,12 +241,10 @@ template <typename T, typename... Fields>
 template <typename T>
 using field_list_of = decltype( list_of( std::declval<const fields_of<T>&>() ) );
 
-template <std::size_t N>
-[[nodiscard]] consteval bool has_number_in( const std::array<std::uint32_t, N>& numbers,
-                                            std::uint32_t first,
-                                            std::uint32_t last )
+template <size_t N>
+[[nodiscard]] consteval bool has_number_in( const std::array<uint32_t, N>& numbers, uint32_t first, uint32_t last )
 {
-	return std::any_of( numbers.begin(), numbers.end(), [&]( std::uint32_t n ) { return n >= first && n <= last; } );
+	return std::any_of( numbers.begin(), numbers.end(), [&]( uint32_t n ) { return n >= first && n <= last; } );
 }
 
 /// Applies the rules for field numbers. `Sorted` is a `std::array` of the numbers in ascending order.
@@ -254,7 +252,7 @@ template <auto Sorted>
 consteval void check_field_numbers()
 {
 	static_assert( !has_number_in( Sorted, 0, 0 ), "pb: tag_zero: field number 0 is not valid" );
-	static_assert( !has_number_in( Sorted, max_field_number + 1, std::uint32_t( -1 ) ),
+	static_assert( !has_number_in( Sorted, max_field_number + 1, uint32_t( -1 ) ),
 	               "pb: tag_too_large: the largest field number is 2^29 - 1" );
 	static_assert( !has_number_in( Sorted, reserved_first, reserved_last ),
 	               "pb: tag_reserved: field numbers 19000 to 19999 are reserved by protobuf" );
@@ -266,7 +264,7 @@ consteval void check_field_numbers()
 /// `std::variant` member has one entry for each alternative after
 /// `std::monostate`, each other member has the alternative 0.
 template <typename M>
-[[nodiscard]] consteval bool is_alternative_valid( std::size_t alternative )
+[[nodiscard]] consteval bool is_alternative_valid( size_t alternative )
 {
 	if constexpr ( is_variant<M> )
 		return alternative >= 1 && alternative < std::variant_size_v<M>;
@@ -280,11 +278,11 @@ inline constexpr char type_mark = 0;
 /// The bytes of one entry of a field list, for the rules that compare entries.
 struct entry_shape
 {
-	std::size_t offset;
-	std::size_t size;
-	std::size_t alternative;
+	size_t offset;
+	size_t size;
+	size_t alternative;
 	/// The number of alternatives of a `std::variant` member, else 0.
-	std::size_t alternatives;
+	size_t alternatives;
 	/// Identity of the member type without `const`.
 	const char* type;
 	/// `true` for an empty struct. An empty struct can share its address with a member of a different type.
@@ -295,9 +293,9 @@ struct entry_shape
 /// different alternatives of one `std::variant` member do not overlap.
 [[nodiscard]] consteval bool entries_overlap( std::span<const entry_shape> entries )
 {
-	for ( std::size_t i = 0; i < entries.size(); ++i )
+	for ( size_t i = 0; i < entries.size(); ++i )
 	{
-		for ( std::size_t j = i + 1; j < entries.size(); ++j )
+		for ( size_t j = i + 1; j < entries.size(); ++j )
 		{
 			const entry_shape& a = entries[i];
 			const entry_shape& b = entries[j];
@@ -330,7 +328,7 @@ struct entry_shape
 		const auto same_member = [&]( const entry_shape& other ) {
 			return other.offset == entry.offset && other.alternative != 0;
 		};
-		const auto count = static_cast<std::size_t>( std::count_if( entries.begin(), entries.end(), same_member ) );
+		const auto count = static_cast<size_t>( std::count_if( entries.begin(), entries.end(), same_member ) );
 		if ( count != entry.alternatives - 1 )
 			return false;
 	}
@@ -338,9 +336,9 @@ struct entry_shape
 }
 
 template <typename M>
-inline constexpr std::size_t alternative_count = 0;
+inline constexpr size_t alternative_count = 0;
 template <typename... A>
-inline constexpr std::size_t alternative_count<std::variant<A...>> = sizeof...( A );
+inline constexpr size_t alternative_count<std::variant<A...>> = sizeof...( A );
 
 /// The alternatives of a `std::variant` type.
 template <typename V>
@@ -350,8 +348,8 @@ template <typename First, typename... More>
 struct variant_traits<std::variant<First, More...>>
 {
 	template <typename A>
-	static constexpr std::size_t count =
-	  ( std::size_t{ std::is_same_v<A, First> } + ... + std::size_t{ std::is_same_v<A, More> } );
+	static constexpr size_t count =
+	  ( size_t{ std::is_same_v<A, First> } + ... + size_t{ std::is_same_v<A, More> } );
 
 	static constexpr bool monostate_first = std::is_same_v<First, std::monostate>;
 	static constexpr bool unique = count<First> == 1 && ( ( count<More> == 1 ) && ... );
@@ -393,7 +391,7 @@ struct encoding_leaf<std::optional<T>>
 };
 
 template <typename S>
-	requires( sequence_traits<S>::is_sequence && !std::is_same_v<element_t<S>, std::uint8_t> )
+	requires( sequence_traits<S>::is_sequence && !std::is_same_v<element_t<S>, uint8_t> )
 struct encoding_leaf<S>
 {
 	using type = element_t<S>;
@@ -414,7 +412,7 @@ consteval void check_leaf_encoding()
 	}
 }
 
-template <typename U, std::size_t Alternative, int_encoding Encoding>
+template <typename U, size_t Alternative, int_encoding Encoding>
 consteval void check_field_encoding()
 {
 	if constexpr ( Encoding != int_encoding::VARINT && is_alternative_valid<U>( Alternative ) )
@@ -432,18 +430,18 @@ struct list_traits;
 
 template <typename T,
           typename... M,
-          std::uint32_t... Number,
-          std::size_t... Offset,
-          std::size_t... Alternative,
+          uint32_t... Number,
+          size_t... Offset,
+          size_t... Alternative,
           int_encoding... Encoding>
 struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative, Encoding>...>>
 {
 	using message = T;
-	static constexpr std::size_t count = sizeof...( M );
+	static constexpr size_t count = sizeof...( M );
 
-	[[nodiscard]] static consteval std::array<std::uint32_t, count> sorted_numbers()
+	[[nodiscard]] static consteval std::array<uint32_t, count> sorted_numbers()
 	{
-		std::array<std::uint32_t, count> numbers{ Number... };
+		std::array<uint32_t, count> numbers{ Number... };
 		std::sort( numbers.begin(), numbers.end() );
 		return numbers;
 	}
@@ -648,9 +646,9 @@ consteval void check_decodable()
 		}
 		else if constexpr ( kind == field_kind::BYTES )
 		{
-			static_assert( !is_std_span<T> || std::is_same_v<T, std::span<const std::uint8_t>>,
+			static_assert( !is_std_span<T> || std::is_same_v<T, std::span<const uint8_t>>,
 			               "pb: decode_fixed_span: a std::span with a static extent is encode-only, "
-			               "use std::span<const std::uint8_t> or std::array to decode" );
+			               "use std::span<const uint8_t> or std::array to decode" );
 			static_assert( !sequence_traits<T>::is_const_element,
 			               "pb: decode_const_member: decode cannot write to a const member" );
 		}

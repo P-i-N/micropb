@@ -1,5 +1,5 @@
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 #include <variant>
 
 #include <micropb/micropb.hpp>
@@ -11,7 +11,7 @@ struct empty
 struct msg
 {
 	[[no_unique_address]] empty e;
-	std::variant<std::monostate, std::int32_t, float> v;
+	std::variant<std::monostate, int32_t, float> v;
 };
 
 template <>

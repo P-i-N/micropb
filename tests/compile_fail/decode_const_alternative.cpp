@@ -1,5 +1,5 @@
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 #include <variant>
 
 #include <micropb/codec.hpp>
@@ -7,7 +7,7 @@
 // An alternative of a `std::variant` is `const`: encode-only.
 struct msg
 {
-	std::variant<std::monostate, const std::int32_t> v;
+	std::variant<std::monostate, const int32_t> v;
 };
 
 template <>

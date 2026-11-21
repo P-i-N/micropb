@@ -1,12 +1,12 @@
-#include <cstddef>
-#include <cstdint>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/codec.hpp>
 
 struct inner
 {
-	std::span<const std::int32_t> ints;
+	std::span<const int32_t> ints;
 };
 
 struct msg

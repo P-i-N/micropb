@@ -18,23 +18,23 @@ This document covers the API rules, proto3-to-C++23 type mapping, `.options` ref
 
 ```cpp
 template <typename T>
-[[nodiscard]] std::size_t pb::encoded_size(const T& msg);
+[[nodiscard]] size_t pb::encoded_size(const T& msg);
 
 template <typename T>
-[[nodiscard]] std::expected<std::size_t, pb::error> pb::encode(
-    const T& msg, std::span<std::uint8_t> out);
+[[nodiscard]] std::expected<size_t, pb::error> pb::encode(
+    const T& msg, std::span<uint8_t> out);
 
 template <typename T>
-[[nodiscard]] std::expected<std::size_t, pb::error> pb::decode(
-    std::span<const std::uint8_t> in, T& msg);
+[[nodiscard]] std::expected<size_t, pb::error> pb::decode(
+    std::span<const uint8_t> in, T& msg);
 
 template <typename T>
-[[nodiscard]] std::expected<std::size_t, pb::error> pb::decode(
-    std::span<const std::uint8_t> in, T& msg, std::span<std::uint8_t> memory);
+[[nodiscard]] std::expected<size_t, pb::error> pb::decode(
+    std::span<const uint8_t> in, T& msg, std::span<uint8_t> memory);
 
 template <typename T>
-[[nodiscard]] std::expected<std::size_t, pb::error> pb::decode(
-    std::span<const std::uint8_t> in, T& msg, pb::arena& memory);
+[[nodiscard]] std::expected<size_t, pb::error> pb::decode(
+    std::span<const uint8_t> in, T& msg, pb::arena& memory);
 ```
 
 ### Encode rules
@@ -362,7 +362,7 @@ if (pb::decode(std::span(wire).first(*n), rx)) {
 | Bounded `repeated T` | `pb::repeated<T, N>` (`push_back`, `size`, `span`, range-`for`) | `pb_size_t x_count; T x[N];` |
 | `optional T` | `std::optional<T>` | `bool has_x; T x;` |
 | `oneof` | `std::variant<std::monostate, A, B>` | `pb_size_t which_x; union { ... } x;` |
-| Error handling | `std::expected<std::size_t, pb::error>` | `bool` + `stream.errmsg` string |
+| Error handling | `std::expected<size_t, pb::error>` | `bool` + `stream.errmsg` string |
 | `.options` file | Same syntax (`max_count`, `max_size`, `max_length`, `fixed_length`, `int_size`) | Native format |
 | Generator dependencies | Python 3 stdlib only + `protoc` | Python 3 + `protobuf` Python package + `protoc` |
 | Streaming I/O & custom callbacks | No (contiguous spans only, no callbacks) | Yes (`pb_istream_t` / `pb_ostream_t`, `pb_callback_t`) |

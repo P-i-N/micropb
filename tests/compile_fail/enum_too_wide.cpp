@@ -1,9 +1,9 @@
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/codec.hpp>
 
-enum class wide : std::int64_t
+enum class wide : int64_t
 {
 	ZERO
 };

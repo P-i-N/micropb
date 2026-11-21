@@ -1,13 +1,13 @@
-#include <cstddef>
-#include <cstdint>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/codec.hpp>
 
 // The arena never calls a destructor, and a merge copies the items with `memcpy`.
 struct item
 {
-	std::int32_t x;
+	int32_t x;
 	~item() {}
 };
 
@@ -25,4 +25,4 @@ struct pb::fields_of<msg> : pb::field_list<msg, pb::field_at<decltype( msg::item
 {};
 
 const msg value{};
-const std::size_t size = pb::encoded_size( value );
+const size_t size = pb::encoded_size( value );

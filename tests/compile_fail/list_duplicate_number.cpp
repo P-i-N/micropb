@@ -1,7 +1,7 @@
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <optional>
+#include <stddef.h>
+#include <stdint.h>
 #include <variant>
 
 #include <micropb/micropb.hpp>
@@ -9,9 +9,9 @@
 // The two entries with the number 5 are not next to each other.
 struct msg
 {
-	std::int32_t a;
-	std::int32_t b;
-	std::int32_t c;
+	int32_t a;
+	int32_t b;
+	int32_t c;
 };
 
 template <>

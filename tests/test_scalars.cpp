@@ -1,13 +1,13 @@
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 #include <type_traits>
 
 #include <micropb/micropb.hpp>
 
 // The standard integer types are accepted by size and sign, so a message with `int` or `long`
-// members works on each target, whatever `std::int32_t` is there.
+// members works on each target, whatever `int32_t` is there.
 
 static_assert( pb::kind_of<signed char>() == pb::field_kind::SCALAR );
 static_assert( pb::kind_of<short>() == pb::field_kind::SCALAR );
@@ -22,13 +22,13 @@ static_assert( pb::wire_type_of<long>() == pb::wire_type::VARINT );
 static_assert( pb::kind_of<pb::repeated<signed char, 4>>() == pb::field_kind::REPEATED ); // not bytes
 static_assert( pb::kind_of<pb::repeated<unsigned char, 4>>() == pb::field_kind::BYTES );
 static_assert( pb::is_packed<signed char>() ); // the element type of a repeated field
-static_assert( pb::wire_type_of<std::int16_t, pb::int_encoding::ZIGZAG>() == pb::wire_type::VARINT );
+static_assert( pb::wire_type_of<int16_t, pb::int_encoding::ZIGZAG>() == pb::wire_type::VARINT );
 
 namespace {
 
 /// The fixed-width type of the same size and sign as `long` and `unsigned long`.
-using long_equivalent = std::conditional_t<sizeof( long ) == 4, std::int32_t, std::int64_t>;
-using ulong_equivalent = std::conditional_t<sizeof( unsigned long ) == 4, std::uint32_t, std::uint64_t>;
+using long_equivalent = std::conditional_t<sizeof( long ) == 4, int32_t, int64_t>;
+using ulong_equivalent = std::conditional_t<sizeof( unsigned long ) == 4, uint32_t, uint64_t>;
 
 struct standard
 {
@@ -43,31 +43,31 @@ struct standard
 
 struct fixed_width
 {
-	std::int32_t a;
+	int32_t a;
 	long_equivalent b;
-	std::uint64_t c;
-	std::int16_t d;
-	std::int8_t e;
-	std::uint32_t f;
+	uint64_t c;
+	int16_t d;
+	int8_t e;
+	uint32_t f;
 	ulong_equivalent g;
 };
 
 struct narrow
 {
-	std::int8_t a;
-	std::int16_t b;
+	int8_t a;
+	int16_t b;
 	int c;
 	long long d;
-	pb::repeated<std::int16_t, 3> e;
+	pb::repeated<int16_t, 3> e;
 };
 
 struct wide
 {
-	std::int32_t a;
-	std::int32_t b;
-	std::int32_t c;
-	std::int64_t d;
-	pb::repeated<std::int32_t, 3> e;
+	int32_t a;
+	int32_t b;
+	int32_t c;
+	int64_t d;
+	pb::repeated<int32_t, 3> e;
 };
 
 } // namespace
@@ -123,17 +123,17 @@ bool test_standard_integers()
 	const standard value{ -1, -123456, 0xFFFF'FFFF'FFFF'FFFFull, -300, -5, 4000000000u, 4000000000ul };
 	const fixed_width twin{ -1, -123456, 0xFFFF'FFFF'FFFF'FFFFull, -300, -5, 4000000000u, 4000000000ul };
 
-	std::array<std::uint8_t, 96> bytes{};
-	std::array<std::uint8_t, 96> twin_bytes{};
-	const auto size = pb::encode( value, std::span<std::uint8_t>( bytes ) );
-	const auto twin_size = pb::encode( twin, std::span<std::uint8_t>( twin_bytes ) );
+	std::array<uint8_t, 96> bytes{};
+	std::array<uint8_t, 96> twin_bytes{};
+	const auto size = pb::encode( value, std::span<uint8_t>( bytes ) );
+	const auto twin_size = pb::encode( twin, std::span<uint8_t>( twin_bytes ) );
 	if ( !size || !twin_size || *size != *twin_size || bytes != twin_bytes )
 		return false;
 	if ( pb::encoded_size( value ) != *size || pb::encoded_size( twin ) != *size )
 		return false;
 
 	standard decoded{};
-	const auto used = pb::decode( std::span<const std::uint8_t>( bytes.data(), *size ), decoded );
+	const auto used = pb::decode( std::span<const uint8_t>( bytes.data(), *size ), decoded );
 	return used && *used == *size && decoded.a == value.a && decoded.b == value.b && decoded.c == value.c &&
 	       decoded.d == value.d && decoded.e == value.e && decoded.f == value.f && decoded.g == value.g;
 }
@@ -142,34 +142,34 @@ bool test_standard_integers()
 bool test_narrow_zigzag()
 {
 	narrow n{};
-	n.a = std::int8_t{ -128 };
-	n.b = std::int16_t{ -32768 };
+	n.a = int8_t{ -128 };
+	n.b = int16_t{ -32768 };
 	n.c = -1;
 	n.d = -5'000'000'000ll;
-	( void )n.e.push_back( std::int16_t{ -1 } );
-	( void )n.e.push_back( std::int16_t{ 0 } );
-	( void )n.e.push_back( std::int16_t{ 32767 } );
+	( void )n.e.push_back( int16_t{ -1 } );
+	( void )n.e.push_back( int16_t{ 0 } );
+	( void )n.e.push_back( int16_t{ 32767 } );
 
 	wide w{};
 	w.a = -128;
 	w.b = -32768;
 	w.c = -1;
-	w.d = std::int64_t{ -5'000'000'000ll };
+	w.d = int64_t{ -5'000'000'000ll };
 	( void )w.e.push_back( -1 );
 	( void )w.e.push_back( 0 );
 	( void )w.e.push_back( 32767 );
 
-	std::array<std::uint8_t, 64> narrow_bytes{};
-	std::array<std::uint8_t, 64> wide_bytes{};
-	const auto narrow_size = pb::encode( n, std::span<std::uint8_t>( narrow_bytes ) );
-	const auto wide_size = pb::encode( w, std::span<std::uint8_t>( wide_bytes ) );
+	std::array<uint8_t, 64> narrow_bytes{};
+	std::array<uint8_t, 64> wide_bytes{};
+	const auto narrow_size = pb::encode( n, std::span<uint8_t>( narrow_bytes ) );
+	const auto wide_size = pb::encode( w, std::span<uint8_t>( wide_bytes ) );
 	if ( !narrow_size || !wide_size || *narrow_size != *wide_size || narrow_bytes != wide_bytes )
 		return false;
 	if ( pb::encoded_size( n ) != *narrow_size || pb::encoded_size( w ) != *wide_size )
 		return false;
 
 	narrow decoded{};
-	const auto used = pb::decode( std::span<const std::uint8_t>( narrow_bytes.data(), *narrow_size ), decoded );
+	const auto used = pb::decode( std::span<const uint8_t>( narrow_bytes.data(), *narrow_size ), decoded );
 	if ( !used || *used != *narrow_size || decoded.a != n.a || decoded.b != n.b || decoded.c != n.c || decoded.d != n.d ||
 	     decoded.e.size() != 3 || decoded.e[0] != -1 || decoded.e[1] != 0 || decoded.e[2] != 32767 )
 		return false;
@@ -177,13 +177,13 @@ bool test_narrow_zigzag()
 	// A value that is too wide for the member loses its upper bits, as for `int32` into 16 bits.
 	wide big{};
 	big.b = 100000;
-	std::array<std::uint8_t, 64> big_bytes{};
-	const auto big_size = pb::encode( big, std::span<std::uint8_t>( big_bytes ) );
+	std::array<uint8_t, 64> big_bytes{};
+	const auto big_size = pb::encode( big, std::span<uint8_t>( big_bytes ) );
 	if ( !big_size )
 		return false;
 	narrow truncated{};
-	const auto truncated_used = pb::decode( std::span<const std::uint8_t>( big_bytes.data(), *big_size ), truncated );
-	return truncated_used && truncated.b == static_cast<std::int16_t>( 100000 );
+	const auto truncated_used = pb::decode( std::span<const uint8_t>( big_bytes.data(), *big_size ), truncated );
+	return truncated_used && truncated.b == static_cast<int16_t>( 100000 );
 }
 
 /// A `sint64` value that does not fit the member. The two decode rules differ here (see the specification):
@@ -193,15 +193,15 @@ bool test_narrow_zigzag()
 /// 2 bytes: ZigZag-decoding 2^32 gives 2^31, whose low 16 bits are 0.
 struct one_sint64
 {
-	std::int64_t a;
+	int64_t a;
 };
 struct one_sint32
 {
-	std::int32_t a;
+	int32_t a;
 };
 struct one_zz16
 {
-	std::int16_t a;
+	int16_t a;
 };
 
 } // namespace
@@ -227,12 +227,12 @@ namespace {
 bool test_out_of_range_sint64()
 {
 	one_sint64 source{};
-	source.a = std::int64_t{ 2147483648 };
-	std::array<std::uint8_t, 16> bytes{};
-	const auto size = pb::encode( source, std::span<std::uint8_t>( bytes ) );
+	source.a = int64_t{ 2147483648 };
+	std::array<uint8_t, 16> bytes{};
+	const auto size = pb::encode( source, std::span<uint8_t>( bytes ) );
 	if ( !size )
 		return false;
-	const std::span<const std::uint8_t> input( bytes.data(), *size );
+	const std::span<const uint8_t> input( bytes.data(), *size );
 
 	one_sint32 four{};
 	four.a = 7;
@@ -241,7 +241,7 @@ bool test_out_of_range_sint64()
 		return false;
 
 	one_zz16 two{};
-	two.a = std::int16_t{ 7 };
+	two.a = int16_t{ 7 };
 	const auto two_used = pb::decode( input, two );
 	return two_used && two.a == 0;
 }

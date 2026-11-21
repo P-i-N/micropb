@@ -1,4 +1,4 @@
-#include <cstddef>
+#include <stddef.h>
 
 #include <micropb/micropb.hpp>
 
@@ -12,7 +12,7 @@ template <>
 struct pb::fields_of<msg> : pb::field_list<msg, pb::field_at<decltype( msg::a ), 1, offsetof( msg, a )>>
 {};
 
-std::size_t size_of_message( const msg& m )
+size_t size_of_message( const msg& m )
 {
 	return pb::encoded_size( m );
 }

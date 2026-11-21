@@ -1,13 +1,13 @@
 #include <array>
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/codec.hpp>
 
 struct msg
 {
-	std::array<std::uint8_t, 70000> big;
-	std::uint32_t after;
+	std::array<uint8_t, 70000> big;
+	uint32_t after;
 };
 
 template <>

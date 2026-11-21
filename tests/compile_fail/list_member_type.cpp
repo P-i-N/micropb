@@ -1,7 +1,7 @@
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <optional>
+#include <stddef.h>
+#include <stdint.h>
 #include <variant>
 
 #include <micropb/micropb.hpp>
@@ -9,7 +9,7 @@
 // A member type rule applies to a field list that a person wrote.
 struct msg
 {
-	std::optional<pb::repeated<std::int32_t, 2>> a;
+	std::optional<pb::repeated<int32_t, 2>> a;
 };
 
 template <>

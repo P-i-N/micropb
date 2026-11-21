@@ -1,5 +1,5 @@
 #include <array>
-#include <cstddef>
+#include <stddef.h>
 
 #include <micropb/codec.hpp>
 

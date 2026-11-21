@@ -1,12 +1,12 @@
-#include <cstddef>
-#include <cstdint>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/codec.hpp>
 
 struct node
 {
-	std::int32_t id;
+	int32_t id;
 	std::span<const node> children;
 };
 
@@ -38,5 +38,5 @@ struct pb::fields_of<a> : pb::field_list<a, pb::field_at<decltype( a::inner ), 1
 
 const node direct{};
 const a indirect{};
-const std::size_t direct_size = pb::encoded_size( direct );
-const std::size_t indirect_size = pb::encoded_size( indirect );
+const size_t direct_size = pb::encoded_size( direct );
+const size_t indirect_size = pb::encoded_size( indirect );

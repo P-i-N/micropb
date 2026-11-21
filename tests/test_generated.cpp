@@ -5,8 +5,9 @@
 #include "vectors/vectors.pb.hpp"
 
 #include <array>
-#include <cstdint>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 #include <string_view>
 #include <type_traits>
 #include <variant>
@@ -20,9 +21,9 @@ namespace {
 namespace gen = micropb::test;
 
 static_assert( sizeof( features::Device_State ) == 1 );
-static_assert( std::is_same_v<decltype( gen::scalars::i8 ), std::int8_t> );
-static_assert( std::is_same_v<decltype( gen::scalars::u16 ), std::uint16_t> );
-static_assert( std::is_same_v<decltype( gen::text::mac ), std::array<std::uint8_t, 6>> );
+static_assert( std::is_same_v<decltype( gen::scalars::i8 ), int8_t> );
+static_assert( std::is_same_v<decltype( gen::scalars::u16 ), uint16_t> );
+static_assert( std::is_same_v<decltype( gen::text::mac ), std::array<uint8_t, 6>> );
 static_assert( std::is_same_v<decltype( gen::lists::names ), pb::repeated<std::string_view, 8>> );
 static_assert(
   std::is_same_v<decltype( gen::envelope::payload ), std::variant<std::monostate, gen::pose, gen::ping, gen::text>> );
@@ -49,19 +50,19 @@ static_assert( same_numbers<gen::scalars, messages::scalars> && same_numbers<gen
                same_numbers<gen::lists, messages::lists> && same_numbers<gen::pose, messages::pose> &&
                same_numbers<gen::ping, messages::ping> && same_numbers<gen::envelope, messages::envelope> );
 
-template <typename T, std::size_t N>
-bool encodes_to( const T& message, const std::array<std::uint8_t, N>& wire )
+template <typename T, size_t N>
+bool encodes_to( const T& message, const std::array<uint8_t, N>& wire )
 {
-	std::array<std::uint8_t, N> out{};
-	const auto size = pb::encode( message, std::span<std::uint8_t>( out ) );
+	std::array<uint8_t, N> out{};
+	const auto size = pb::encode( message, std::span<uint8_t>( out ) );
 	return pb::encoded_size( message ) == N && size && *size == N && out == wire;
 }
 
-template <typename T, std::size_t N>
-bool round_trips( const std::array<std::uint8_t, N>& wire )
+template <typename T, size_t N>
+bool round_trips( const std::array<uint8_t, N>& wire )
 {
 	T message{};
-	const auto decoded = pb::decode( std::span<const std::uint8_t>( wire ), message );
+	const auto decoded = pb::decode( std::span<const uint8_t>( wire ), message );
 	return decoded && *decoded == N && encodes_to( message, wire );
 }
 
@@ -81,13 +82,13 @@ bool test_reference_vectors()
 bool test_reference_values()
 {
 	gen::envelope message{};
-	if ( !pb::decode( std::span<const std::uint8_t>( vectors::envelope_pose ), message ) )
+	if ( !pb::decode( std::span<const uint8_t>( vectors::envelope_pose ), message ) )
 		return false;
 
 	const auto* pose = std::get_if<gen::pose>( &message.payload );
 	gen::scalars values{};
 	return message.id == 2 && pose && pose->pos.size() == 3 && pose->pos[2] == 3 && pose->rot.size() == 4 &&
-	       pose->rot[3] == 1 && pb::decode( std::span<const std::uint8_t>( vectors::scalars_enum_neg ), values ) &&
+	       pose->rot[3] == 1 && pb::decode( std::span<const uint8_t>( vectors::scalars_enum_neg ), values ) &&
 	       values.c == gen::color::NEG;
 }
 
@@ -102,7 +103,7 @@ bool test_field_numbers()
 
 	return encodes_to(
 	  device,
-	  std::array<std::uint8_t, 16>{
+	  std::array<uint8_t, 16>{
 	    0x08, 0x01, 0x1a, 0x00, 0x22, 0x00, 0x50, 0x05, 0xb2, 0x01, 0x02, 0x68, 0x69, 0xd0, 0x01, 0x01 } );
 }
 
@@ -111,7 +112,7 @@ bool test_fixed_arrays()
 {
 	const features::Calibration calibration{ { 1, 2, 3, 4 }, { 1, 2, 3, 4, 5, 6 } };
 
-	return encodes_to( calibration, std::array<std::uint8_t, 26>{ 0x0a, 0x10, 0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x00,
+	return encodes_to( calibration, std::array<uint8_t, 26>{ 0x0a, 0x10, 0x00, 0x00, 0x80, 0x3f, 0x00, 0x00, 0x00,
 	                                                              0x40, 0x00, 0x00, 0x40, 0x40, 0x00, 0x00, 0x80, 0x40,
 	                                                              0x12, 0x06, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06 } );
 }
@@ -120,26 +121,26 @@ bool test_fixed_arrays()
 bool test_views()
 {
 	features::Device_Slot slots[2]{ { 1, {} }, {} };
-	const std::int16_t deltas[]{ -1, 300 };
-	const std::uint8_t blob[]{ 'x', 'y', 'z' };
+	const int16_t deltas[]{ -1, 300 };
+	const uint8_t blob[]{ 'x', 'y', 'z' };
 	features::Report report{ features::Batch{ slots, deltas, blob } };
 
 	return slots[0].key.push_back( 'a' ) && slots[0].key.push_back( 'b' ) &&
 	       encodes_to( report,
-	                   std::array<std::uint8_t, 22>{ 0x12, 0x14, 0x0a, 0x06, 0x08, 0x01, 0x12, 0x02, 0x61, 0x62, 0x0a,
+	                   std::array<uint8_t, 22>{ 0x12, 0x14, 0x0a, 0x06, 0x08, 0x01, 0x12, 0x02, 0x61, 0x62, 0x0a,
 	                                                 0x00, 0x12, 0x03, 0x01, 0xd8, 0x04, 0x1a, 0x03, 0x78, 0x79, 0x7a } );
 }
 
 /// Decodes the bytes of `test_views` into the spans of `Batch`. The items are in the arena.
 bool test_views_decode()
 {
-	constexpr std::array<std::uint8_t, 22> wire{ 0x12, 0x14, 0x0a, 0x06, 0x08, 0x01, 0x12, 0x02, 0x61, 0x62, 0x0a,
+	constexpr std::array<uint8_t, 22> wire{ 0x12, 0x14, 0x0a, 0x06, 0x08, 0x01, 0x12, 0x02, 0x61, 0x62, 0x0a,
 	                                             0x00, 0x12, 0x03, 0x01, 0xd8, 0x04, 0x1a, 0x03, 0x78, 0x79, 0x7a };
-	std::array<std::uint8_t, 256> storage{};
-	pb::arena memory{ std::span<std::uint8_t>( storage ) };
+	std::array<uint8_t, 256> storage{};
+	pb::arena memory{ std::span<uint8_t>( storage ) };
 	features::Report report{};
 
-	const auto decoded = pb::decode( std::span<const std::uint8_t>( wire ), report, memory );
+	const auto decoded = pb::decode( std::span<const uint8_t>( wire ), report, memory );
 	const auto* batch = std::get_if<features::Batch>( &report.body );
 	if ( !decoded || *decoded != wire.size() || !batch || batch->slots.size() != 2 || batch->deltas.size() != 2 ||
 	     batch->blob.size() != 3 )
@@ -155,7 +156,7 @@ bool test_views_decode()
 /// spare { index: 3 } slots { index: 1 key: "ab" } slots {} history: [STATE_BUSY, STATE_IDLE] trims: [-1, 5]
 /// trim_delta: -300 history_delta: [-1, 2, -32768] moved { index: 9 } } slot { key: "k" } origin { x: -4 y: 4 }
 /// unit: UNIT_METER mode: RX_MODE_VARIABLE`
-constexpr auto frame_wire = std::to_array<std::uint8_t>(
+constexpr auto frame_wire = std::to_array<uint8_t>(
   { 0x0a, 0x55, 0x08, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01, 0x10, 0x01, 0x1a, 0x04,
 	  0x08, 0x01, 0x10, 0x02, 0x22, 0x00, 0x50, 0x07, 0x58, 0xd4, 0xfd, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 	  0xff, 0x01, 0x62, 0x00, 0x6a, 0x02, 0x08, 0x03, 0x72, 0x06, 0x08, 0x01, 0x12, 0x02, 0x61, 0x62, 0x72,
@@ -195,7 +196,7 @@ bool test_frame_decode()
 {
 	features::Frame frame{};
 	if ( !round_trips<features::Frame>( frame_wire ) ||
-	     !pb::decode( std::span<const std::uint8_t>( frame_wire ), frame ) )
+	     !pb::decode( std::span<const uint8_t>( frame_wire ), frame ) )
 		return false;
 
 	const features::Device& device = frame.device;
@@ -231,8 +232,8 @@ bool test_names_of_the_library()
 	::detail::reader message{};
 	message.tag.error = 5;
 	return message.repeated.push_back( { 1 } ) &&
-	       encodes_to( message, std::array<std::uint8_t, 8>{ 0x0a, 0x02, 0x08, 0x05, 0x12, 0x02, 0x08, 0x01 } ) &&
-	       round_trips<::detail::reader>( std::array<std::uint8_t, 8>{ 0x0a, 0x02, 0x08, 0x05, 0x12, 0x02, 0x08, 0x01 } );
+	       encodes_to( message, std::array<uint8_t, 8>{ 0x0a, 0x02, 0x08, 0x05, 0x12, 0x02, 0x08, 0x01 } ) &&
+	       round_trips<::detail::reader>( std::array<uint8_t, 8>{ 0x0a, 0x02, 0x08, 0x05, 0x12, 0x02, 0x08, 0x01 } );
 }
 
 } // namespace

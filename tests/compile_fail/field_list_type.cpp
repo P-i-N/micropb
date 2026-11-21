@@ -1,16 +1,16 @@
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/codec.hpp>
 
 struct other
 {
-	std::int32_t a;
+	int32_t a;
 };
 
 struct msg
 {
-	std::int32_t a;
+	int32_t a;
 };
 
 // The list names `other`, but it is the list of `msg`.

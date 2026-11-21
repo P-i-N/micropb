@@ -1,12 +1,12 @@
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 #include <variant>
 
 #include <micropb/codec.hpp>
 
 struct msg
 {
-	std::variant<std::int32_t, float> v;
+	std::variant<int32_t, float> v;
 };
 
 template <>

@@ -1,10 +1,10 @@
 #pragma once
 
 #include <algorithm>
-#include <cstddef>
-#include <cstdint>
 #include <expected>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <micropb/types.hpp>
 
@@ -14,12 +14,12 @@ namespace pb {
 
 namespace detail {
 /// Largest field number of proto3.
-inline constexpr std::uint32_t max_field_number = ( 1u << 29 ) - 1;
+inline constexpr uint32_t max_field_number = ( 1u << 29 ) - 1;
 
 /// Number of bytes that `value` uses as a varint (1 to 10).
-[[nodiscard]] constexpr std::size_t varint_size( std::uint64_t value )
+[[nodiscard]] constexpr size_t varint_size( uint64_t value )
 {
-	std::size_t size = 1;
+	size_t size = 1;
 	while ( value >= 0x80 )
 	{
 		value >>= 7;
@@ -28,24 +28,24 @@ inline constexpr std::uint32_t max_field_number = ( 1u << 29 ) - 1;
 	return size;
 }
 
-[[nodiscard]] constexpr std::uint32_t zigzag_encode( std::int32_t value )
+[[nodiscard]] constexpr uint32_t zigzag_encode( int32_t value )
 {
-	return ( static_cast<std::uint32_t>( value ) << 1 ) ^ static_cast<std::uint32_t>( value >> 31 );
+	return ( static_cast<uint32_t>( value ) << 1 ) ^ static_cast<uint32_t>( value >> 31 );
 }
 
-[[nodiscard]] constexpr std::uint64_t zigzag_encode( std::int64_t value )
+[[nodiscard]] constexpr uint64_t zigzag_encode( int64_t value )
 {
-	return ( static_cast<std::uint64_t>( value ) << 1 ) ^ static_cast<std::uint64_t>( value >> 63 );
+	return ( static_cast<uint64_t>( value ) << 1 ) ^ static_cast<uint64_t>( value >> 63 );
 }
 
-[[nodiscard]] constexpr std::int32_t zigzag_decode( std::uint32_t value )
+[[nodiscard]] constexpr int32_t zigzag_decode( uint32_t value )
 {
-	return static_cast<std::int32_t>( ( value >> 1 ) ^ ( ~( value & 1 ) + 1 ) );
+	return static_cast<int32_t>( ( value >> 1 ) ^ ( ~( value & 1 ) + 1 ) );
 }
 
-[[nodiscard]] constexpr std::int64_t zigzag_decode( std::uint64_t value )
+[[nodiscard]] constexpr int64_t zigzag_decode( uint64_t value )
 {
-	return static_cast<std::int64_t>( ( value >> 1 ) ^ ( ~( value & 1 ) + 1 ) );
+	return static_cast<int64_t>( ( value >> 1 ) ^ ( ~( value & 1 ) + 1 ) );
 }
 
 } // namespace detail
@@ -55,7 +55,7 @@ inline constexpr std::uint32_t max_field_number = ( 1u << 29 ) - 1;
 /// Field number and wire type of one field in the encoded stream.
 struct field_key
 {
-	std::uint32_t number;
+	uint32_t number;
 	wire_type type;
 };
 
@@ -68,24 +68,24 @@ struct field_key
 struct writer
 {
 	constexpr writer() = default;
-	constexpr explicit writer( std::span<std::uint8_t> out ) : _out( out ) {}
+	constexpr explicit writer( std::span<uint8_t> out ) : _out( out ) {}
 
-	constexpr void write_varint( std::uint64_t value )
+	constexpr void write_varint( uint64_t value )
 	{
 		while ( value >= 0x80 )
 		{
-			put( static_cast<std::uint8_t>( value | 0x80 ) );
+			put( static_cast<uint8_t>( value | 0x80 ) );
 			value >>= 7;
 		}
-		put( static_cast<std::uint8_t>( value ) );
+		put( static_cast<uint8_t>( value ) );
 	}
 
-	constexpr void write_fixed32( std::uint32_t value ) { write_le( value, 4 ); }
+	constexpr void write_fixed32( uint32_t value ) { write_le( value, 4 ); }
 
-	constexpr void write_fixed64( std::uint64_t value ) { write_le( value, 8 ); }
+	constexpr void write_fixed64( uint64_t value ) { write_le( value, 8 ); }
 
 	/// Writes all items of `bytes`, or none of them when they do not all fit.
-	/// `bytes` is a contiguous range of `std::uint8_t` or `char`.
+	/// `bytes` is a contiguous range of `uint8_t` or `char`.
 	template <typename B>
 	constexpr void write_bytes( const B& bytes )
 	{
@@ -94,16 +94,16 @@ struct writer
 		advance( bytes.size() );
 	}
 
-	constexpr void write_key( std::uint32_t number, wire_type type )
+	constexpr void write_key( uint32_t number, wire_type type )
 	{
-		write_varint( ( static_cast<std::uint64_t>( number ) << 3 ) | static_cast<std::uint64_t>( type ) );
+		write_varint( ( static_cast<uint64_t>( number ) << 3 ) | static_cast<uint64_t>( type ) );
 	}
 
 	/// Counts `count` bytes and writes nothing. The count stops at the largest
-	/// `std::size_t`: a size that is too large for the type never fits.
-	constexpr void advance( std::size_t count )
+	/// `size_t`: a size that is too large for the type never fits.
+	constexpr void advance( size_t count )
 	{
-		constexpr std::size_t limit = std::size_t( -1 );
+		constexpr size_t limit = size_t( -1 );
 		_pos = count > limit - _pos ? limit : _pos + count;
 	}
 
@@ -112,26 +112,26 @@ struct writer
 
 	/// Number of bytes that the output needs. It is the number of bytes that
 	/// the writer wrote only when `fits()` is `true`.
-	[[nodiscard]] constexpr std::size_t size() const { return _pos; }
+	[[nodiscard]] constexpr size_t size() const { return _pos; }
 
 	[[nodiscard]] constexpr bool fits() const { return _pos <= _out.size(); }
 
 private:
-	constexpr void put( std::uint8_t byte )
+	constexpr void put( uint8_t byte )
 	{
 		if ( _pos < _out.size() )
 			_out[_pos] = byte;
 		advance( 1 );
 	}
 
-	constexpr void write_le( std::uint64_t value, std::size_t count )
+	constexpr void write_le( uint64_t value, size_t count )
 	{
-		for ( std::size_t i = 0; i < count; ++i )
-			put( static_cast<std::uint8_t>( value >> ( 8 * i ) ) );
+		for ( size_t i = 0; i < count; ++i )
+			put( static_cast<uint8_t>( value >> ( 8 * i ) ) );
 	}
 
-	std::span<std::uint8_t> _out;
-	std::size_t _pos = 0;
+	std::span<uint8_t> _out;
+	size_t _pos = 0;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -145,14 +145,14 @@ private:
 struct reader
 {
 	/// Largest field number of proto3.
-	static constexpr std::uint32_t max_field_number = detail::max_field_number;
+	static constexpr uint32_t max_field_number = detail::max_field_number;
 
-	constexpr explicit reader( std::span<const std::uint8_t> in ) : _in( in ) {}
+	constexpr explicit reader( std::span<const uint8_t> in ) : _in( in ) {}
 
-	[[nodiscard]] constexpr std::uint64_t read_varint()
+	[[nodiscard]] constexpr uint64_t read_varint()
 	{
-		std::uint64_t value = 0;
-		for ( std::size_t i = 0; i < 10; ++i )
+		uint64_t value = 0;
+		for ( size_t i = 0; i < 10; ++i )
 		{
 			if ( _pos + i >= _in.size() )
 			{
@@ -160,11 +160,11 @@ struct reader
 				return 0;
 			}
 
-			const std::uint8_t byte = _in[_pos + i];
+			const uint8_t byte = _in[_pos + i];
 			if ( i == 9 && byte > 1 )
 				break;
 
-			value |= static_cast<std::uint64_t>( byte & 0x7F ) << ( 7 * i );
+			value |= static_cast<uint64_t>( byte & 0x7F ) << ( 7 * i );
 			if ( ( byte & 0x80 ) == 0 )
 			{
 				_pos += i + 1;
@@ -175,24 +175,24 @@ struct reader
 		return 0;
 	}
 
-	[[nodiscard]] constexpr std::uint32_t read_fixed32() { return static_cast<std::uint32_t>( read_le( 4 ) ); }
+	[[nodiscard]] constexpr uint32_t read_fixed32() { return static_cast<uint32_t>( read_le( 4 ) ); }
 
-	[[nodiscard]] constexpr std::uint64_t read_fixed64() { return read_le( 8 ); }
+	[[nodiscard]] constexpr uint64_t read_fixed64() { return read_le( 8 ); }
 
 	/// Returns a view into the input. Does not copy.
-	[[nodiscard]] constexpr std::span<const std::uint8_t> read_length_delimited()
+	[[nodiscard]] constexpr std::span<const uint8_t> read_length_delimited()
 	{
 		// The comparison with the remaining bytes comes before an addition, so it
 		// cannot overflow. After a failed `read_varint`, the length is 0 and no
 		// bytes remain.
-		const std::uint64_t length = read_varint();
+		const uint64_t length = read_varint();
 		if ( length > remaining() )
 		{
 			fail( error::TRUNCATED );
 			return {};
 		}
 
-		const auto bytes = _in.subspan( _pos, static_cast<std::size_t>( length ) );
+		const auto bytes = _in.subspan( _pos, static_cast<size_t>( length ) );
 		_pos += bytes.size();
 		return bytes;
 	}
@@ -200,12 +200,12 @@ struct reader
 	/// The key is valid only when `failed()` is `false` after the call.
 	[[nodiscard]] constexpr field_key read_key()
 	{
-		const std::uint64_t key = read_varint();
+		const uint64_t key = read_varint();
 		if ( _failed )
 			return {};
 
-		const std::uint64_t number = key >> 3;
-		const auto type = static_cast<std::uint8_t>( key & 7 );
+		const uint64_t number = key >> 3;
+		const auto type = static_cast<uint8_t>( key & 7 );
 		if ( number == 0 || number > max_field_number )
 		{
 			fail( error::INVALID_TAG );
@@ -216,7 +216,7 @@ struct reader
 			fail( error::INVALID_WIRE_TYPE );
 			return {};
 		}
-		return { static_cast<std::uint32_t>( number ), static_cast<wire_type>( type ) };
+		return { static_cast<uint32_t>( number ), static_cast<wire_type>( type ) };
 	}
 
 	constexpr void skip( wire_type type )
@@ -259,9 +259,9 @@ struct reader
 	[[nodiscard]] constexpr bool empty() const { return _pos == _in.size(); }
 
 private:
-	[[nodiscard]] constexpr std::size_t remaining() const { return _in.size() - _pos; }
+	[[nodiscard]] constexpr size_t remaining() const { return _in.size() - _pos; }
 
-	[[nodiscard]] constexpr std::uint64_t read_le( std::size_t count )
+	[[nodiscard]] constexpr uint64_t read_le( size_t count )
 	{
 		if ( remaining() < count )
 		{
@@ -269,15 +269,15 @@ private:
 			return 0;
 		}
 
-		std::uint64_t value = 0;
-		for ( std::size_t i = 0; i < count; ++i )
-			value |= static_cast<std::uint64_t>( _in[_pos + i] ) << ( 8 * i );
+		uint64_t value = 0;
+		for ( size_t i = 0; i < count; ++i )
+			value |= static_cast<uint64_t>( _in[_pos + i] ) << ( 8 * i );
 		_pos += count;
 		return value;
 	}
 
-	std::span<const std::uint8_t> _in;
-	std::size_t _pos = 0;
+	std::span<const uint8_t> _in;
+	size_t _pos = 0;
 	error _error{};
 	bool _failed = false;
 };
