@@ -267,7 +267,26 @@ class OptionsTest(unittest.TestCase):
         text = header("message m { bytes a = 1; bytes b = 2; bytes c = 3; }",
                       "m.a max_size:16\nm.b max_size:6 fixed_length:true\n")
         self.assertEqual(members(text, "m"), [
-            "pb::repeated<uint8_t, 16> a;", "std::array<uint8_t, 6> b;", "std::span<const uint8_t> c;"])
+            "pb::bytes<16> a;", "std::array<uint8_t, 6> b;", "std::span<const uint8_t> c;"])
+
+    def test_string_max_length_and_max_size(self):
+        text = header("message m { string a = 1; string b = 2; string c = 3; string d = 4; }",
+                      "m.a max_length:15\nm.b max_size:16\nm.c max_size:1\n")
+        self.assertEqual(members(text, "m"), [
+            "pb::string<15> a;", "pb::string<15> b;", "pb::string<0> c;", "std::string_view d;"])
+
+    def test_string_max_length_and_max_size_override_across_lines(self):
+        text = header("message m { string a = 1; string b = 2; }",
+                      "* max_size:32\nm.a max_length:10\n")
+        self.assertEqual(members(text, "m"), ["pb::string<10> a;", "pb::string<31> b;"])
+        text = header("message m { string a = 1; }", "m.a max_length:10\n* max_size:32\n")
+        self.assertEqual(members(text, "m"), ["pb::string<31> a;"])
+
+    def test_repeated_sized_bytes_and_strings(self):
+        text = header("message m { repeated bytes a = 1; repeated string b = 2; }",
+                      "m.a max_count:2 max_size:8\nm.b max_count:3 max_length:12\n")
+        self.assertEqual(members(text, "m"), [
+            "pb::repeated<pb::bytes<8>, 2> a;", "pb::repeated<pb::string<12>, 3> b;"])
 
     def test_int_size(self):
         text = header("message m { int32 a = 1; uint32 b = 2; int64 c = 3; uint64 d = 4; }",
@@ -318,10 +337,10 @@ class OptionsTest(unittest.TestCase):
         self.assertEqual(field_list(text, "m"), ["a = 1", "b = 2", "c = 3", "d = 4", "e = 5", "f = 6:ZIGZAG"])
 
     def test_pointer_bytes_and_string(self):
-        text = header("message m { bytes a = 1; string b = 2; bytes c = 3; }",
+        text = header("message m { bytes a = 1; string b = 2; bytes c = 3; string d = 4; }",
                       "m.* max_size:8\nm.a type:FT_POINTER\nm.b type:FT_POINTER\n")
         self.assertEqual(members(text, "m"), [
-            "std::span<const uint8_t> a;", "std::string_view b;", "pb::repeated<uint8_t, 8> c;"])
+            "std::span<const uint8_t> a;", "std::string_view b;", "pb::bytes<8> c;", "pb::string<7> d;"])
 
     def test_type_static_and_default(self):
         text = header("message m { repeated int32 a = 1; repeated int32 b = 2; }",
@@ -684,6 +703,10 @@ class ErrorTest(unittest.TestCase):
         self.assertIn("a.proto: m.a: fixed_length needs max_size",
                       error(PROTO3 + "message m { bytes a = 1; }", "m.a fixed_length:true\n"))
 
+    def test_string_with_both_max_length_and_max_size_on_one_line(self):
+        self.assertIn("a.proto: m.a: give max_length or max_size, not both",
+                      error(PROTO3 + "message m { string a = 1; }", "m.a max_length:8 max_size:9\n"))
+
     def test_message_that_contains_itself(self):
         self.assertIn("a.proto: a message cannot contain itself: node -> node",
                       error(PROTO3 + "message node { optional node next = 1; }"))
@@ -781,12 +804,14 @@ class WarningTest(unittest.TestCase):
         self.assertEqual(members(text, "m"), ["pb::repeated<int32_t, 4> a;"])
 
     def test_option_that_does_not_apply(self):
-        stderr, text = self.warnings("package p; message m { string name = 1; int32 a = 2; fixed32 b = 3; }",
-                                     "m.name max_size:40\n\nm.a max_count:4\nm.b int_size:IS_8\n")
-        self.assertIn("a.options:1: warning: max_size does not apply to p.m.name", stderr)
+        stderr, text = self.warnings("package p; message m { string name = 1; int32 a = 2; fixed32 b = 3; bytes c = 4; }",
+                                     "m.name fixed_length:true\n\nm.a max_count:4\nm.b int_size:IS_8\nm.c max_length:8\n")
+        self.assertIn("a.options:1: warning: fixed_length does not apply to p.m.name", stderr)
         self.assertIn("a.options:3: warning: max_count does not apply to p.m.a", stderr)
         self.assertIn("a.options:4: warning: int_size does not apply to p.m.b", stderr)
-        self.assertEqual(members(text, "m"), ["std::string_view name;", "int32_t a;", "uint32_t b;"])
+        self.assertIn("a.options:5: warning: max_length does not apply to p.m.c", stderr)
+        self.assertEqual(members(text, "m"),
+                         ["std::string_view name;", "int32_t a;", "uint32_t b;", "std::span<const uint8_t> c;"])
 
     def test_int_size_does_not_apply_to_fixed_and_enum_fields(self):
         stderr, text = self.warnings("enum e { E_A = 0; } message m { sfixed32 a = 1; e b = 2; fixed64 c = 3; }",
@@ -795,17 +820,17 @@ class WarningTest(unittest.TestCase):
             self.assertIn(f"warning: int_size does not apply to m.{name}", stderr)
         self.assertEqual(members(text, "m"), ["int32_t a;", "e b;", "uint64_t c;"])
 
-    def test_max_size_does_not_apply_to_repeated_bytes(self):
-        stderr, text = self.warnings("message m { repeated bytes a = 1; }", "m.a max_count:2 max_size:8\n")
-        self.assertIn("a.options:1: warning: max_size does not apply to m.a", stderr)
-
     def test_pointer_ignores_the_sizes(self):
-        stderr, text = self.warnings("message m { repeated int32 a = 1; bytes b = 2; }",
-                                     "m.a max_count:4 fixed_count:true type:FT_POINTER\nm.b max_size:8 type:FT_POINTER\n")
+        stderr, text = self.warnings("message m { repeated int32 a = 1; bytes b = 2; string c = 3; }",
+                                     "m.a max_count:4 fixed_count:true type:FT_POINTER\n"
+                                     "m.b max_size:8 type:FT_POINTER\n"
+                                     "m.c max_length:8 type:FT_POINTER\n")
         self.assertIn("a.options:1: warning: max_count does not apply to m.a", stderr)
         self.assertIn("a.options:1: warning: fixed_count does not apply to m.a", stderr)
         self.assertIn("a.options:2: warning: max_size does not apply to m.b", stderr)
-        self.assertEqual(members(text, "m"), ["std::span<const int32_t> a;", "std::span<const uint8_t> b;"])
+        self.assertIn("a.options:3: warning: max_length does not apply to m.c", stderr)
+        self.assertEqual(members(text, "m"),
+                         ["std::span<const int32_t> a;", "std::span<const uint8_t> b;", "std::string_view c;"])
 
     def test_type_does_not_apply_to_a_scalar(self):
         stderr, text = self.warnings("message m { int32 a = 1; }", "m.a type:FT_POINTER\n")

@@ -10,11 +10,12 @@ fields come from app.options, a file in the NanoPB format:
     Message.field  (no option)                    repeated: std::span<const T>; decode needs a pb::arena
     Message.field  max_count:8                    pb::repeated<T, 8>
     Message.field  max_count:3 fixed_count:true   std::array<T, 3>
-    Message.field  max_size:16                    bytes: pb::repeated<uint8_t, 16>
+    Message.field  max_size:16                    bytes: pb::bytes<16>; string: pb::string<15>
+    Message.field  max_length:15                  string: pb::string<15>
     Message.field  max_size:6 fixed_length:true   bytes: std::array<uint8_t, 6>
     Message.field  int_size:IS_8                  int8_t or uint8_t (also IS_16, IS_32, IS_64)
     Message.field  type:FT_POINTER                repeated: std::span<const T>, also with max_count;
-                                                    bytes: std::span<const uint8_t>
+                                                    bytes: std::span<const uint8_t>; string: std::string_view
     Enum           enum_intsize:IS_8              enum class Enum : int8_t (also IS_16, IS_32)
 
 The plugin looks for app.options with the path that protoc has for app.proto: first from the
@@ -288,8 +289,8 @@ class Rule:
 class Options:
     """The rules of one options file. `path` is None when the .proto file has no options file."""
 
-    PARSERS = {"max_count": positive, "max_size": positive, "fixed_count": boolean, "fixed_length": boolean,
-               "int_size": int_size, "enum_intsize": int_size, "type": field_type}
+    PARSERS = {"max_count": positive, "max_size": positive, "max_length": positive, "fixed_count": boolean,
+               "fixed_length": boolean, "int_size": int_size, "enum_intsize": int_size, "type": field_type}
 
     def __init__(self, path):
         self.path = path
@@ -466,12 +467,27 @@ class Header:
 
         pointer = option("type") if repeated or field.type in (Field.TYPE_BYTES, Field.TYPE_STRING) else False
 
-        if field.type == Field.TYPE_BYTES and not repeated and not pointer:
+        if field.type == Field.TYPE_BYTES and not pointer:
             size, fixed = option("max_size"), option("fixed_length")
             if fixed and not size:
                 raise self.error(f"{name}: fixed_length needs max_size")
             if size:
-                text = f"std::array<uint8_t, {size}>" if fixed else f"pb::repeated<uint8_t, {size}>"
+                text = f"std::array<uint8_t, {size}>" if fixed else f"pb::bytes<{size}>"
+        elif field.type == Field.TYPE_STRING and not pointer:
+            length, size = option("max_length"), option("max_size")
+            if length is not None and size is not None:
+                len_line, size_line = found["max_length"][1].line, found["max_size"][1].line
+                if len_line == size_line:
+                    raise self.error(f"{name}: give max_length or max_size, not both")
+                chars = length if len_line > size_line else size - 1
+            elif length is not None:
+                chars = length
+            elif size is not None:
+                chars = size - 1
+            else:
+                chars = None
+            if chars is not None:
+                text = f"pb::string<{chars}>"
 
         count = option("max_count") if repeated and not pointer else None
         if repeated and not pointer and not count and option("fixed_count"):

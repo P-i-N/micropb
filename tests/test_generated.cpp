@@ -28,6 +28,8 @@ static_assert(
   std::is_same_v<decltype( gen::envelope::payload ), std::variant<std::monostate, gen::pose, gen::ping, gen::text>> );
 
 static_assert( std::is_same_v<decltype( features::Device::limits ), features::limits> );
+static_assert( std::is_same_v<decltype( features::Device_Slot::key ), pb::bytes<16>> );
+static_assert( std::is_same_v<decltype( features::Device::token ), std::optional<pb::bytes<8>>> );
 static_assert( std::is_same_v<decltype( features::Device::trims ), pb::repeated<int8_t, 4>> );
 static_assert( std::is_same_v<decltype( features::Device::trim_delta ), int16_t> );
 static_assert( std::is_same_v<decltype( features::Frame::origin ), shared::types::Point> );

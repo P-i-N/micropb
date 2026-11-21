@@ -32,7 +32,7 @@ struct limits {
 
 struct Device_Slot {
     uint32_t index;
-    pb::repeated<uint8_t, 16> key;
+    pb::bytes<16> key;
 };
 
 struct Device {
@@ -42,7 +42,7 @@ struct Device {
     ::features::limits backup;
     uint32_t serial;
     int16_t offset;
-    std::optional<pb::repeated<uint8_t, 8>> token;
+    std::optional<pb::bytes<8>> token;
     std::optional<Device_Slot> spare;
     pb::repeated<Device_Slot, 2> slots;
     pb::repeated<Device_State, 3> history;
