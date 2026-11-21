@@ -24,7 +24,7 @@ struct message
 	std::optional<inner> child;
 	std::variant<std::monostate, inner, std::uint32_t> choice;
 	std::array<std::uint8_t, 4> key;
-	pb::sint32 delta;
+	std::int32_t delta;
 };
 
 struct empty
@@ -129,7 +129,7 @@ struct pb::fields_of<manual::message>
                    pb::field_at<decltype( manual::message::choice ), 10, offsetof( manual::message, choice ), 1>,
                    pb::field_at<decltype( manual::message::choice ), 11, offsetof( manual::message, choice ), 2>,
                    pb::field_at<decltype( manual::message::key ), 3, offsetof( manual::message, key )>,
-                   pb::field_at<decltype( manual::message::delta ), 4, offsetof( manual::message, delta )>>
+                   pb::field_at<decltype( manual::message::delta ), 4, offsetof( manual::message, delta ), 0, pb::int_encoding::ZIGZAG>>
 {};
 
 template <>

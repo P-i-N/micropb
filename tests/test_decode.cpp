@@ -43,12 +43,12 @@ bool same( const inner& a, const inner& b )
 
 bool same( const scalars& a, const scalars& b )
 {
-	return a.i32 == b.i32 && a.i64 == b.i64 && a.u32 == b.u32 && a.u64 == b.u64 && a.s32.value == b.s32.value &&
-	       a.s64.value == b.s64.value && a.flag == b.flag &&
+	return a.i32 == b.i32 && a.i64 == b.i64 && a.u32 == b.u32 && a.u64 == b.u64 && a.s32 == b.s32 &&
+	       a.s64 == b.s64 && a.flag == b.flag &&
 	       std::bit_cast<std::uint32_t>( a.f ) == std::bit_cast<std::uint32_t>( b.f ) &&
-	       std::bit_cast<std::uint64_t>( a.d ) == std::bit_cast<std::uint64_t>( b.d ) && a.fx32.value == b.fx32.value &&
-	       a.fx64.value == b.fx64.value && a.sfx32.value == b.sfx32.value && a.sfx64.value == b.sfx64.value &&
-	       a.c == b.c && a.i8 == b.i8 && a.u16 == b.u16;
+	       std::bit_cast<std::uint64_t>( a.d ) == std::bit_cast<std::uint64_t>( b.d ) && a.fx32 == b.fx32 &&
+	       a.fx64 == b.fx64 && a.sfx32 == b.sfx32 && a.sfx64 == b.sfx64 && a.c == b.c && a.i8 == b.i8 &&
+	       a.u16 == b.u16;
 }
 
 bool same( const text& a, const text& b )
@@ -78,7 +78,7 @@ bool same( const lists& a, const lists& b )
 	return same_items( a.ints, b.ints, std::equal_to<>{} ) && same_items( a.floats, b.floats, same_bits ) &&
 	       same_items( a.names, b.names, std::equal_to<>{} ) &&
 	       same_items( a.items, b.items, []( const inner& x, const inner& y ) { return same( x, y ); } ) &&
-	       same_items( a.zz, b.zz, []( sint64 x, sint64 y ) { return x.value == y.value; } );
+	       same_items( a.zz, b.zz, std::equal_to<>{} );
 }
 
 /// `decode` reads `in` into a `T` that equals `expected`.
@@ -96,7 +96,7 @@ struct narrow
 	std::int8_t i8;
 	std::uint16_t u16;
 	bool flag;
-	sint32 s32;
+	std::int32_t s32;
 };
 
 enum class small : std::uint8_t
@@ -201,12 +201,13 @@ struct fragile_items
 } // namespace
 
 template <>
-struct pb::fields_of<narrow> : pb::field_list<narrow,
-                                              pb::field_at<decltype( narrow::i32 ), 1, offsetof( narrow, i32 )>,
-                                              pb::field_at<decltype( narrow::i8 ), 2, offsetof( narrow, i8 )>,
-                                              pb::field_at<decltype( narrow::u16 ), 3, offsetof( narrow, u16 )>,
-                                              pb::field_at<decltype( narrow::flag ), 4, offsetof( narrow, flag )>,
-                                              pb::field_at<decltype( narrow::s32 ), 5, offsetof( narrow, s32 )>>
+struct pb::fields_of<narrow>
+  : pb::field_list<narrow,
+                   pb::field_at<decltype( narrow::i32 ), 1, offsetof( narrow, i32 )>,
+                   pb::field_at<decltype( narrow::i8 ), 2, offsetof( narrow, i8 )>,
+                   pb::field_at<decltype( narrow::u16 ), 3, offsetof( narrow, u16 )>,
+                   pb::field_at<decltype( narrow::flag ), 4, offsetof( narrow, flag )>,
+                   pb::field_at<decltype( narrow::s32 ), 5, offsetof( narrow, s32 ), 0, pb::int_encoding::ZIGZAG>>
 {};
 
 template <>
@@ -553,8 +554,7 @@ bool test_narrowing()
 	const bool ok_c = decode( varint_field( 0x18, 70000 ).span(), c ).has_value();
 	const bool ok_d = decode( varint_field( 0x20, 2 ).span(), d ).has_value();
 	const bool ok_e = decode( varint_field( 0x28, ( std::uint64_t{ 3 } << 32 ) + 3 ).span(), e ).has_value();
-	return ok_a && a.i32 == 7 && ok_b && b.i8 == 44 && ok_c && c.u16 == 4464 && ok_d && d.flag && ok_e &&
-	       e.s32.value == -2;
+	return ok_a && a.i32 == 7 && ok_b && b.i8 == 44 && ok_c && c.u16 == 4464 && ok_d && d.flag && ok_e && e.s32 == -2;
 }
 
 /// An enum is `int32` on the wire. The decoder truncates the varint to `std::int32_t`, then converts it to the

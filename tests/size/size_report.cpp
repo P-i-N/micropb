@@ -16,7 +16,7 @@
 struct m0
 {
 	bool f0;
-	pb::fixed32 f1;
+	std::uint32_t f1;
 	std::optional<float> f2;
 	double f3;
 	std::int32_t f4;
@@ -41,7 +41,7 @@ struct m2
 {
 	double f0;
 	pb::repeated<float, 4> f1;
-	pb::fixed32 f2;
+	std::uint32_t f2;
 	std::uint8_t f3;
 	std::uint32_t f4;
 	std::optional<std::uint32_t> f5;
@@ -87,19 +87,19 @@ struct m5
 
 struct m6
 {
-	pb::fixed32 f0;
+	std::uint32_t f0;
 	pb::repeated<std::int32_t, 8> f1;
 	std::uint32_t f2;
 	pb::repeated<float, 4> f3;
 	std::uint64_t f4;
 	std::int16_t f5;
 	std::int32_t f6;
-	pb::sint32 f7;
+	std::int32_t f7;
 };
 
 struct m7
 {
-	pb::fixed32 f0;
+	std::uint32_t f0;
 	std::int32_t f1;
 	pb::repeated<std::uint8_t, 16> f2;
 	std::string_view f3;
@@ -114,7 +114,7 @@ struct m8
 	pb::repeated<float, 4> f0;
 	bool f1;
 	pb::repeated<std::int32_t, 8> f2;
-	pb::fixed32 f3;
+	std::uint32_t f3;
 	std::optional<std::uint32_t> f4;
 	std::uint64_t f5;
 	std::uint8_t f6;
@@ -129,7 +129,7 @@ struct m9
 	double f3;
 	pb::repeated<float, 4> f4;
 	std::optional<float> f5;
-	pb::sint32 f6;
+	std::int32_t f6;
 	std::string_view f7;
 };
 
@@ -141,7 +141,7 @@ struct m10
 	std::int16_t f3;
 	std::uint64_t f4;
 	pb::repeated<std::int32_t, 8> f5;
-	pb::sint32 f6;
+	std::int32_t f6;
 	std::uint8_t f7;
 };
 
@@ -161,7 +161,7 @@ struct m12
 {
 	double f0;
 	std::int16_t f1;
-	pb::sint32 f2;
+	std::int32_t f2;
 	std::optional<float> f3;
 	std::uint64_t f4;
 	float f5;
@@ -175,7 +175,7 @@ struct m13
 	pb::repeated<float, 4> f1;
 	std::uint64_t f2;
 	std::string_view f3;
-	pb::fixed32 f4;
+	std::uint32_t f4;
 	double f5;
 	std::uint8_t f6;
 	bool f7;
@@ -188,9 +188,9 @@ struct m14
 	double f2;
 	pb::repeated<std::uint8_t, 16> f3;
 	std::uint64_t f4;
-	pb::sint32 f5;
+	std::int32_t f5;
 	std::optional<float> f6;
-	pb::fixed32 f7;
+	std::uint32_t f7;
 };
 
 struct m15
@@ -200,7 +200,7 @@ struct m15
 	std::uint32_t f2;
 	std::optional<std::uint32_t> f3;
 	std::string_view f4;
-	pb::fixed32 f5;
+	std::uint32_t f5;
 	std::uint64_t f6;
 	float f7;
 };
@@ -221,11 +221,11 @@ struct m17
 {
 	std::int16_t f0;
 	std::optional<std::uint32_t> f1;
-	pb::fixed32 f2;
+	std::uint32_t f2;
 	std::uint32_t f3;
 	float f4;
 	std::uint8_t f5;
-	pb::sint32 f6;
+	std::int32_t f6;
 	std::uint64_t f7;
 };
 
@@ -243,7 +243,7 @@ struct m18
 
 struct m19
 {
-	pb::sint32 f0;
+	std::int32_t f0;
 	std::optional<float> f1;
 	std::uint32_t f2;
 	std::optional<std::uint32_t> f3;
@@ -257,8 +257,8 @@ struct m20
 {
 	float f0;
 	double f1;
-	pb::fixed32 f2;
-	pb::sint32 f3;
+	std::uint32_t f2;
+	std::int32_t f3;
 	std::string_view f4;
 	bool f5;
 	std::int32_t f6;
@@ -270,7 +270,7 @@ struct m21
 	std::string_view f0;
 	bool f1;
 	std::uint64_t f2;
-	pb::sint32 f3;
+	std::int32_t f3;
 	std::int16_t f4;
 	pb::repeated<std::int32_t, 8> f5;
 	pb::repeated<std::uint8_t, 16> f6;
@@ -309,7 +309,7 @@ struct m24
 	float f3;
 	pb::repeated<std::int32_t, 8> f4;
 	pb::repeated<float, 4> f5;
-	pb::sint32 f6;
+	std::int32_t f6;
 	pb::repeated<std::uint8_t, 16> f7;
 };
 
@@ -333,7 +333,7 @@ struct m26
 	std::int16_t f3;
 	std::uint32_t f4;
 	pb::repeated<float, 4> f5;
-	pb::fixed32 f6;
+	std::uint32_t f6;
 	std::string_view f7;
 };
 
@@ -343,7 +343,7 @@ struct m27
 	std::uint32_t f1;
 	pb::repeated<std::uint8_t, 16> f2;
 	bool f3;
-	pb::sint32 f4;
+	std::int32_t f4;
 	float f5;
 	pb::repeated<std::int32_t, 8> f6;
 	double f7;
@@ -351,7 +351,7 @@ struct m27
 
 struct m28
 {
-	pb::sint32 f0;
+	std::int32_t f0;
 	std::optional<float> f1;
 	std::int32_t f2;
 	bool f3;
@@ -367,7 +367,7 @@ struct m29
 	std::uint32_t f1;
 	std::uint64_t f2;
 	pb::repeated<std::int32_t, 8> f3;
-	pb::fixed32 f4;
+	std::uint32_t f4;
 	float f5;
 	pb::repeated<std::uint8_t, 16> f6;
 	std::optional<std::uint32_t> f7;
@@ -380,7 +380,7 @@ struct m30
 	pb::repeated<std::int32_t, 8> f2;
 	double f3;
 	pb::repeated<std::uint8_t, 16> f4;
-	pb::fixed32 f5;
+	std::uint32_t f5;
 	std::uint64_t f6;
 	std::uint32_t f7;
 };
@@ -392,7 +392,7 @@ struct m31
 	std::string_view f2;
 	std::int32_t f3;
 	pb::repeated<std::int32_t, 8> f4;
-	pb::fixed32 f5;
+	std::uint32_t f5;
 	pb::repeated<float, 4> f6;
 	pb::repeated<std::uint8_t, 16> f7;
 };
@@ -445,7 +445,7 @@ template <>
 struct pb::fields_of<m0>
   : pb::field_list<m0,
 	               pb::field_at<decltype( m0::f0 ), 1, offsetof( m0, f0 )>,
-	               pb::field_at<decltype( m0::f1 ), 2, offsetof( m0, f1 )>,
+	               pb::field_at<decltype( m0::f1 ), 2, offsetof( m0, f1 ), 0, pb::int_encoding::FIXED>,
 	               pb::field_at<decltype( m0::f2 ), 3, offsetof( m0, f2 )>,
 	               pb::field_at<decltype( m0::f3 ), 4, offsetof( m0, f3 )>,
 	               pb::field_at<decltype( m0::f4 ), 5, offsetof( m0, f4 )>,
@@ -472,7 +472,7 @@ struct pb::fields_of<m2>
   : pb::field_list<m2,
 	               pb::field_at<decltype( m2::f0 ), 1, offsetof( m2, f0 )>,
 	               pb::field_at<decltype( m2::f1 ), 2, offsetof( m2, f1 )>,
-	               pb::field_at<decltype( m2::f2 ), 3, offsetof( m2, f2 )>,
+	               pb::field_at<decltype( m2::f2 ), 3, offsetof( m2, f2 ), 0, pb::int_encoding::FIXED>,
 	               pb::field_at<decltype( m2::f3 ), 4, offsetof( m2, f3 )>,
 	               pb::field_at<decltype( m2::f4 ), 5, offsetof( m2, f4 )>,
 	               pb::field_at<decltype( m2::f5 ), 6, offsetof( m2, f5 )>,
@@ -522,20 +522,20 @@ struct pb::fields_of<m5>
 template <>
 struct pb::fields_of<m6>
   : pb::field_list<m6,
-	               pb::field_at<decltype( m6::f0 ), 1, offsetof( m6, f0 )>,
+	               pb::field_at<decltype( m6::f0 ), 1, offsetof( m6, f0 ), 0, pb::int_encoding::FIXED>,
 	               pb::field_at<decltype( m6::f1 ), 2, offsetof( m6, f1 )>,
 	               pb::field_at<decltype( m6::f2 ), 3, offsetof( m6, f2 )>,
 	               pb::field_at<decltype( m6::f3 ), 4, offsetof( m6, f3 )>,
 	               pb::field_at<decltype( m6::f4 ), 5, offsetof( m6, f4 )>,
 	               pb::field_at<decltype( m6::f5 ), 6, offsetof( m6, f5 )>,
 	               pb::field_at<decltype( m6::f6 ), 7, offsetof( m6, f6 )>,
-	               pb::field_at<decltype( m6::f7 ), 8, offsetof( m6, f7 )>>
+	               pb::field_at<decltype( m6::f7 ), 8, offsetof( m6, f7 ), 0, pb::int_encoding::ZIGZAG>>
 {};
 
 template <>
 struct pb::fields_of<m7>
   : pb::field_list<m7,
-	               pb::field_at<decltype( m7::f0 ), 1, offsetof( m7, f0 )>,
+	               pb::field_at<decltype( m7::f0 ), 1, offsetof( m7, f0 ), 0, pb::int_encoding::FIXED>,
 	               pb::field_at<decltype( m7::f1 ), 2, offsetof( m7, f1 )>,
 	               pb::field_at<decltype( m7::f2 ), 3, offsetof( m7, f2 )>,
 	               pb::field_at<decltype( m7::f3 ), 4, offsetof( m7, f3 )>,
@@ -551,7 +551,7 @@ struct pb::fields_of<m8>
 	               pb::field_at<decltype( m8::f0 ), 1, offsetof( m8, f0 )>,
 	               pb::field_at<decltype( m8::f1 ), 2, offsetof( m8, f1 )>,
 	               pb::field_at<decltype( m8::f2 ), 3, offsetof( m8, f2 )>,
-	               pb::field_at<decltype( m8::f3 ), 4, offsetof( m8, f3 )>,
+	               pb::field_at<decltype( m8::f3 ), 4, offsetof( m8, f3 ), 0, pb::int_encoding::FIXED>,
 	               pb::field_at<decltype( m8::f4 ), 5, offsetof( m8, f4 )>,
 	               pb::field_at<decltype( m8::f5 ), 6, offsetof( m8, f5 )>,
 	               pb::field_at<decltype( m8::f6 ), 7, offsetof( m8, f6 )>,
@@ -567,7 +567,7 @@ struct pb::fields_of<m9>
 	               pb::field_at<decltype( m9::f3 ), 4, offsetof( m9, f3 )>,
 	               pb::field_at<decltype( m9::f4 ), 5, offsetof( m9, f4 )>,
 	               pb::field_at<decltype( m9::f5 ), 6, offsetof( m9, f5 )>,
-	               pb::field_at<decltype( m9::f6 ), 7, offsetof( m9, f6 )>,
+	               pb::field_at<decltype( m9::f6 ), 7, offsetof( m9, f6 ), 0, pb::int_encoding::ZIGZAG>,
 	               pb::field_at<decltype( m9::f7 ), 8, offsetof( m9, f7 )>>
 {};
 
@@ -580,7 +580,7 @@ struct pb::fields_of<m10>
 	               pb::field_at<decltype( m10::f3 ), 4, offsetof( m10, f3 )>,
 	               pb::field_at<decltype( m10::f4 ), 5, offsetof( m10, f4 )>,
 	               pb::field_at<decltype( m10::f5 ), 6, offsetof( m10, f5 )>,
-	               pb::field_at<decltype( m10::f6 ), 7, offsetof( m10, f6 )>,
+	               pb::field_at<decltype( m10::f6 ), 7, offsetof( m10, f6 ), 0, pb::int_encoding::ZIGZAG>,
 	               pb::field_at<decltype( m10::f7 ), 8, offsetof( m10, f7 )>>
 {};
 
@@ -602,7 +602,7 @@ struct pb::fields_of<m12>
   : pb::field_list<m12,
 	               pb::field_at<decltype( m12::f0 ), 1, offsetof( m12, f0 )>,
 	               pb::field_at<decltype( m12::f1 ), 2, offsetof( m12, f1 )>,
-	               pb::field_at<decltype( m12::f2 ), 3, offsetof( m12, f2 )>,
+	               pb::field_at<decltype( m12::f2 ), 3, offsetof( m12, f2 ), 0, pb::int_encoding::ZIGZAG>,
 	               pb::field_at<decltype( m12::f3 ), 4, offsetof( m12, f3 )>,
 	               pb::field_at<decltype( m12::f4 ), 5, offsetof( m12, f4 )>,
 	               pb::field_at<decltype( m12::f5 ), 6, offsetof( m12, f5 )>,
@@ -617,7 +617,7 @@ struct pb::fields_of<m13>
 	               pb::field_at<decltype( m13::f1 ), 2, offsetof( m13, f1 )>,
 	               pb::field_at<decltype( m13::f2 ), 3, offsetof( m13, f2 )>,
 	               pb::field_at<decltype( m13::f3 ), 4, offsetof( m13, f3 )>,
-	               pb::field_at<decltype( m13::f4 ), 5, offsetof( m13, f4 )>,
+	               pb::field_at<decltype( m13::f4 ), 5, offsetof( m13, f4 ), 0, pb::int_encoding::FIXED>,
 	               pb::field_at<decltype( m13::f5 ), 6, offsetof( m13, f5 )>,
 	               pb::field_at<decltype( m13::f6 ), 7, offsetof( m13, f6 )>,
 	               pb::field_at<decltype( m13::f7 ), 8, offsetof( m13, f7 )>>
@@ -631,9 +631,9 @@ struct pb::fields_of<m14>
 	               pb::field_at<decltype( m14::f2 ), 3, offsetof( m14, f2 )>,
 	               pb::field_at<decltype( m14::f3 ), 4, offsetof( m14, f3 )>,
 	               pb::field_at<decltype( m14::f4 ), 5, offsetof( m14, f4 )>,
-	               pb::field_at<decltype( m14::f5 ), 6, offsetof( m14, f5 )>,
+	               pb::field_at<decltype( m14::f5 ), 6, offsetof( m14, f5 ), 0, pb::int_encoding::ZIGZAG>,
 	               pb::field_at<decltype( m14::f6 ), 7, offsetof( m14, f6 )>,
-	               pb::field_at<decltype( m14::f7 ), 8, offsetof( m14, f7 )>>
+	               pb::field_at<decltype( m14::f7 ), 8, offsetof( m14, f7 ), 0, pb::int_encoding::FIXED>>
 {};
 
 template <>
@@ -644,7 +644,7 @@ struct pb::fields_of<m15>
 	               pb::field_at<decltype( m15::f2 ), 3, offsetof( m15, f2 )>,
 	               pb::field_at<decltype( m15::f3 ), 4, offsetof( m15, f3 )>,
 	               pb::field_at<decltype( m15::f4 ), 5, offsetof( m15, f4 )>,
-	               pb::field_at<decltype( m15::f5 ), 6, offsetof( m15, f5 )>,
+	               pb::field_at<decltype( m15::f5 ), 6, offsetof( m15, f5 ), 0, pb::int_encoding::FIXED>,
 	               pb::field_at<decltype( m15::f6 ), 7, offsetof( m15, f6 )>,
 	               pb::field_at<decltype( m15::f7 ), 8, offsetof( m15, f7 )>>
 {};
@@ -667,11 +667,11 @@ struct pb::fields_of<m17>
   : pb::field_list<m17,
 	               pb::field_at<decltype( m17::f0 ), 1, offsetof( m17, f0 )>,
 	               pb::field_at<decltype( m17::f1 ), 2, offsetof( m17, f1 )>,
-	               pb::field_at<decltype( m17::f2 ), 3, offsetof( m17, f2 )>,
+	               pb::field_at<decltype( m17::f2 ), 3, offsetof( m17, f2 ), 0, pb::int_encoding::FIXED>,
 	               pb::field_at<decltype( m17::f3 ), 4, offsetof( m17, f3 )>,
 	               pb::field_at<decltype( m17::f4 ), 5, offsetof( m17, f4 )>,
 	               pb::field_at<decltype( m17::f5 ), 6, offsetof( m17, f5 )>,
-	               pb::field_at<decltype( m17::f6 ), 7, offsetof( m17, f6 )>,
+	               pb::field_at<decltype( m17::f6 ), 7, offsetof( m17, f6 ), 0, pb::int_encoding::ZIGZAG>,
 	               pb::field_at<decltype( m17::f7 ), 8, offsetof( m17, f7 )>>
 {};
 
@@ -691,7 +691,7 @@ struct pb::fields_of<m18>
 template <>
 struct pb::fields_of<m19>
   : pb::field_list<m19,
-	               pb::field_at<decltype( m19::f0 ), 1, offsetof( m19, f0 )>,
+	               pb::field_at<decltype( m19::f0 ), 1, offsetof( m19, f0 ), 0, pb::int_encoding::ZIGZAG>,
 	               pb::field_at<decltype( m19::f1 ), 2, offsetof( m19, f1 )>,
 	               pb::field_at<decltype( m19::f2 ), 3, offsetof( m19, f2 )>,
 	               pb::field_at<decltype( m19::f3 ), 4, offsetof( m19, f3 )>,
@@ -706,8 +706,8 @@ struct pb::fields_of<m20>
   : pb::field_list<m20,
 	               pb::field_at<decltype( m20::f0 ), 1, offsetof( m20, f0 )>,
 	               pb::field_at<decltype( m20::f1 ), 2, offsetof( m20, f1 )>,
-	               pb::field_at<decltype( m20::f2 ), 3, offsetof( m20, f2 )>,
-	               pb::field_at<decltype( m20::f3 ), 4, offsetof( m20, f3 )>,
+	               pb::field_at<decltype( m20::f2 ), 3, offsetof( m20, f2 ), 0, pb::int_encoding::FIXED>,
+	               pb::field_at<decltype( m20::f3 ), 4, offsetof( m20, f3 ), 0, pb::int_encoding::ZIGZAG>,
 	               pb::field_at<decltype( m20::f4 ), 5, offsetof( m20, f4 )>,
 	               pb::field_at<decltype( m20::f5 ), 6, offsetof( m20, f5 )>,
 	               pb::field_at<decltype( m20::f6 ), 7, offsetof( m20, f6 )>,
@@ -720,7 +720,7 @@ struct pb::fields_of<m21>
 	               pb::field_at<decltype( m21::f0 ), 1, offsetof( m21, f0 )>,
 	               pb::field_at<decltype( m21::f1 ), 2, offsetof( m21, f1 )>,
 	               pb::field_at<decltype( m21::f2 ), 3, offsetof( m21, f2 )>,
-	               pb::field_at<decltype( m21::f3 ), 4, offsetof( m21, f3 )>,
+	               pb::field_at<decltype( m21::f3 ), 4, offsetof( m21, f3 ), 0, pb::int_encoding::ZIGZAG>,
 	               pb::field_at<decltype( m21::f4 ), 5, offsetof( m21, f4 )>,
 	               pb::field_at<decltype( m21::f5 ), 6, offsetof( m21, f5 )>,
 	               pb::field_at<decltype( m21::f6 ), 7, offsetof( m21, f6 )>,
@@ -762,7 +762,7 @@ struct pb::fields_of<m24>
 	               pb::field_at<decltype( m24::f3 ), 4, offsetof( m24, f3 )>,
 	               pb::field_at<decltype( m24::f4 ), 5, offsetof( m24, f4 )>,
 	               pb::field_at<decltype( m24::f5 ), 6, offsetof( m24, f5 )>,
-	               pb::field_at<decltype( m24::f6 ), 7, offsetof( m24, f6 )>,
+	               pb::field_at<decltype( m24::f6 ), 7, offsetof( m24, f6 ), 0, pb::int_encoding::ZIGZAG>,
 	               pb::field_at<decltype( m24::f7 ), 8, offsetof( m24, f7 )>>
 {};
 
@@ -788,7 +788,7 @@ struct pb::fields_of<m26>
 	               pb::field_at<decltype( m26::f3 ), 4, offsetof( m26, f3 )>,
 	               pb::field_at<decltype( m26::f4 ), 5, offsetof( m26, f4 )>,
 	               pb::field_at<decltype( m26::f5 ), 6, offsetof( m26, f5 )>,
-	               pb::field_at<decltype( m26::f6 ), 7, offsetof( m26, f6 )>,
+	               pb::field_at<decltype( m26::f6 ), 7, offsetof( m26, f6 ), 0, pb::int_encoding::FIXED>,
 	               pb::field_at<decltype( m26::f7 ), 8, offsetof( m26, f7 )>>
 {};
 
@@ -799,7 +799,7 @@ struct pb::fields_of<m27>
 	               pb::field_at<decltype( m27::f1 ), 2, offsetof( m27, f1 )>,
 	               pb::field_at<decltype( m27::f2 ), 3, offsetof( m27, f2 )>,
 	               pb::field_at<decltype( m27::f3 ), 4, offsetof( m27, f3 )>,
-	               pb::field_at<decltype( m27::f4 ), 5, offsetof( m27, f4 )>,
+	               pb::field_at<decltype( m27::f4 ), 5, offsetof( m27, f4 ), 0, pb::int_encoding::ZIGZAG>,
 	               pb::field_at<decltype( m27::f5 ), 6, offsetof( m27, f5 )>,
 	               pb::field_at<decltype( m27::f6 ), 7, offsetof( m27, f6 )>,
 	               pb::field_at<decltype( m27::f7 ), 8, offsetof( m27, f7 )>>
@@ -808,7 +808,7 @@ struct pb::fields_of<m27>
 template <>
 struct pb::fields_of<m28>
   : pb::field_list<m28,
-	               pb::field_at<decltype( m28::f0 ), 1, offsetof( m28, f0 )>,
+	               pb::field_at<decltype( m28::f0 ), 1, offsetof( m28, f0 ), 0, pb::int_encoding::ZIGZAG>,
 	               pb::field_at<decltype( m28::f1 ), 2, offsetof( m28, f1 )>,
 	               pb::field_at<decltype( m28::f2 ), 3, offsetof( m28, f2 )>,
 	               pb::field_at<decltype( m28::f3 ), 4, offsetof( m28, f3 )>,
@@ -825,7 +825,7 @@ struct pb::fields_of<m29>
 	               pb::field_at<decltype( m29::f1 ), 2, offsetof( m29, f1 )>,
 	               pb::field_at<decltype( m29::f2 ), 3, offsetof( m29, f2 )>,
 	               pb::field_at<decltype( m29::f3 ), 4, offsetof( m29, f3 )>,
-	               pb::field_at<decltype( m29::f4 ), 5, offsetof( m29, f4 )>,
+	               pb::field_at<decltype( m29::f4 ), 5, offsetof( m29, f4 ), 0, pb::int_encoding::FIXED>,
 	               pb::field_at<decltype( m29::f5 ), 6, offsetof( m29, f5 )>,
 	               pb::field_at<decltype( m29::f6 ), 7, offsetof( m29, f6 )>,
 	               pb::field_at<decltype( m29::f7 ), 8, offsetof( m29, f7 )>>
@@ -839,7 +839,7 @@ struct pb::fields_of<m30>
 	               pb::field_at<decltype( m30::f2 ), 3, offsetof( m30, f2 )>,
 	               pb::field_at<decltype( m30::f3 ), 4, offsetof( m30, f3 )>,
 	               pb::field_at<decltype( m30::f4 ), 5, offsetof( m30, f4 )>,
-	               pb::field_at<decltype( m30::f5 ), 6, offsetof( m30, f5 )>,
+	               pb::field_at<decltype( m30::f5 ), 6, offsetof( m30, f5 ), 0, pb::int_encoding::FIXED>,
 	               pb::field_at<decltype( m30::f6 ), 7, offsetof( m30, f6 )>,
 	               pb::field_at<decltype( m30::f7 ), 8, offsetof( m30, f7 )>>
 {};
@@ -852,7 +852,7 @@ struct pb::fields_of<m31>
 	               pb::field_at<decltype( m31::f2 ), 3, offsetof( m31, f2 )>,
 	               pb::field_at<decltype( m31::f3 ), 4, offsetof( m31, f3 )>,
 	               pb::field_at<decltype( m31::f4 ), 5, offsetof( m31, f4 )>,
-	               pb::field_at<decltype( m31::f5 ), 6, offsetof( m31, f5 )>,
+	               pb::field_at<decltype( m31::f5 ), 6, offsetof( m31, f5 ), 0, pb::int_encoding::FIXED>,
 	               pb::field_at<decltype( m31::f6 ), 7, offsetof( m31, f6 )>,
 	               pb::field_at<decltype( m31::f7 ), 8, offsetof( m31, f7 )>>
 {};

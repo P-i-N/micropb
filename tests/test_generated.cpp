@@ -28,13 +28,12 @@ static_assert(
   std::is_same_v<decltype( gen::envelope::payload ), std::variant<std::monostate, gen::pose, gen::ping, gen::text>> );
 
 static_assert( std::is_same_v<decltype( features::Device::limits ), features::limits> );
-static_assert( std::is_same_v<decltype( features::Device::trims ), pb::repeated<std::int8_t, 4>> );
-static_assert(
-  std::is_same_v<decltype( features::Device::trim_delta ), pb::wire_int<std::int16_t, pb::int_encoding::ZIGZAG>> );
+static_assert( std::is_same_v<decltype( features::Device::trims ), pb::repeated<int8_t, 4>> );
+static_assert( std::is_same_v<decltype( features::Device::trim_delta ), int16_t> );
 static_assert( std::is_same_v<decltype( features::Frame::origin ), shared::types::Point> );
 static_assert( std::is_same_v<decltype( features::Calibration::gains ), std::array<float, 4>> );
 static_assert( std::is_same_v<decltype( features::Batch::slots ), std::span<const features::Device_Slot>> );
-static_assert( std::is_same_v<decltype( features::Batch::blob ), std::span<const std::uint8_t>> );
+static_assert( std::is_same_v<decltype( features::Batch::blob ), std::span<const uint8_t>> );
 
 namespace d = pb::detail;
 
@@ -119,7 +118,7 @@ bool test_fixed_arrays()
 bool test_views()
 {
 	features::Device_Slot slots[2]{ { 1, {} }, {} };
-	const pb::wire_int<std::int16_t, pb::int_encoding::ZIGZAG> deltas[]{ -1, 300 };
+	const std::int16_t deltas[]{ -1, 300 };
 	const std::uint8_t blob[]{ 'x', 'y', 'z' };
 	features::Report report{ features::Batch{ slots, deltas, blob } };
 
@@ -146,8 +145,8 @@ bool test_views_decode()
 
 	const auto key = batch->slots[0].key;
 	return batch->slots[0].index == 1 && key.size() == 2 && key[0] == 'a' && key[1] == 'b' &&
-	       batch->slots[1].index == 0 && batch->slots[1].key.empty() && batch->deltas[0].value == -1 &&
-	       batch->deltas[1].value == 300 && batch->blob[0] == 'x' && batch->blob[1] == 'y' && batch->blob[2] == 'z';
+	       batch->slots[1].index == 0 && batch->slots[1].key.empty() && batch->deltas[0] == -1 &&
+	       batch->deltas[1] == 300 && batch->blob[0] == 'x' && batch->blob[1] == 'y' && batch->blob[2] == 'z';
 }
 
 /// `device { class: -2 state: STATE_BUSY limits { low: 1 high: 2 } backup {} serial: 7 offset: -300 token: ""

@@ -2,10 +2,10 @@
 #pragma once
 
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <optional>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 #include <string_view>
 #include <variant>
 
@@ -15,41 +15,41 @@
 
 namespace features {
 
-enum class RxMode : std::int32_t {
+enum class RxMode : int32_t {
     FIXED = 0,
     VARIABLE = 1,
 };
 
-enum class Device_State : std::int8_t {
+enum class Device_State : int8_t {
     IDLE = 0,
     BUSY = 1,
 };
 
 struct limits {
-    std::int32_t low;
-    std::int32_t high;
+    int32_t low;
+    int32_t high;
 };
 
 struct Device_Slot {
-    std::uint32_t index;
-    pb::repeated<std::uint8_t, 16> key;
+    uint32_t index;
+    pb::repeated<uint8_t, 16> key;
 };
 
 struct Device {
-    std::int32_t class_;
+    int32_t class_;
     Device_State state;
     ::features::limits limits;
     ::features::limits backup;
-    std::uint32_t serial;
-    std::int16_t offset;
-    std::optional<pb::repeated<std::uint8_t, 8>> token;
+    uint32_t serial;
+    int16_t offset;
+    std::optional<pb::repeated<uint8_t, 8>> token;
     std::optional<Device_Slot> spare;
     pb::repeated<Device_Slot, 2> slots;
     pb::repeated<Device_State, 3> history;
-    pb::repeated<std::int8_t, 4> trims;
-    pb::wire_int<std::int16_t, pb::int_encoding::ZIGZAG> trim_delta;
-    pb::repeated<pb::wire_int<std::int16_t, pb::int_encoding::ZIGZAG>, 3> history_delta;
-    std::variant<std::monostate, std::uint32_t, std::string_view, Device_Slot> event;
+    pb::repeated<int8_t, 4> trims;
+    int16_t trim_delta;
+    pb::repeated<int16_t, 3> history_delta;
+    std::variant<std::monostate, uint32_t, std::string_view, Device_Slot> event;
     bool ready;
 };
 
@@ -63,17 +63,17 @@ struct Frame {
 
 struct Calibration {
     std::array<float, 4> gains;
-    std::array<std::uint8_t, 6> id;
+    std::array<uint8_t, 6> id;
 };
 
 struct Batch {
     std::span<const Device_Slot> slots;
-    std::span<const pb::wire_int<std::int16_t, pb::int_encoding::ZIGZAG>> deltas;
-    std::span<const std::uint8_t> blob;
+    std::span<const int16_t> deltas;
+    std::span<const uint8_t> blob;
 };
 
 struct Report {
-    std::variant<std::monostate, std::uint32_t, Batch> body;
+    std::variant<std::monostate, uint32_t, Batch> body;
 };
 
 } // namespace features
@@ -103,8 +103,8 @@ struct pb::fields_of<::features::Device> : pb::field_list<::features::Device,
     pb::field_at<decltype(::features::Device::slots), 14, offsetof(::features::Device, slots)>,
     pb::field_at<decltype(::features::Device::history), 15, offsetof(::features::Device, history)>,
     pb::field_at<decltype(::features::Device::trims), 16, offsetof(::features::Device, trims)>,
-    pb::field_at<decltype(::features::Device::trim_delta), 17, offsetof(::features::Device, trim_delta)>,
-    pb::field_at<decltype(::features::Device::history_delta), 18, offsetof(::features::Device, history_delta)>,
+    pb::field_at<decltype(::features::Device::trim_delta), 17, offsetof(::features::Device, trim_delta), 0, pb::int_encoding::ZIGZAG>,
+    pb::field_at<decltype(::features::Device::history_delta), 18, offsetof(::features::Device, history_delta), 0, pb::int_encoding::ZIGZAG>,
     pb::field_at<decltype(::features::Device::event), 20, offsetof(::features::Device, event), 1>,
     pb::field_at<decltype(::features::Device::event), 22, offsetof(::features::Device, event), 2>,
     pb::field_at<decltype(::features::Device::event), 25, offsetof(::features::Device, event), 3>,
@@ -126,7 +126,7 @@ struct pb::fields_of<::features::Calibration> : pb::field_list<::features::Calib
 template <>
 struct pb::fields_of<::features::Batch> : pb::field_list<::features::Batch,
     pb::field_at<decltype(::features::Batch::slots), 1, offsetof(::features::Batch, slots)>,
-    pb::field_at<decltype(::features::Batch::deltas), 2, offsetof(::features::Batch, deltas)>,
+    pb::field_at<decltype(::features::Batch::deltas), 2, offsetof(::features::Batch, deltas), 0, pb::int_encoding::ZIGZAG>,
     pb::field_at<decltype(::features::Batch::blob), 3, offsetof(::features::Batch, blob)>> {};
 
 template <>

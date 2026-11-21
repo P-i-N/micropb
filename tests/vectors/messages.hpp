@@ -27,15 +27,15 @@ struct scalars
 	std::int64_t i64;
 	std::uint32_t u32;
 	std::uint64_t u64;
-	pb::sint32 s32;
-	pb::sint64 s64;
+	std::int32_t s32;
+	std::int64_t s64;
 	bool flag;
 	float f;
 	double d;
-	pb::fixed32 fx32;
-	pb::fixed64 fx64;
-	pb::sfixed32 sfx32;
-	pb::sfixed64 sfx64;
+	std::uint32_t fx32;
+	std::uint64_t fx64;
+	std::int32_t sfx32;
+	std::int64_t sfx64;
 	color c;
 	std::int8_t i8;
 	std::uint16_t u16;
@@ -68,7 +68,7 @@ struct lists
 	pb::repeated<float, 8> floats;
 	pb::repeated<std::string_view, 8> names;
 	pb::repeated<inner, 8> items;
-	pb::repeated<pb::sint64, 8> zz;
+	pb::repeated<std::int64_t, 8> zz;
 };
 
 struct pose
@@ -92,23 +92,24 @@ struct envelope
 
 template <>
 struct pb::fields_of<messages::scalars>
-  : pb::field_list<messages::scalars,
-                   pb::field_at<decltype( messages::scalars::i32 ), 1, offsetof( messages::scalars, i32 )>,
-                   pb::field_at<decltype( messages::scalars::i64 ), 2, offsetof( messages::scalars, i64 )>,
-                   pb::field_at<decltype( messages::scalars::u32 ), 3, offsetof( messages::scalars, u32 )>,
-                   pb::field_at<decltype( messages::scalars::u64 ), 4, offsetof( messages::scalars, u64 )>,
-                   pb::field_at<decltype( messages::scalars::s32 ), 5, offsetof( messages::scalars, s32 )>,
-                   pb::field_at<decltype( messages::scalars::s64 ), 6, offsetof( messages::scalars, s64 )>,
-                   pb::field_at<decltype( messages::scalars::flag ), 7, offsetof( messages::scalars, flag )>,
-                   pb::field_at<decltype( messages::scalars::f ), 8, offsetof( messages::scalars, f )>,
-                   pb::field_at<decltype( messages::scalars::d ), 9, offsetof( messages::scalars, d )>,
-                   pb::field_at<decltype( messages::scalars::fx32 ), 10, offsetof( messages::scalars, fx32 )>,
-                   pb::field_at<decltype( messages::scalars::fx64 ), 11, offsetof( messages::scalars, fx64 )>,
-                   pb::field_at<decltype( messages::scalars::sfx32 ), 12, offsetof( messages::scalars, sfx32 )>,
-                   pb::field_at<decltype( messages::scalars::sfx64 ), 13, offsetof( messages::scalars, sfx64 )>,
-                   pb::field_at<decltype( messages::scalars::c ), 14, offsetof( messages::scalars, c )>,
-                   pb::field_at<decltype( messages::scalars::i8 ), 15, offsetof( messages::scalars, i8 )>,
-                   pb::field_at<decltype( messages::scalars::u16 ), 16, offsetof( messages::scalars, u16 )>>
+  : pb::field_list<
+      messages::scalars,
+      pb::field_at<decltype( messages::scalars::i32 ), 1, offsetof( messages::scalars, i32 )>,
+      pb::field_at<decltype( messages::scalars::i64 ), 2, offsetof( messages::scalars, i64 )>,
+      pb::field_at<decltype( messages::scalars::u32 ), 3, offsetof( messages::scalars, u32 )>,
+      pb::field_at<decltype( messages::scalars::u64 ), 4, offsetof( messages::scalars, u64 )>,
+      pb::field_at<decltype( messages::scalars::s32 ), 5, offsetof( messages::scalars, s32 ), 0, pb::int_encoding::ZIGZAG>,
+      pb::field_at<decltype( messages::scalars::s64 ), 6, offsetof( messages::scalars, s64 ), 0, pb::int_encoding::ZIGZAG>,
+      pb::field_at<decltype( messages::scalars::flag ), 7, offsetof( messages::scalars, flag )>,
+      pb::field_at<decltype( messages::scalars::f ), 8, offsetof( messages::scalars, f )>,
+      pb::field_at<decltype( messages::scalars::d ), 9, offsetof( messages::scalars, d )>,
+      pb::field_at<decltype( messages::scalars::fx32 ), 10, offsetof( messages::scalars, fx32 ), 0, pb::int_encoding::FIXED>,
+      pb::field_at<decltype( messages::scalars::fx64 ), 11, offsetof( messages::scalars, fx64 ), 0, pb::int_encoding::FIXED>,
+      pb::field_at<decltype( messages::scalars::sfx32 ), 12, offsetof( messages::scalars, sfx32 ), 0, pb::int_encoding::FIXED>,
+      pb::field_at<decltype( messages::scalars::sfx64 ), 13, offsetof( messages::scalars, sfx64 ), 0, pb::int_encoding::FIXED>,
+      pb::field_at<decltype( messages::scalars::c ), 14, offsetof( messages::scalars, c )>,
+      pb::field_at<decltype( messages::scalars::i8 ), 15, offsetof( messages::scalars, i8 )>,
+      pb::field_at<decltype( messages::scalars::u16 ), 16, offsetof( messages::scalars, u16 )>>
 {};
 
 template <>
@@ -142,7 +143,7 @@ struct pb::fields_of<messages::lists>
                    pb::field_at<decltype( messages::lists::floats ), 2, offsetof( messages::lists, floats )>,
                    pb::field_at<decltype( messages::lists::names ), 3, offsetof( messages::lists, names )>,
                    pb::field_at<decltype( messages::lists::items ), 4, offsetof( messages::lists, items )>,
-                   pb::field_at<decltype( messages::lists::zz ), 5, offsetof( messages::lists, zz )>>
+                   pb::field_at<decltype( messages::lists::zz ), 5, offsetof( messages::lists, zz ), 0, pb::int_encoding::ZIGZAG>>
 {};
 
 template <>

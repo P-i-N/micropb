@@ -2,10 +2,10 @@
 #pragma once
 
 #include <array>
-#include <cstddef>
-#include <cstdint>
 #include <optional>
 #include <span>
+#include <stddef.h>
+#include <stdint.h>
 #include <string_view>
 #include <variant>
 
@@ -13,7 +13,7 @@
 
 namespace micropb::test {
 
-enum class color : std::int32_t {
+enum class color : int32_t {
     NONE = 0,
     RED = 1,
     BLUE = 2,
@@ -21,48 +21,48 @@ enum class color : std::int32_t {
 };
 
 struct scalars {
-    std::int32_t i32;
-    std::int64_t i64;
-    std::uint32_t u32;
-    std::uint64_t u64;
-    pb::sint32 s32;
-    pb::sint64 s64;
+    int32_t i32;
+    int64_t i64;
+    uint32_t u32;
+    uint64_t u64;
+    int32_t s32;
+    int64_t s64;
     bool flag;
     float f;
     double d;
-    pb::fixed32 fx32;
-    pb::fixed64 fx64;
-    pb::sfixed32 sfx32;
-    pb::sfixed64 sfx64;
+    uint32_t fx32;
+    uint64_t fx64;
+    int32_t sfx32;
+    int64_t sfx64;
     color c;
-    std::int8_t i8;
-    std::uint16_t u16;
+    int8_t i8;
+    uint16_t u16;
 };
 
 struct text {
     std::string_view name;
-    std::span<const std::uint8_t> data;
-    std::array<std::uint8_t, 6> mac;
+    std::span<const uint8_t> data;
+    std::array<uint8_t, 6> mac;
 };
 
 struct inner {
-    std::int32_t x;
+    int32_t x;
     std::string_view label;
 };
 
 struct outer {
     inner child;
-    std::optional<std::int32_t> maybe;
+    std::optional<int32_t> maybe;
     std::optional<inner> maybe_child;
-    std::int32_t gap;
+    int32_t gap;
 };
 
 struct lists {
-    pb::repeated<std::int32_t, 8> ints;
+    pb::repeated<int32_t, 8> ints;
     pb::repeated<float, 8> floats;
     pb::repeated<std::string_view, 8> names;
     pb::repeated<inner, 8> items;
-    pb::repeated<pb::sint64, 8> zz;
+    pb::repeated<int64_t, 8> zz;
 };
 
 struct pose {
@@ -71,11 +71,11 @@ struct pose {
 };
 
 struct ping {
-    std::uint32_t seq;
+    uint32_t seq;
 };
 
 struct envelope {
-    std::uint32_t id;
+    uint32_t id;
     std::variant<std::monostate, pose, ping, text> payload;
 };
 
@@ -89,15 +89,15 @@ struct pb::fields_of<::micropb::test::scalars> : pb::field_list<::micropb::test:
     pb::field_at<decltype(::micropb::test::scalars::i64), 2, offsetof(::micropb::test::scalars, i64)>,
     pb::field_at<decltype(::micropb::test::scalars::u32), 3, offsetof(::micropb::test::scalars, u32)>,
     pb::field_at<decltype(::micropb::test::scalars::u64), 4, offsetof(::micropb::test::scalars, u64)>,
-    pb::field_at<decltype(::micropb::test::scalars::s32), 5, offsetof(::micropb::test::scalars, s32)>,
-    pb::field_at<decltype(::micropb::test::scalars::s64), 6, offsetof(::micropb::test::scalars, s64)>,
+    pb::field_at<decltype(::micropb::test::scalars::s32), 5, offsetof(::micropb::test::scalars, s32), 0, pb::int_encoding::ZIGZAG>,
+    pb::field_at<decltype(::micropb::test::scalars::s64), 6, offsetof(::micropb::test::scalars, s64), 0, pb::int_encoding::ZIGZAG>,
     pb::field_at<decltype(::micropb::test::scalars::flag), 7, offsetof(::micropb::test::scalars, flag)>,
     pb::field_at<decltype(::micropb::test::scalars::f), 8, offsetof(::micropb::test::scalars, f)>,
     pb::field_at<decltype(::micropb::test::scalars::d), 9, offsetof(::micropb::test::scalars, d)>,
-    pb::field_at<decltype(::micropb::test::scalars::fx32), 10, offsetof(::micropb::test::scalars, fx32)>,
-    pb::field_at<decltype(::micropb::test::scalars::fx64), 11, offsetof(::micropb::test::scalars, fx64)>,
-    pb::field_at<decltype(::micropb::test::scalars::sfx32), 12, offsetof(::micropb::test::scalars, sfx32)>,
-    pb::field_at<decltype(::micropb::test::scalars::sfx64), 13, offsetof(::micropb::test::scalars, sfx64)>,
+    pb::field_at<decltype(::micropb::test::scalars::fx32), 10, offsetof(::micropb::test::scalars, fx32), 0, pb::int_encoding::FIXED>,
+    pb::field_at<decltype(::micropb::test::scalars::fx64), 11, offsetof(::micropb::test::scalars, fx64), 0, pb::int_encoding::FIXED>,
+    pb::field_at<decltype(::micropb::test::scalars::sfx32), 12, offsetof(::micropb::test::scalars, sfx32), 0, pb::int_encoding::FIXED>,
+    pb::field_at<decltype(::micropb::test::scalars::sfx64), 13, offsetof(::micropb::test::scalars, sfx64), 0, pb::int_encoding::FIXED>,
     pb::field_at<decltype(::micropb::test::scalars::c), 14, offsetof(::micropb::test::scalars, c)>,
     pb::field_at<decltype(::micropb::test::scalars::i8), 15, offsetof(::micropb::test::scalars, i8)>,
     pb::field_at<decltype(::micropb::test::scalars::u16), 16, offsetof(::micropb::test::scalars, u16)>> {};
@@ -126,7 +126,7 @@ struct pb::fields_of<::micropb::test::lists> : pb::field_list<::micropb::test::l
     pb::field_at<decltype(::micropb::test::lists::floats), 2, offsetof(::micropb::test::lists, floats)>,
     pb::field_at<decltype(::micropb::test::lists::names), 3, offsetof(::micropb::test::lists, names)>,
     pb::field_at<decltype(::micropb::test::lists::items), 4, offsetof(::micropb::test::lists, items)>,
-    pb::field_at<decltype(::micropb::test::lists::zz), 5, offsetof(::micropb::test::lists, zz)>> {};
+    pb::field_at<decltype(::micropb::test::lists::zz), 5, offsetof(::micropb::test::lists, zz), 0, pb::int_encoding::ZIGZAG>> {};
 
 template <>
 struct pb::fields_of<::micropb::test::pose> : pb::field_list<::micropb::test::pose,

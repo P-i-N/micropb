@@ -41,37 +41,24 @@ enum class wire_type : std::uint8_t
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Integer encoding on the wire: zigzag varint or fixed width.
-enum class int_encoding
+/// Wire encoding of an integer field, element, optional value or oneof alternative.
+enum class int_encoding : std::uint8_t
 {
+	VARINT,
 	ZIGZAG,
-	FIXED
+	FIXED,
 };
-
-/// Integer field with a fixed wire encoding. Converts implicitly to and from `T`.
-template <typename T, int_encoding E>
-struct wire_int
-{
-	constexpr wire_int() = default;
-	constexpr wire_int( T v ) : value( v ) {}
-	[[nodiscard]] constexpr operator T() const { return value; }
-
-	T value{};
-};
-
-using sint32 = wire_int<std::int32_t, int_encoding::ZIGZAG>;
-using sint64 = wire_int<std::int64_t, int_encoding::ZIGZAG>;
-using fixed32 = wire_int<std::uint32_t, int_encoding::FIXED>;
-using fixed64 = wire_int<std::uint64_t, int_encoding::FIXED>;
-using sfixed32 = wire_int<std::int32_t, int_encoding::FIXED>;
-using sfixed64 = wire_int<std::int64_t, int_encoding::FIXED>;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-/// One field of a message: the type `M` of the member, the field number and
-/// the offset of the member in bytes. For an alternative of a `std::variant`
-/// member, `Alternative` is the index of the alternative, which is 1 or more.
-template <typename M, std::uint32_t Number, std::size_t Offset, std::size_t Alternative = 0>
+/// One field of a message: the type `M` of the member, the field number, the
+/// offset of the member in bytes, the 1-based `std::variant` alternative index
+/// (0 for plain members), and the wire encoding for integer scalars.
+template <typename M,
+          std::uint32_t Number,
+          std::size_t Offset,
+          std::size_t Alternative = 0,
+          int_encoding Encoding = int_encoding::VARINT>
 struct field_at
 {};
 

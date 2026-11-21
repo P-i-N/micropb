@@ -22,15 +22,7 @@ static_assert( pb::wire_type_of<long>() == pb::wire_type::VARINT );
 static_assert( pb::kind_of<pb::repeated<signed char, 4>>() == pb::field_kind::REPEATED ); // not bytes
 static_assert( pb::kind_of<pb::repeated<unsigned char, 4>>() == pb::field_kind::BYTES );
 static_assert( pb::is_packed<signed char>() ); // the element type of a repeated field
-
-using zz8 = pb::wire_int<std::int8_t, pb::int_encoding::ZIGZAG>;
-using zz16 = pb::wire_int<std::int16_t, pb::int_encoding::ZIGZAG>;
-using zz_int = pb::wire_int<int, pb::int_encoding::ZIGZAG>;
-using zz64 = pb::wire_int<long long, pb::int_encoding::ZIGZAG>;
-static_assert( pb::kind_of<zz8>() == pb::field_kind::SCALAR );
-static_assert( pb::wire_type_of<zz16>() == pb::wire_type::VARINT );
-static_assert( pb::kind_of<pb::repeated<zz8, 4>>() == pb::field_kind::REPEATED ); // not bytes
-static_assert( pb::is_packed<zz8>() );                                            // the element type
+static_assert( pb::wire_type_of<std::int16_t, pb::int_encoding::ZIGZAG>() == pb::wire_type::VARINT );
 
 namespace {
 
@@ -62,40 +54,42 @@ struct fixed_width
 
 struct narrow
 {
-	zz8 a;
-	zz16 b;
-	zz_int c;
-	zz64 d;
-	pb::repeated<zz16, 3> e;
+	std::int8_t a;
+	std::int16_t b;
+	int c;
+	long long d;
+	pb::repeated<std::int16_t, 3> e;
 };
 
 struct wide
 {
-	pb::sint32 a;
-	pb::sint32 b;
-	pb::sint32 c;
-	pb::sint64 d;
-	pb::repeated<pb::sint32, 3> e;
+	std::int32_t a;
+	std::int32_t b;
+	std::int32_t c;
+	std::int64_t d;
+	pb::repeated<std::int32_t, 3> e;
 };
 
 } // namespace
 
 template <>
-struct pb::fields_of<narrow> : pb::field_list<narrow,
-                                              pb::field_at<decltype( narrow::a ), 1, offsetof( narrow, a )>,
-                                              pb::field_at<decltype( narrow::b ), 2, offsetof( narrow, b )>,
-                                              pb::field_at<decltype( narrow::c ), 3, offsetof( narrow, c )>,
-                                              pb::field_at<decltype( narrow::d ), 4, offsetof( narrow, d )>,
-                                              pb::field_at<decltype( narrow::e ), 5, offsetof( narrow, e )>>
+struct pb::fields_of<narrow>
+  : pb::field_list<narrow,
+                   pb::field_at<decltype( narrow::a ), 1, offsetof( narrow, a ), 0, pb::int_encoding::ZIGZAG>,
+                   pb::field_at<decltype( narrow::b ), 2, offsetof( narrow, b ), 0, pb::int_encoding::ZIGZAG>,
+                   pb::field_at<decltype( narrow::c ), 3, offsetof( narrow, c ), 0, pb::int_encoding::ZIGZAG>,
+                   pb::field_at<decltype( narrow::d ), 4, offsetof( narrow, d ), 0, pb::int_encoding::ZIGZAG>,
+                   pb::field_at<decltype( narrow::e ), 5, offsetof( narrow, e ), 0, pb::int_encoding::ZIGZAG>>
 {};
 
 template <>
-struct pb::fields_of<wide> : pb::field_list<wide,
-                                            pb::field_at<decltype( wide::a ), 1, offsetof( wide, a )>,
-                                            pb::field_at<decltype( wide::b ), 2, offsetof( wide, b )>,
-                                            pb::field_at<decltype( wide::c ), 3, offsetof( wide, c )>,
-                                            pb::field_at<decltype( wide::d ), 4, offsetof( wide, d )>,
-                                            pb::field_at<decltype( wide::e ), 5, offsetof( wide, e )>>
+struct pb::fields_of<wide>
+  : pb::field_list<wide,
+                   pb::field_at<decltype( wide::a ), 1, offsetof( wide, a ), 0, pb::int_encoding::ZIGZAG>,
+                   pb::field_at<decltype( wide::b ), 2, offsetof( wide, b ), 0, pb::int_encoding::ZIGZAG>,
+                   pb::field_at<decltype( wide::c ), 3, offsetof( wide, c ), 0, pb::int_encoding::ZIGZAG>,
+                   pb::field_at<decltype( wide::d ), 4, offsetof( wide, d ), 0, pb::int_encoding::ZIGZAG>,
+                   pb::field_at<decltype( wide::e ), 5, offsetof( wide, e ), 0, pb::int_encoding::ZIGZAG>>
 {};
 
 template <>
@@ -199,30 +193,33 @@ bool test_narrow_zigzag()
 /// 2 bytes: ZigZag-decoding 2^32 gives 2^31, whose low 16 bits are 0.
 struct one_sint64
 {
-	pb::sint64 a;
+	std::int64_t a;
 };
 struct one_sint32
 {
-	pb::sint32 a;
+	std::int32_t a;
 };
 struct one_zz16
 {
-	zz16 a;
+	std::int16_t a;
 };
 
 } // namespace
 
 template <>
 struct pb::fields_of<one_sint64>
-  : pb::field_list<one_sint64, pb::field_at<decltype( one_sint64::a ), 1, offsetof( one_sint64, a )>>
+  : pb::field_list<one_sint64,
+                   pb::field_at<decltype( one_sint64::a ), 1, offsetof( one_sint64, a ), 0, pb::int_encoding::ZIGZAG>>
 {};
 template <>
 struct pb::fields_of<one_sint32>
-  : pb::field_list<one_sint32, pb::field_at<decltype( one_sint32::a ), 1, offsetof( one_sint32, a )>>
+  : pb::field_list<one_sint32,
+                   pb::field_at<decltype( one_sint32::a ), 1, offsetof( one_sint32, a ), 0, pb::int_encoding::ZIGZAG>>
 {};
 template <>
 struct pb::fields_of<one_zz16>
-  : pb::field_list<one_zz16, pb::field_at<decltype( one_zz16::a ), 1, offsetof( one_zz16, a )>>
+  : pb::field_list<one_zz16,
+                   pb::field_at<decltype( one_zz16::a ), 1, offsetof( one_zz16, a ), 0, pb::int_encoding::ZIGZAG>>
 {};
 
 namespace {

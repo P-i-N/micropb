@@ -45,7 +45,7 @@ inline constexpr std::uint8_t scalar_bool = 0x20;
 /// An enum: `int32` on the wire.
 inline constexpr std::uint8_t scalar_enum = 0x40;
 
-template <typename T>
+template <typename T, int_encoding Encoding = int_encoding::VARINT>
 [[nodiscard]] consteval std::uint8_t scalar_code_of()
 {
 	constexpr std::uint8_t size = sizeof( T ) == 1 ? 0 : sizeof( T ) == 2 ? 1 : sizeof( T ) == 4 ? 2 : 3;
@@ -54,9 +54,9 @@ template <typename T>
 		return size | scalar_bool;
 	else if constexpr ( std::is_enum_v<T> )
 		return size | scalar_enum | ( std::is_signed_v<std::underlying_type_t<T>> ? scalar_signed : 0 );
-	else if constexpr ( is_zigzag<T> )
+	else if constexpr ( Encoding == int_encoding::ZIGZAG )
 		return size | scalar_signed | scalar_zigzag;
-	else if constexpr ( wire_type_of<T>() != wire_type::VARINT )
+	else if constexpr ( Encoding == int_encoding::FIXED || wire_type_of<T>() != wire_type::VARINT )
 		return size | scalar_fixed;
 	else
 		return size | ( std::is_signed_v<T> ? scalar_signed : 0 );
@@ -209,7 +209,7 @@ struct variant_desc
 
 static_assert( sizeof( value_desc ) <= 2 * sizeof( void* ) );
 
-template <typename T>
+template <typename T, int_encoding Encoding = int_encoding::VARINT>
 struct value_descriptor
 {
 	static const value_desc value;
@@ -335,7 +335,7 @@ template <typename S>
 template <typename S>
 inline constexpr span_desc span_descriptor = describe_span<S>();
 
-template <typename S>
+template <typename S, int_encoding Encoding = int_encoding::VARINT>
 [[nodiscard]] consteval sequence_desc describe_sequence()
 {
 	if constexpr ( is_string<S> )
@@ -353,7 +353,7 @@ template <typename S>
 	else
 	{
 		using element = element_t<S>;
-		constexpr const value_desc* item = &value_descriptor<element>::value;
+		constexpr const value_desc* item = &value_descriptor<element, Encoding>::value;
 		constexpr std::uint32_t item_size = sizeof( element );
 		constexpr auto capacity = static_cast<std::uint32_t>( sequence_traits<S>::capacity );
 
@@ -380,38 +380,56 @@ template <typename S>
 	}
 }
 
-template <typename S>
-inline constexpr sequence_desc sequence_descriptor = describe_sequence<S>();
+template <typename S, int_encoding Encoding = int_encoding::VARINT>
+inline constexpr sequence_desc sequence_descriptor = describe_sequence<S, Encoding>();
 
-template <typename O>
-inline constexpr optional_desc optional_descriptor{ &value_descriptor<typename O::value_type>::value,
+template <typename O, int_encoding Encoding = int_encoding::VARINT>
+inline constexpr optional_desc optional_descriptor{ &value_descriptor<typename O::value_type, Encoding>::value,
                                                     access_optional<O> };
 
 /// The descriptor of the alternative `A` of a `std::variant`. Null for `std::monostate`.
-template <typename A>
+template <typename A, int_encoding Encoding = int_encoding::VARINT>
 [[nodiscard]] consteval const value_desc* describe_alternative()
 {
 	if constexpr ( std::is_same_v<A, std::monostate> )
 		return nullptr;
 	else
-		return &value_descriptor<A>::value;
+		return &value_descriptor<A, Encoding>::value;
 }
 
-template <typename V>
+template <typename V, int_encoding... AltEncodings>
 struct variant_alternatives;
 
-template <typename... A>
-struct variant_alternatives<std::variant<A...>>
+template <typename... A, int_encoding... AltEncodings>
+struct variant_alternatives<std::variant<A...>, AltEncodings...>
 {
-	static constexpr const value_desc* value[sizeof...( A )] = { describe_alternative<A>()... };
+	static constexpr const value_desc* value[sizeof...( A )] = { describe_alternative<A, AltEncodings>()... };
 };
 
+template <typename V, int_encoding... AltEncodings>
+inline constexpr variant_desc variant_descriptor{ variant_alternatives<V, AltEncodings...>::value, access_variant<V> };
+
 template <typename V>
-inline constexpr variant_desc variant_descriptor{ variant_alternatives<V>::value, access_variant<V> };
+struct default_variant_descriptor;
+
+template <typename... A>
+struct default_variant_descriptor<std::variant<A...>>
+{
+	static constexpr const variant_desc* value =
+	  &variant_descriptor<std::variant<A...>, ( static_cast<void>( sizeof( A ) ), int_encoding::VARINT )...>;
+};
+
+template <typename V, int_encoding... AltEncodings>
+inline constexpr value_desc variant_value_desc{
+	.kind = field_kind::ONEOF,
+	.scalar = 0,
+	.words = 0,
+	.variant = &variant_descriptor<V, AltEncodings...>,
+};
 
 /// Compound descriptor of the member type `M`, or null when `M` encodes inline
 /// in a field word (`SCALAR`, `std::string_view`, and `std::span<const std::uint8_t>`).
-template <typename M>
+template <typename M, int_encoding Encoding = int_encoding::VARINT>
 [[nodiscard]] consteval const value_desc* sub_desc_of()
 {
 	using U = std::remove_const_t<M>;
@@ -420,17 +438,17 @@ template <typename M>
 	               std::is_same_v<U, std::span<const std::uint8_t>> )
 		return nullptr;
 	else
-		return &value_descriptor<U>::value;
+		return &value_descriptor<U, Encoding>::value;
 }
 
-template <typename M>
+template <typename M, int_encoding Encoding = int_encoding::VARINT>
 [[nodiscard]] consteval std::uint8_t base_op_of()
 {
 	using U = std::remove_const_t<M>;
 	constexpr field_kind kind = kind_of<U>();
 	if constexpr ( kind == field_kind::SCALAR )
 	{
-		constexpr std::uint8_t code = scalar_code_of<U>();
+		constexpr std::uint8_t code = scalar_code_of<U, Encoding>();
 		static_assert( code < op_string );
 		return code;
 	}
@@ -475,22 +493,83 @@ struct message_table_data<0, 0>
 template <typename L>
 struct field_table;
 
-template <typename T, typename... M, std::uint32_t... Number, std::size_t... Offset, std::size_t... Alternative>
-struct field_table<field_list<T, field_at<M, Number, Offset, Alternative>...>>
+template <typename T,
+          typename... M,
+          std::uint32_t... Number,
+          std::size_t... Offset,
+          std::size_t... Alternative,
+          int_encoding... Encoding>
+struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encoding>...>>
 {
 	static constexpr std::size_t entry_count = sizeof...( M );
 
-	template <typename Target>
+	template <typename Target, int_encoding TargetEncoding>
 	[[nodiscard]] static consteval std::size_t type_id_of()
 	{
 		if constexpr ( entry_count > 0 )
 		{
-			const bool same[]{ std::is_same_v<Target, std::remove_const_t<M>>... };
+			const bool same[]{ ( std::is_same_v<Target, std::remove_const_t<M>> && TargetEncoding == Encoding )... };
 			for ( std::size_t i = 0; i < entry_count; ++i )
 				if ( same[i] )
 					return i;
 		}
 		return 0;
+	}
+
+	template <std::size_t VarOffset, std::size_t AltIdx>
+	[[nodiscard]] static consteval int_encoding alt_encoding_at()
+	{
+		int_encoding result = int_encoding::VARINT;
+		if constexpr ( entry_count > 0 )
+		{
+			const std::size_t offsets[]{ Offset... };
+			const std::size_t alts[]{ Alternative... };
+			const int_encoding encs[]{ Encoding... };
+			for ( std::size_t i = 0; i < entry_count; ++i )
+				if ( offsets[i] == VarOffset && alts[i] == AltIdx )
+					result = encs[i];
+		}
+		return result;
+	}
+
+	template <typename V, std::size_t VarOffset, std::size_t... Is>
+	[[nodiscard]] static consteval const value_desc* variant_sub_of( std::index_sequence<Is...> )
+	{
+		constexpr bool all_varint = ( ( alt_encoding_at<VarOffset, Is>() == int_encoding::VARINT ) && ... );
+		if constexpr ( all_varint )
+			return &value_descriptor<V>::value;
+		else
+			return &variant_value_desc<V, alt_encoding_at<VarOffset, Is>()...>;
+	}
+
+	template <typename V, std::size_t VarOffset, std::size_t... Is>
+	[[nodiscard]] static consteval std::size_t variant_key_of( std::index_sequence<Is...> )
+	{
+		constexpr bool all_varint = ( ( alt_encoding_at<VarOffset, Is>() == int_encoding::VARINT ) && ... );
+		if constexpr ( all_varint )
+			return type_id_of<V, int_encoding::VARINT>();
+		else
+			return entry_count + VarOffset;
+	}
+
+	template <typename FieldM, std::size_t FieldOffset, std::size_t FieldAlt, int_encoding FieldEnc>
+	[[nodiscard]] static consteval const value_desc* row_sub_of()
+	{
+		using U = std::remove_const_t<FieldM>;
+		if constexpr ( FieldAlt != 0 && is_variant<U> )
+			return variant_sub_of<U, FieldOffset>( std::make_index_sequence<std::variant_size_v<U>>{} );
+		else
+			return sub_desc_of<FieldM, FieldEnc>();
+	}
+
+	template <typename FieldM, std::size_t FieldOffset, std::size_t FieldAlt, int_encoding FieldEnc>
+	[[nodiscard]] static consteval std::size_t row_key_of()
+	{
+		using U = std::remove_const_t<FieldM>;
+		if constexpr ( FieldAlt != 0 && is_variant<U> )
+			return variant_key_of<U, FieldOffset>( std::make_index_sequence<std::variant_size_v<U>>{} );
+		else
+			return type_id_of<U, FieldEnc>();
 	}
 
 	struct plan
@@ -503,7 +582,7 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative>...>>
 
 	[[nodiscard]] static consteval plan build_plan()
 	{
-		list_traits<field_list<T, field_at<M, Number, Offset, Alternative>...>>::check();
+		list_traits<field_list<T, field_at<M, Number, Offset, Alternative, Encoding>...>>::check();
 		struct raw_row
 		{
 			std::uint32_t number;
@@ -516,9 +595,9 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative>...>>
 		std::array<raw_row, entry_count> rows{ raw_row{ Number,
 		                                                Offset,
 		                                                Alternative,
-		                                                type_id_of<std::remove_const_t<M>>(),
-		                                                base_op_of<M>(),
-		                                                sub_desc_of<M>() }... };
+		                                                row_key_of<M, Offset, Alternative, Encoding>(),
+		                                                base_op_of<M, Encoding>(),
+		                                                row_sub_of<M, Offset, Alternative, Encoding>() }... };
 		std::sort( rows.begin(), rows.end(), []( const raw_row& a, const raw_row& b ) { return a.number < b.number; } );
 
 		plan p{};
@@ -606,13 +685,13 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative>...>>
 	static constexpr table_type value = make();
 };
 
-template <typename T>
+template <typename T, int_encoding Encoding>
 [[nodiscard]] consteval value_desc describe_value()
 {
 	constexpr field_kind kind = kind_of<T>();
 
 	if constexpr ( kind == field_kind::SCALAR )
-		return { .kind = kind, .scalar = scalar_code_of<T>(), .words = 0, .size = 0 };
+		return { .kind = kind, .scalar = scalar_code_of<T, Encoding>(), .words = 0, .size = 0 };
 	else if constexpr ( std::is_same_v<T, std::string_view> )
 		return { .kind = kind, .scalar = 0, .words = 0, .sequence = nullptr };
 	else if constexpr ( kind == field_kind::FIXED_BYTES )
@@ -623,7 +702,7 @@ template <typename T>
 		// goes through its accessor, as each other sequence.
 		return { .kind = kind, .scalar = 0, .words = 0, .sequence = nullptr };
 	else if constexpr ( kind == field_kind::STRING || kind == field_kind::BYTES || kind == field_kind::REPEATED )
-		return { .kind = kind, .scalar = 0, .words = 0, .sequence = &sequence_descriptor<T> };
+		return { .kind = kind, .scalar = 0, .words = 0, .sequence = &sequence_descriptor<T, Encoding> };
 	else if constexpr ( kind == field_kind::MESSAGE )
 	{
 		// The field list of `T` must name `T`: a list of a different type has the offsets of that type.
@@ -641,13 +720,13 @@ template <typename T>
 		};
 	}
 	else if constexpr ( kind == field_kind::OPTIONAL )
-		return { .kind = kind, .scalar = 0, .words = 0, .optional = &optional_descriptor<T> };
+		return { .kind = kind, .scalar = 0, .words = 0, .optional = &optional_descriptor<T, Encoding> };
 	else
-		return { .kind = kind, .scalar = 0, .words = 0, .variant = &variant_descriptor<T> };
+		return { .kind = kind, .scalar = 0, .words = 0, .variant = default_variant_descriptor<T>::value };
 }
 
-template <typename T>
-constexpr value_desc value_descriptor<T>::value = describe_value<T>();
+template <typename T, int_encoding Encoding>
+constexpr value_desc value_descriptor<T, Encoding>::value = describe_value<T, Encoding>();
 
 ////////////////////////////////////////////////////////////////////////////////
 // Part 2: interpreter. No function in this part is a template.

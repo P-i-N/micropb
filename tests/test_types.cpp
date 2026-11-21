@@ -14,13 +14,6 @@ using namespace pb;
 
 namespace {
 
-constexpr bool test_wire_int()
-{
-	sint32 s = -5;
-	const std::int32_t i = s;
-	return i == -5 && sizeof( sint64 ) == 8;
-}
-
 constexpr bool test_repeated()
 {
 	repeated<int, 2> r;
@@ -153,7 +146,6 @@ bool test_arena_overflow()
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static_assert( test_wire_int() );
 static_assert( test_repeated() );
 static_assert( test_bytes() );
 static_assert( test_string() );
@@ -169,8 +161,8 @@ static_assert( !std::is_constructible_v<bytes<4>, const std::uint8_t ( & )[5]> )
 int main()
 {
 	pb::string<8> runtime_empty;
-	const bool ok = runtime_empty.c_str()[0] == '\0' && std::strlen( runtime_empty.c_str() ) == 0 && test_wire_int() &&
-	                test_repeated() && test_bytes() && test_string() && test_arena_empty() && test_arena_allocate() &&
+	const bool ok = runtime_empty.c_str()[0] == '\0' && std::strlen( runtime_empty.c_str() ) == 0 && test_repeated() &&
+	                test_bytes() && test_string() && test_arena_empty() && test_arena_allocate() &&
 	                test_arena_odd_start() && test_arena_full() && test_arena_overflow();
 	return ok ? 0 : 1;
 }
