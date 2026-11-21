@@ -809,11 +809,16 @@ inline void emit_message( writer& sink, const value_desc& message, const void* o
 // types against the type that it knows at the call, and gives warnings about
 // accesses that never occur.
 
+#if __has_cpp_attribute( gnu::noclone )
+#define MICROPB_ENTRY [[nodiscard, gnu::noinline, gnu::noclone]]
+#else
+#define MICROPB_ENTRY [[nodiscard, gnu::noinline]]
+#endif
+
 /// Encoded size of the fields of the message at `object`, without key and
 /// length prefix. A writer without a span only counts, so the size and the
 /// bytes come from one code path.
-[[nodiscard, gnu::noinline, gnu::noclone]] inline std::size_t encoded_size( const value_desc& message,
-                                                                            const void* object )
+MICROPB_ENTRY inline std::size_t encoded_size( const value_desc& message, const void* object )
 {
 	writer sink;
 	emit_message( sink, message, object );
@@ -959,7 +964,7 @@ inline void emit_message( writer& sink, const value_desc& message, const void* o
 	}
 }
 
-[[nodiscard, gnu::noinline, gnu::noclone]] inline std::expected<std::size_t, error> encode(
+MICROPB_ENTRY inline std::expected<std::size_t, error> encode(
   const value_desc& message, const void* object, std::span<std::uint8_t> out )
 {
 	writer sink( out );
@@ -1396,7 +1401,7 @@ inline void decode_message( reader& in, const value_desc& message, void* object,
 }
 
 /// `memory` is null for a message without a `std::span<const T>` repeated field.
-[[nodiscard, gnu::noinline, gnu::noclone]] inline std::expected<std::size_t, error> decode(
+MICROPB_ENTRY inline std::expected<std::size_t, error> decode(
   const value_desc& message, std::span<const std::uint8_t> in, void* object, arena* memory )
 {
 	reset_message( message, object );
@@ -1407,6 +1412,8 @@ inline void decode_message( reader& in, const value_desc& message, void* object,
 		return std::unexpected( source.status().error() );
 	return in.size();
 }
+
+#undef MICROPB_ENTRY
 
 } // namespace detail
 

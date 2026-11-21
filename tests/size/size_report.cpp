@@ -1,8 +1,7 @@
 // Size report: 32 message types of 8 mixed fields each, in one oneof envelope.
-// The message types are those of "Reference: the benchmark" in
-// docs/superpowers/specs/2026-11-18-micropb-table-codec-design.md. Do not
-// change them: the size targets refer to exactly these types.
-// MICROPB_SIZE_TYPES (16 or 32) sets how many of them the envelope uses.
+// Do not change the message types: the size measurements in README.md and
+// DETAILS.md refer to them. MICROPB_SIZE_TYPES (16 or 32) sets how many of
+// them the envelope uses.
 
 #include <cstddef>
 #include <cstdint>
