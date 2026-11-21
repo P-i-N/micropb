@@ -127,7 +127,7 @@ struct repeated
 private:
 	friend struct detail::sequence_access;
 
-	std::array<T, N> _items{};
+	std::array<T, N> _items;
 	std::size_t _count = 0;
 };
 
