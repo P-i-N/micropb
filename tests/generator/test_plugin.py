@@ -428,8 +428,12 @@ class StructureTest(unittest.TestCase):
             message b { int32 x = 1; }
             message m { uint32 id = 1; oneof payload { a first = 2; b second = 3; } bool last = 4; }
             """)
-        self.assertEqual(members(text, "m"),
-                         ["uint32_t id = 0;", "std::variant<std::monostate, a, b> payload = {};", "bool last = false;"])
+        self.assertEqual(members(text, "m"), [
+            "uint32_t id = 0;",
+            "static constexpr size_t payload_first = 1;",
+            "static constexpr size_t payload_second = 2;",
+            "std::variant<std::monostate, a, b> payload = {};",
+            "bool last = false;"])
         self.assertEqual(field_list(text, "m"), ["id = 1", "payload = 2/1", "payload = 3/2", "last = 4"])
         self.assertIn("#include <variant>\n", text)
 
@@ -438,14 +442,44 @@ class StructureTest(unittest.TestCase):
             message m { uint32 id = 1; oneof payload { int32 first = 5; string second = 7; } bool last = 8; }
             """)
         self.assertEqual(members(text, "m"), [
-            "uint32_t id = 0;", "std::variant<std::monostate, int32_t, std::string_view> payload = {};", "bool last = false;"])
+            "uint32_t id = 0;",
+            "static constexpr size_t payload_first = 1;",
+            "static constexpr size_t payload_second = 2;",
+            "std::variant<std::monostate, int32_t, std::string_view> payload = {};",
+            "bool last = false;"])
         self.assertEqual(field_list(text, "m"), ["id = 1", "payload = 5/1", "payload = 7/2", "last = 8"])
 
     def test_oneof_next_to_an_optional_field(self):
         text = header("message m { optional bool a = 1; oneof v { int32 b = 2; bool c = 3; } optional bool d = 4; }")
         self.assertEqual(members(text, "m"), [
-            "std::optional<bool> a = {};", "std::variant<std::monostate, int32_t, bool> v = {};", "std::optional<bool> d = {};"])
+            "std::optional<bool> a = {};",
+            "static constexpr size_t v_b = 1;",
+            "static constexpr size_t v_c = 2;",
+            "std::variant<std::monostate, int32_t, bool> v = {};",
+            "std::optional<bool> d = {};"])
         self.assertEqual(field_list(text, "m"), ["a = 1", "v = 2/1", "v = 3/2", "d = 4"])
+
+    def test_oneof_with_duplicate_member_types(self):
+        text = header("""
+            message m {
+              uint32 id = 1;
+              oneof msg { string err = 2; string info = 3; string html = 4; }
+              oneof delta { int32 raw = 5; sint32 zz = 6; sfixed32 fx = 7; }
+            }
+            """)
+        self.assertEqual(members(text, "m"), [
+            "uint32_t id = 0;",
+            "static constexpr size_t msg_err = 1;",
+            "static constexpr size_t msg_info = 2;",
+            "static constexpr size_t msg_html = 3;",
+            "std::variant<std::monostate, std::string_view, std::string_view, std::string_view> msg = {};",
+            "static constexpr size_t delta_raw = 1;",
+            "static constexpr size_t delta_zz = 2;",
+            "static constexpr size_t delta_fx = 3;",
+            "std::variant<std::monostate, int32_t, int32_t, int32_t> delta = {};"])
+        self.assertEqual(field_list(text, "m"), [
+            "id = 1", "msg = 2/1", "msg = 3/2", "msg = 4/3",
+            "delta = 5/1", "delta = 6/2:ZIGZAG", "delta = 7/3:FIXED"])
 
     def test_field_numbers_are_in_the_field_list(self):
         text = header("message m { int32 a = 3; int32 b = 4; int32 c = 10; int32 d = 11; int32 e = 5; }")
@@ -602,16 +636,32 @@ class NameTest(unittest.TestCase):
 
     def test_oneof_name_equal_to_a_type_name(self):
         text = header("message payload { int32 x = 1; } message m { oneof payload { payload p = 1; int32 q = 2; } }")
-        self.assertEqual(members(text, "m"), ["std::variant<std::monostate, ::payload, int32_t> payload = {};"])
+        self.assertEqual(members(text, "m"), [
+            "static constexpr size_t payload_p = 1;",
+            "static constexpr size_t payload_q = 2;",
+            "std::variant<std::monostate, ::payload, int32_t> payload = {};"])
 
     def test_oneof_member_type_equal_to_a_field_name(self):
         text = header("enum mode { MODE_A = 0; } message m { mode mode = 1; oneof v { mode x = 4; int32 y = 5; } }")
-        self.assertEqual(members(text, "m"),
-                         ["::mode mode = ::mode::A;", "std::variant<std::monostate, ::mode, int32_t> v = {};"])
+        self.assertEqual(members(text, "m"), [
+            "::mode mode = ::mode::A;",
+            "static constexpr size_t v_x = 1;",
+            "static constexpr size_t v_y = 2;",
+            "std::variant<std::monostate, ::mode, int32_t> v = {};"])
+
+    def test_oneof_index_name_equal_to_a_type_name(self):
+        text = header("message msg_err { int32 x = 1; } message m { msg_err first = 1; oneof msg { string err = 2; } }")
+        self.assertEqual(members(text, "m"), [
+            "::msg_err first = {};",
+            "static constexpr size_t msg_err = 1;",
+            "std::variant<std::monostate, std::string_view> msg = {};"])
 
     def test_oneof_with_a_keyword_name(self):
         text = header("message m { oneof union { int32 a = 1; bool b = 2; } }")
-        self.assertEqual(members(text, "m"), ["std::variant<std::monostate, int32_t, bool> union_ = {};"])
+        self.assertEqual(members(text, "m"), [
+            "static constexpr size_t union_a = 1;",
+            "static constexpr size_t union_b = 2;",
+            "std::variant<std::monostate, int32_t, bool> union_ = {};"])
         self.assertEqual(field_list(text, "m"), ["union_ = 1/1", "union_ = 2/2"])
 
     def test_keyword_field_name_equal_to_a_type_name_after_the_suffix(self):
@@ -635,7 +685,11 @@ class NumberTest(unittest.TestCase):
 
     def test_oneof_with_descending_numbers(self):
         text = header("message m { oneof w { bool d = 9; float e = 4; } int32 last = 1; }")
-        self.assertEqual(members(text, "m"), ["std::variant<std::monostate, bool, float> w = {};", "int32_t last = 0;"])
+        self.assertEqual(members(text, "m"), [
+            "static constexpr size_t w_d = 1;",
+            "static constexpr size_t w_e = 2;",
+            "std::variant<std::monostate, bool, float> w = {};",
+            "int32_t last = 0;"])
         self.assertEqual(field_list(text, "m"), ["w = 9/1", "w = 4/2", "last = 1"])
 
     def test_optional_field_after_a_gap(self):
@@ -733,11 +787,11 @@ class ErrorTest(unittest.TestCase):
                 self.assertIn("a.options: the file is not UTF-8 text", text)
                 self.assertNotIn("Traceback", text)
 
-    def test_oneof_with_two_members_of_one_type(self):
-        self.assertIn("a.proto: m.v: a oneof cannot have two members of the type int32_t",
-                      error(PROTO3 + "message m { oneof v { int32 a = 1; int32 b = 2; } }"))
-        self.assertIn("a.proto: m.v: a oneof cannot have two members of the type int32_t",
-                      error(PROTO3 + "message m { oneof v { int32 a = 1; sint32 b = 2; } }"))
+    def test_two_members_with_the_same_cpp_name(self):
+        self.assertIn("a.proto: m: two members have the C++ name msg_err",
+                      error(PROTO3 + "message m { int32 msg_err = 1; oneof msg { string err = 2; } }"))
+        self.assertIn("a.proto: m: two members have the C++ name a_b_c",
+                      error(PROTO3 + "message m { oneof a { int32 b_c = 1; } oneof a_b { int32 c = 2; } }"))
 
     def test_two_types_with_the_same_flat_name(self):
         self.assertIn("a.proto: two types have the C++ name A_B",

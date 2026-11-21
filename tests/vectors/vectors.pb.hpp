@@ -76,6 +76,9 @@ struct ping {
 
 struct envelope {
     uint32_t id = 0;
+    static constexpr size_t payload_pose = 1;
+    static constexpr size_t payload_ping = 2;
+    static constexpr size_t payload_text = 3;
     std::variant<std::monostate, pose, ping, text> payload = {};
 };
 

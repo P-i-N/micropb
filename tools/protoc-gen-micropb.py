@@ -220,7 +220,7 @@ INCLUDES = [
     ("<array>", r"std::array<"),
     ("<optional>", r"std::optional<"),
     ("<span>", r"std::span<"),
-    ("<stddef.h>", r"\boffsetof\("),
+    ("<stddef.h>", r"\b(offsetof\(|size_t\b)"),
     ("<stdint.h>", r"\bu?int\d+_t\b"),
     ("<string_view>", r"std::string_view\b"),
     ("<variant>", r"std::variant<"),
@@ -529,9 +529,15 @@ class Header:
         def oneof_of(field):  # the index of the oneof of `field`. `optional` is a oneof only for protoc.
             return field.oneof_index if "oneof_index" in field.present and not field.proto3_optional else None
 
-        member_names = {ident(field.name) for field in desc.field if oneof_of(field) is None}
-        member_names |= {ident(desc.oneof_decl[oneof_of(field)].name) for field in desc.field
-                         if oneof_of(field) is not None}
+        all_names = ([ident(field.name) for field in desc.field if oneof_of(field) is None] +
+                     [ident(desc.oneof_decl[idx].name) for idx in dict.fromkeys(
+                         oneof_of(field) for field in desc.field if oneof_of(field) is not None)] +
+                     [ident(f"{desc.oneof_decl[oneof_of(field)].name}_{field.name}")
+                      for field in desc.field if oneof_of(field) is not None])
+        for cname in all_names:
+            if all_names.count(cname) > 1:
+                raise self.error(f"{message.proto_name}: two members have the C++ name {cname}")
+        member_names = set(all_names)
 
         lines, entries, done = [], [], set()  # an entry: member name, field number, alternative index, encoding
         for field in desc.field:
@@ -557,10 +563,9 @@ class Header:
                 group = [other for other in desc.field if oneof_of(other) == index]
                 name = desc.oneof_decl[index].name
                 types = [self.field_type(message, other, member_names) for other in group]
-                for text in types:
-                    if types.count(text) > 1:
-                        raise self.error(f"{message.proto_name}.{name}: a oneof cannot have two members "
-                                         f"of the type {text}")
+                for position, other in enumerate(group, 1):
+                    const_name = ident(f"{name}_{other.name}")
+                    lines.append(f"    static constexpr size_t {const_name} = {position};")
                 lines.append(f"    std::variant<std::monostate, {', '.join(types)}> {ident(name)} = {{}};")
                 entries += [(ident(name), other.number, position, ENCODINGS.get(other.type))
                             for position, other in enumerate(group, 1)]

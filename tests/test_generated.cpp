@@ -236,12 +236,35 @@ bool test_names_of_the_library()
 	       round_trips<::detail::reader>( std::array<uint8_t, 8>{ 0x0a, 0x02, 0x08, 0x05, 0x12, 0x02, 0x08, 0x01 } );
 }
 
+/// `Log` has three `std::string_view` alternatives in `msg`, addressed by the generated 1-based index constants.
+bool test_duplicate_oneof()
+{
+	constexpr std::array<uint8_t, 7> err_wire{ 0x08, 0x07, 0x12, 0x03, 0x62, 0x61, 0x64 };
+	constexpr std::array<uint8_t, 6> info_wire{ 0x08, 0x07, 0x1a, 0x02, 0x6f, 0x6b };
+	constexpr std::array<uint8_t, 7> html_wire{ 0x08, 0x07, 0x22, 0x03, 0x3c, 0x62, 0x3e };
+
+	const features::Log err{ .id = 7, .msg{ std::in_place_index<features::Log::msg_err>, "bad" } };
+	features::Log info{ .id = 7 };
+	info.msg.emplace<features::Log::msg_info>( "ok" );
+	features::Log html{ .id = 7 };
+	html.msg.emplace<features::Log::msg_html>( "<b>" );
+
+	features::Log rx{};
+	if ( !pb::decode( std::span<const uint8_t>( html_wire ), rx ) )
+		return false;
+	const auto* html_text = std::get_if<features::Log::msg_html>( &rx.msg );
+
+	return encodes_to( err, err_wire ) && encodes_to( info, info_wire ) && encodes_to( html, html_wire ) &&
+	       round_trips<features::Log>( err_wire ) && round_trips<features::Log>( info_wire ) && rx.id == 7 &&
+	       rx.msg.index() == features::Log::msg_html && html_text && *html_text == "<b>";
+}
+
 } // namespace
 
 int main()
 {
 	const bool ok = test_default_initialization() && test_reference_vectors() && test_reference_values() &&
 	                test_field_numbers() && test_fixed_arrays() && test_views() && test_views_decode() &&
-	                test_frame_encode() && test_frame_decode() && test_names_of_the_library();
+	                test_frame_encode() && test_frame_decode() && test_names_of_the_library() && test_duplicate_oneof();
 	return ok ? 0 : 1;
 }

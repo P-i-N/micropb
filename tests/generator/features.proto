@@ -74,3 +74,13 @@ message Report {
     Batch batch = 2;
   }
 }
+
+// Alternatives of one C++ type in a oneof use the generated 1-based index constants.
+message Log {
+  uint32 id = 1;
+  oneof msg {
+    string err = 2;
+    string info = 3;
+    string html = 4;
+  }
+}

@@ -49,6 +49,9 @@ struct Device {
     pb::repeated<int8_t, 4> trims = {};
     int16_t trim_delta = 0;
     pb::repeated<int16_t, 3> history_delta = {};
+    static constexpr size_t event_code = 1;
+    static constexpr size_t event_text = 2;
+    static constexpr size_t event_moved = 3;
     std::variant<std::monostate, uint32_t, std::string_view, Device_Slot> event = {};
     bool ready = false;
 };
@@ -73,7 +76,17 @@ struct Batch {
 };
 
 struct Report {
+    static constexpr size_t body_code = 1;
+    static constexpr size_t body_batch = 2;
     std::variant<std::monostate, uint32_t, Batch> body = {};
+};
+
+struct Log {
+    uint32_t id = 0;
+    static constexpr size_t msg_err = 1;
+    static constexpr size_t msg_info = 2;
+    static constexpr size_t msg_html = 3;
+    std::variant<std::monostate, std::string_view, std::string_view, std::string_view> msg = {};
 };
 
 } // namespace features
@@ -133,3 +146,10 @@ template <>
 struct pb::fields_of<::features::Report> : pb::field_list<::features::Report,
     pb::field_at<decltype(::features::Report::body), 1, offsetof(::features::Report, body), 1>,
     pb::field_at<decltype(::features::Report::body), 2, offsetof(::features::Report, body), 2>> {};
+
+template <>
+struct pb::fields_of<::features::Log> : pb::field_list<::features::Log,
+    pb::field_at<decltype(::features::Log::id), 1, offsetof(::features::Log, id)>,
+    pb::field_at<decltype(::features::Log::msg), 2, offsetof(::features::Log, msg), 1>,
+    pb::field_at<decltype(::features::Log::msg), 3, offsetof(::features::Log, msg), 2>,
+    pb::field_at<decltype(::features::Log::msg), 4, offsetof(::features::Log, msg), 3>> {};
