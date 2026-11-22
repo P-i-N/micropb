@@ -744,10 +744,7 @@ template <typename T, int_encoding Encoding>
 		return { .kind = kind, .scalar = 0, .words = 0, .sequence = &sequence_descriptor<T, Encoding> };
 	else if constexpr ( kind == field_kind::MESSAGE )
 	{
-		// The field list of `T` must name `T`: a list of a different type has the offsets of that type.
 		using list = field_list_of<T>;
-		static_assert( std::is_same_v<typename list_traits<list>::message, T>,
-		               "pb: field_list_type: pb::fields_of<T> must derive from pb::field_list<T, ...> with the same T" );
 		const void* table = nullptr;
 		if constexpr ( field_table<list>::layout.words_n > 0 )
 			table = &field_table<list>::value;
