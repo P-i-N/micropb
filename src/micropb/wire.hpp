@@ -1,10 +1,13 @@
 #pragma once
 
 #include <algorithm>
+#include <bit>
+#include <cstring>
 #include <expected>
 #include <span>
 #include <stddef.h>
 #include <stdint.h>
+#include <type_traits>
 
 #include <micropb/types.hpp>
 
@@ -120,12 +123,25 @@ private:
 	constexpr void put( uint8_t byte )
 	{
 		if ( _pos < _out.size() )
-			_out[_pos] = byte;
+		{
+			_out[_pos++] = byte;
+			return;
+		}
 		advance( 1 );
 	}
 
 	constexpr void write_le( uint64_t value, size_t count )
 	{
+		if ( !std::is_constant_evaluated() )
+		{
+			if constexpr ( std::endian::native == std::endian::little )
+			{
+				if ( _pos <= _out.size() && count <= _out.size() - _pos )
+					std::memcpy( _out.data() + _pos, &value, count );
+				advance( count );
+				return;
+			}
+		}
 		for ( size_t i = 0; i < count; ++i )
 			put( static_cast<uint8_t>( value >> ( 8 * i ) ) );
 	}
@@ -151,8 +167,20 @@ struct reader
 
 	[[nodiscard]] constexpr uint64_t read_varint()
 	{
-		uint64_t value = 0;
-		for ( size_t i = 0; i < 10; ++i )
+		if ( _pos >= _in.size() )
+		{
+			fail( error::TRUNCATED );
+			return 0;
+		}
+		const uint8_t first = _in[_pos];
+		if ( first < 0x80 )
+		{
+			++_pos;
+			return first;
+		}
+
+		uint64_t value = first & 0x7Fu;
+		for ( size_t i = 1; i < 10; ++i )
 		{
 			if ( _pos + i >= _in.size() )
 			{
@@ -164,7 +192,7 @@ struct reader
 			if ( i == 9 && byte > 1 )
 				break;
 
-			value |= static_cast<uint64_t>( byte & 0x7F ) << ( 7 * i );
+			value |= static_cast<uint64_t>( byte & 0x7Fu ) << ( 7 * i );
 			if ( ( byte & 0x80 ) == 0 )
 			{
 				_pos += i + 1;
@@ -270,6 +298,15 @@ private:
 		}
 
 		uint64_t value = 0;
+		if ( !std::is_constant_evaluated() )
+		{
+			if constexpr ( std::endian::native == std::endian::little )
+			{
+				std::memcpy( &value, _in.data() + _pos, count );
+				_pos += count;
+				return value;
+			}
+		}
 		for ( size_t i = 0; i < count; ++i )
 			value |= static_cast<uint64_t>( _in[_pos + i] ) << ( 8 * i );
 		_pos += count;

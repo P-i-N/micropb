@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstring>
 #include <expected>
 #include <new>
@@ -944,25 +945,45 @@ inline void emit_submessage( writer& sink, uint32_t number, const value_desc& me
 inline void emit_packed( writer& sink, uint32_t number, const sequence_desc& sequence, const sequence_view& items )
 {
 	const uint8_t code = sequence.element->scalar;
+	const bool fixed = ( code & scalar_fixed ) != 0;
 
 	// The length prefix comes before the values, so measure them first.
-	writer measure;
-	if ( code & scalar_fixed )
+	size_t payload_size = 0;
+	if ( fixed )
 	{
-		measure.advance( items.count * sequence.element_size );
+		payload_size = items.count * sequence.element_size;
 	}
 	else
 	{
-		for ( size_t i = 0; i < items.count; ++i )
-			measure.write_varint( load_scalar( member_at( items.data, i * sequence.element_size ), code ) );
+		const auto* ptr = static_cast<const unsigned char*>( items.data );
+		for ( size_t i = 0; i < items.count; ++i, ptr += sequence.element_size )
+			payload_size += varint_size( load_scalar( ptr, code ) );
 	}
 
 	sink.write_key( number, wire_type::LENGTH_DELIMITED );
-	sink.write_varint( measure.size() );
-	for ( size_t i = 0; i < items.count; ++i )
+	sink.write_varint( payload_size );
+	if ( sink.counts_only() )
 	{
-		const void* item = member_at( items.data, i * sequence.element_size );
-		emit_scalar( sink, code, load_scalar( item, code ) );
+		sink.advance( payload_size );
+		return;
+	}
+
+	if ( fixed )
+	{
+		if constexpr ( std::endian::native == std::endian::little )
+		{
+			sink.write_bytes( std::span<const uint8_t>( static_cast<const uint8_t*>( items.data ), payload_size ) );
+			return;
+		}
+		const auto* ptr = static_cast<const unsigned char*>( items.data );
+		for ( size_t i = 0; i < items.count; ++i, ptr += sequence.element_size )
+			emit_scalar( sink, code, load_scalar( ptr, code ) );
+	}
+	else
+	{
+		const auto* ptr = static_cast<const unsigned char*>( items.data );
+		for ( size_t i = 0; i < items.count; ++i, ptr += sequence.element_size )
+			sink.write_varint( load_scalar( ptr, code ) );
 	}
 }
 
@@ -1046,6 +1067,23 @@ inline void emit_message( writer& sink, const value_desc& message, const void* o
 	const uint32_t* words = message_words( message );
 	for ( size_t pos = 0; pos < message.words; )
 	{
+		const uint32_t w0 = words[pos];
+		if ( ( w0 & 0x80000000u ) == 0 )
+		{
+			const auto op = static_cast<uint8_t>( w0 >> 24 );
+			if ( op < op_string )
+			{
+				++pos;
+				const uint64_t bits = load_scalar( member_at( object, ( w0 >> 12 ) & 0xFFFu ), op );
+				if ( bits != 0 )
+				{
+					sink.write_key( w0 & 0xFFFu, wire_of_scalar( op ) );
+					emit_scalar( sink, op, bits );
+				}
+				continue;
+			}
+		}
+
 		const field_entry field = decode_entry( words, pos );
 		const value_desc type = resolve_type( subs, field );
 		const void* member = member_at( object, field.offset );
@@ -1128,7 +1166,7 @@ inline void reset_value( const value_desc& type, void* value )
 {
 	switch ( type.kind )
 	{
-		case field_kind::SCALAR: std::memset( value, 0, size_t{ 1 } << ( type.scalar & scalar_size_mask ) ); break;
+		case field_kind::SCALAR: store_scalar( value, type.scalar & scalar_size_mask, 0 ); break;
 		case field_kind::FIXED_BYTES: std::memset( value, 0, type.size ); break;
 		case field_kind::STRING:
 			if ( type.sequence == nullptr )
@@ -1169,6 +1207,24 @@ inline void reset_message( const value_desc& message, void* object )
 	const uint32_t* words = message_words( message );
 	for ( size_t pos = 0; pos < message.words; )
 	{
+		const uint32_t w0 = words[pos];
+		if ( ( w0 & 0x80000000u ) == 0 )
+		{
+			const auto op = static_cast<uint8_t>( w0 >> 24 );
+			if ( op < op_string )
+			{
+				++pos;
+				store_scalar( member_at( object, ( w0 >> 12 ) & 0xFFFu ), op & scalar_size_mask, 0 );
+				continue;
+			}
+			// Skip extra alternatives of a 1-word oneof without decoding the entry.
+			if ( op > op_oneof_base )
+			{
+				++pos;
+				continue;
+			}
+		}
+
 		// A `std::variant` member has one entry for each alternative. Reset it one time.
 		const field_entry field = decode_entry( words, pos );
 		if ( field.alternative <= 1 )
@@ -1317,6 +1373,81 @@ inline void decode_element( reader& in, wire_type wire, const sequence_desc& seq
 		*repeated_count( sequence, value ) = items.count + 1;
 }
 
+/// Reads a packed scalar record into `value`. Scalar elements are trivially
+/// copyable and implicit-lifetime, so the loop writes directly into storage.
+inline void decode_packed_scalars( reader& in, const sequence_desc& sequence, void* value )
+{
+	const std::span<const uint8_t> bytes = in.read_length_delimited();
+	if ( in.failed() || bytes.empty() )
+		return;
+
+	const sequence_view items = view_of( sequence, value );
+	const bool is_span = sequence.span != nullptr && sequence.span->bind != nullptr;
+	const error full_err = is_span ? error::TRUNCATED : error::CAPACITY_EXCEEDED;
+	const size_t capacity = decode_capacity( sequence, items );
+	const uint8_t code = sequence.element->scalar;
+	const size_t elem_size = sequence.element_size;
+	size_t count = items.count;
+	auto* dst = static_cast<unsigned char*>( member_at( items.data, count * elem_size ) );
+
+	if ( code & scalar_fixed )
+	{
+		const unsigned shift = code & scalar_size_mask;
+		const size_t full = bytes.size() >> shift;
+		const size_t avail = capacity - count;
+		const size_t copy_count = std::min( full, avail );
+
+		if ( copy_count != 0 )
+		{
+			if constexpr ( std::endian::native == std::endian::little )
+			{
+				std::memcpy( dst, bytes.data(), copy_count << shift );
+			}
+			else
+			{
+				reader packed( bytes.first( copy_count << shift ) );
+				for ( size_t i = 0; i < copy_count; ++i, dst += elem_size )
+					store_scalar( dst, code, read_scalar( packed, code ) );
+			}
+			count += copy_count;
+		}
+
+		if ( full > avail )
+			in.fail( full_err );
+		else if ( ( bytes.size() & ( elem_size - 1 ) ) != 0 )
+			in.fail( count >= capacity ? full_err : error::TRUNCATED );
+	}
+	else
+	{
+		reader packed( bytes );
+		while ( !packed.empty() )
+		{
+			if ( count >= capacity )
+			{
+				in.fail( full_err );
+				break;
+			}
+			const uint64_t bits = packed.read_varint();
+			if ( packed.failed() )
+			{
+				in.absorb( packed );
+				break;
+			}
+			store_scalar( dst, code, bits );
+			dst += elem_size;
+			++count;
+		}
+	}
+
+	if ( count != items.count )
+	{
+		if ( is_span )
+			sequence.span->bind( value, items.data, count );
+		else
+			*repeated_count( sequence, value ) = count;
+	}
+}
+
 /// Reads one record of a repeated field. A scalar element can be a packed
 /// record or a single value, also mixed in one message.
 inline void decode_repeated( reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory )
@@ -1328,10 +1459,7 @@ inline void decode_repeated( reader& in, field_key key, const sequence_desc& seq
 	const value_desc& element = *sequence.element;
 	if ( element.kind == field_kind::SCALAR && key.type == wire_type::LENGTH_DELIMITED )
 	{
-		reader packed( in.read_length_delimited() );
-		while ( !packed.empty() )
-			decode_element( packed, wire_of( element ), sequence, value, memory );
-		in.absorb( packed );
+		decode_packed_scalars( in, sequence, value );
 	}
 	else if ( key.type == wire_of( element ) )
 	{
@@ -1474,8 +1602,21 @@ inline void decode_message( reader& in, const value_desc& message, void* object,
 			continue;
 		}
 
-		const value_desc type = resolve_type( subs, field );
 		void* member = member_at( object, field.offset );
+		if ( field.base_op < op_string )
+		{
+			if ( key.type != wire_of_scalar( field.base_op ) )
+				in.skip( key.type );
+			else
+			{
+				const uint64_t bits = read_scalar( in, field.base_op );
+				if ( !in.failed() )
+					store_scalar( member, field.base_op, bits );
+			}
+			continue;
+		}
+
+		const value_desc type = resolve_type( subs, field );
 		if ( type.kind == field_kind::REPEATED )
 		{
 			decode_repeated( in, key, *type.sequence, member, memory );
