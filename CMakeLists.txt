@@ -196,7 +196,8 @@ if(MICROPB_TESTS)
             decode_encode_only not_aggregate enum_too_wide
             member_offset_too_large decode_const_member decode_fixed_span
             field_list_type field_list_offset field_list_alternative recursive_message
-            decode_needs_arena span_element_trivial no_field_list zigzag_unsigned fixed_width)
+            decode_needs_arena span_element_trivial no_field_list zigzag_unsigned fixed_width
+            wide_table_required)
         micropb_add_compile_fail_test(${rule} ${rule})
     endforeach()
 

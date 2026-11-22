@@ -224,7 +224,7 @@ namespace d = pb::detail;
 // The table is in the order of the field numbers.
 using message_table = d::field_table<d::field_list_of<manual::message>>;
 constexpr const auto& layout = message_table::layout;
-static_assert( message_table::entry_count == 7 && layout.words_n == 7 );
+static_assert( message_table::entry_count == 7 && layout.words_n == 9 );
 static_assert( layout.entries[0].number == 1 && layout.entries[1].number == 2 && layout.entries[2].number == 3 &&
                layout.entries[3].number == 4 && layout.entries[4].number == 5 && layout.entries[5].number == 10 &&
                layout.entries[6].number == 11 );
@@ -235,7 +235,7 @@ static_assert( layout.entries[5].offset == offsetof( manual::message, choice ) &
                layout.subs[layout.entries[6].sub_idx] == &d::value_descriptor<decltype( manual::message::choice )>::value );
 static_assert( d::value_descriptor<manual::empty>::value.words == 0 &&
                d::value_descriptor<manual::empty>::value.table == nullptr );
-static_assert( d::value_descriptor<manual::shared_offset>::value.words == 3 );
+static_assert( d::value_descriptor<manual::shared_offset>::value.words == 5 );
 
 static_assert( !d::is_recursive<manual::inner>() && !d::is_recursive<manual::message>() &&
                !d::is_recursive<manual::empty>() && !d::is_recursive<manual::fixed>() &&
