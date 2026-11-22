@@ -1,3 +1,4 @@
+#define MICROPB_WIDE_TABLES
 #include <array>
 #include <cstring>
 #include <optional>
@@ -85,9 +86,13 @@ template <typename Table>
 consteval d::field_entry entry_at( size_t index )
 {
 	size_t pos = 0;
+	uint32_t prev = 0;
 	d::field_entry entry{};
 	for ( size_t i = 0; i <= index; ++i )
-		entry = d::decode_entry( Table::value.words.data(), pos );
+	{
+		entry = d::decode_entry( Table::value.words.data(), pos, prev );
+		prev = entry.number;
+	}
 	return entry;
 }
 
@@ -102,16 +107,16 @@ consteval d::value_desc type_at( size_t index )
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// `plain`: three inline scalars at offsets 0, 4, 8, numbers 1, 2, 3, zero compound pointers, 3 words (12 B).
-static_assert( p.kind == K::MESSAGE && p.scalar == 0 && p.words == 3 && sizeof( plain_table::value ) == 12 );
+// `plain`: three inline scalars at offsets 0, 4, 8, numbers 1, 2, 3, zero compound pointers, 3 halfwords (6 B).
+static_assert( p.kind == K::MESSAGE && p.scalar == 0 && p.words == 3 && sizeof( plain_table::value ) == 6 );
 static_assert( entry_at<plain_table>( 0 ).offset == 0 && entry_at<plain_table>( 1 ).offset == 4 &&
                entry_at<plain_table>( 2 ).offset == 8 );
 static_assert( entry_at<plain_table>( 2 ).number == 3 && type_at<plain_table>( 2 ).kind == K::SCALAR &&
                entry_at<plain_table>( 0 ).alternative == 0 );
 static_assert( type_at<plain_table>( 1 ).scalar == d::scalar_code_of<uint32_t>() );
 
-// `holder`: 11 1-word entries, with the numbers 1 5 6 7 8 9 10 11 12 13 14, and 8 deduplicated compound pointers.
-static_assert( h.kind == K::MESSAGE && h.scalar == 8 && h.words == 11 );
+// `holder`: 9 1-halfword entries + 2 2-halfword oneof entries = 13 halfwords, and 8 deduplicated compound pointers.
+static_assert( h.kind == K::MESSAGE && h.scalar == 8 && h.words == 13 );
 static_assert( entry_at<holder_table>( 1 ).number == 5 && entry_at<holder_table>( 8 ).number == 12 &&
                entry_at<holder_table>( 10 ).number == 14 );
 static_assert( type_at<holder_table>( 1 ).kind == K::MESSAGE && type_at<holder_table>( 1 ).table == p.table );
@@ -147,8 +152,8 @@ static_assert( d::scalar_code_of<uint16_t>() == 1 && d::scalar_code_of<uint64_t>
 static_assert( d::scalar_code_of<int32_t, pb::int_encoding::ZIGZAG>() == ( 2 | d::scalar_signed | d::scalar_zigzag ) );
 static_assert( d::scalar_code_of<float>() == ( 2 | d::scalar_fixed ) &&
                d::value_descriptor<int64_t, pb::int_encoding::FIXED>::value.scalar == ( 3 | d::scalar_fixed ) );
-static_assert( d::scalar_code_of<small>() == ( 0 | d::scalar_enum ) );
-static_assert( d::scalar_code_of<level>() == ( 2 | d::scalar_enum | d::scalar_signed ) );
+static_assert( d::scalar_code_of<small>() == 0 );
+static_assert( d::scalar_code_of<level>() == ( 2 | d::scalar_signed ) );
 
 static_assert( sizeof( d::value_desc ) <= 2 * sizeof( void* ) );
 
@@ -620,7 +625,7 @@ bool test_wide_entries()
 {
 	using wt = d::field_table<d::field_list_of<wide_msg>>;
 	// 32 1-word entries (`first` 1..32) + 1 (`pad`) = 33 1-word entries, plus 5 3-word entries = 48 words.
-	static_assert( wt::entry_count == 38 && wt::layout.words_n == 33 + 5 * 3 );
+	static_assert( wt::entry_count == 38 && wt::layout.words_n == 32 * 2 + 1 + 5 * 5 + 1 );
 
 	wide_msg tx{};
 	tx.first.emplace<33>( alt_tag<32>{ 42 } );

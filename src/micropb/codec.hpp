@@ -33,17 +33,24 @@ namespace detail {
 // Part 1: descriptors
 
 /// A scalar code tells the interpreter how to load and store a scalar. The low
-/// two bits are log2 of the size in bytes. The other bits are flags.
+/// two bits are log2 of the size in bytes. All codes fit in `0..19` so every
+/// scalar fits in a 1-halfword (5-bit op) field entry.
 inline constexpr uint8_t scalar_size_mask = 0x03;
 /// The type has a sign: the loaded value sign-extends to 64 bits.
 inline constexpr uint8_t scalar_signed = 0x04;
-/// `sint32` or `sint64`: ZigZag varint.
-inline constexpr uint8_t scalar_zigzag = 0x08;
-/// Fixed width on the wire: 4 bytes or 8 bytes, the size of the type.
+/// `bool`: 1 byte (`code == scalar_bool`).
+inline constexpr uint8_t scalar_bool = 0x08;
+/// Unsigned 32-bit enum (`code == scalar_enum`): `int32` on the wire, sign-extends bit 31.
+inline constexpr uint8_t scalar_enum = 0x0A;
+/// `sint8`..`sint64`: ZigZag varint (always combined with `scalar_signed`, so `0x0C..0x0F`).
+inline constexpr uint8_t scalar_zigzag = 0x0C;
+/// Fixed width on the wire: 4 bytes (`0x12`) or 8 bytes (`0x13`).
 inline constexpr uint8_t scalar_fixed = 0x10;
-inline constexpr uint8_t scalar_bool = 0x20;
-/// An enum: `int32` on the wire.
-inline constexpr uint8_t scalar_enum = 0x40;
+
+[[nodiscard]] constexpr bool is_scalar_zigzag( uint8_t code )
+{
+	return ( code & scalar_zigzag ) == scalar_zigzag;
+}
 
 template <typename T, int_encoding Encoding = int_encoding::VARINT>
 [[nodiscard]] consteval uint8_t scalar_code_of()
@@ -51,11 +58,18 @@ template <typename T, int_encoding Encoding = int_encoding::VARINT>
 	constexpr uint8_t size = sizeof( T ) == 1 ? 0 : sizeof( T ) == 2 ? 1 : sizeof( T ) == 4 ? 2 : 3;
 
 	if constexpr ( std::is_same_v<T, bool> )
-		return size | scalar_bool;
+		return scalar_bool;
 	else if constexpr ( std::is_enum_v<T> )
-		return size | scalar_enum | ( std::is_signed_v<std::underlying_type_t<T>> ? scalar_signed : 0 );
+	{
+		if constexpr ( std::is_signed_v<std::underlying_type_t<T>> )
+			return size | scalar_signed;
+		else if constexpr ( sizeof( T ) == 4 )
+			return scalar_enum;
+		else
+			return size;
+	}
 	else if constexpr ( Encoding == int_encoding::ZIGZAG )
-		return size | scalar_signed | scalar_zigzag;
+		return size | scalar_zigzag;
 	else if constexpr ( Encoding == int_encoding::FIXED || wire_type_of<T>() != wire_type::VARINT )
 		return size | scalar_fixed;
 	else
@@ -91,25 +105,31 @@ struct value_desc
 	};
 };
 
-// Each field of a message encodes into 1 or 3 `uint32_t` words, sorted in
-// ascending field number:
-// - 1 word (bit 31 == 0): `[30:24 op] [23:12 offset] [11:0 number]`
-//     op 0..70:   inline SCALAR (`op` is the scalar code)
-//     op 71:      inline STRING (`std::string_view`)
-//     op 72:      inline BYTES view (`std::span<const uint8_t>`)
-//     op 73..95:  compound member at `subs[op - 73]`
-//     op 96..127: ONEOF alternative `op - 95` (1..32) on `subs[0]`
-// - 3 words (bit 31 == 1), when `number > 4095`, `offset > 4095`, `sub_idx >= 23`,
-//   a second `std::variant` member, or `alternative > 32`:
-//     word 0: `0x80000000u | number`
-//     word 1: `(offset << 16) | alternative`
-//     word 2: `(sub_idx << 8) | base_op`
-inline constexpr uint8_t op_string = 71;
-inline constexpr uint8_t op_bytes_view = 72;
-inline constexpr uint8_t op_sub_base = 73;
-inline constexpr uint8_t op_sub_limit = 23;
-inline constexpr uint8_t op_oneof_base = 96;
+// Each field of a message encodes into 1, 2, or (under `MICROPB_WIDE_TABLES`) 5
+// `uint16_t` halfwords, sorted in ascending field number:
+// - 1 halfword (bit 15 == 0): `[14:12 tag_delta - 1 (1..8)] [11:5 offset (0..127)] [4:0 op (0..31)]`
+//     op 0..19:   inline SCALAR (`op` is the scalar code)
+//     op 20:      inline STRING (`std::string_view`)
+//     op 21:      inline BYTES view (`std::span<const uint8_t>`)
+//     op 22..31:  compound member at `subs[op - 22]`
+// - 2 halfwords (bit 15 == 1, `op != 127`): 31 bits across `(w0 << 16) | w1`:
+//     `[30:24 op (0..126)] [23:12 offset (0..4095)] [11:0 number (1..4095)]`
+//     op 22..94:  compound member at `subs[op - 22]`
+//     op 95..126: ONEOF alternative `op - 94` (1..32) on `subs[0]`
+// - 5 halfwords (`(w0 >> 8) == 0xFFu`, requires `MICROPB_WIDE_TABLES`):
+//     w0: `0xFF00u | base_op`
+//     w1: `number & 0xFFFFu`
+//     w2: `number >> 16`
+//     w3: `offset`
+//     w4: `(sub_idx << 8) | alternative`
+inline constexpr uint8_t op_string = 20;
+inline constexpr uint8_t op_bytes_view = 21;
+inline constexpr uint8_t op_sub_base = 22;
+inline constexpr uint8_t op_short_sub_limit = 10;
+inline constexpr uint8_t op_sub_limit = 73;
+inline constexpr uint8_t op_oneof_base = 95;
 inline constexpr uint8_t op_oneof_max_alt = 32;
+inline constexpr uint8_t op_wide = 127;
 
 /// Unpacked entry of a message field table.
 struct field_entry
@@ -436,7 +456,19 @@ template <typename M, int_encoding Encoding = int_encoding::VARINT>
 		return op_sub_base;
 }
 
-[[nodiscard]] consteval bool fits_one_word( const field_entry& entry )
+[[nodiscard]] consteval bool fits_one_halfword( const field_entry& entry, uint32_t prev_number )
+{
+	if ( entry.alternative != 0 || entry.offset > 0x7Fu )
+		return false;
+	const uint32_t delta = entry.number - prev_number;
+	if ( delta < 1u || delta > 8u )
+		return false;
+	if ( entry.base_op == op_sub_base )
+		return entry.sub_idx < op_short_sub_limit;
+	return true;
+}
+
+[[nodiscard]] consteval bool fits_two_halfwords( const field_entry& entry )
 {
 	if ( entry.number > 0xFFFu || entry.offset > 0xFFFu )
 		return false;
@@ -451,13 +483,13 @@ template <size_t SubCount, size_t WordCount>
 struct message_table_data
 {
 	std::array<const value_desc*, SubCount> subs;
-	std::array<uint32_t, WordCount> words;
+	std::array<uint16_t, WordCount> words;
 };
 
 template <size_t WordCount>
 struct message_table_data<0, WordCount>
 {
-	std::array<uint32_t, WordCount> words;
+	std::array<uint16_t, WordCount> words;
 };
 
 template <>
@@ -552,6 +584,7 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 	{
 		size_t subs_n;
 		size_t words_n;
+		bool has_wide;
 		std::array<const value_desc*, entry_count> subs;
 		std::array<field_entry, entry_count> entries;
 	};
@@ -597,6 +630,7 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 			}
 		}
 
+		uint32_t prev_number = 0;
 		for ( size_t i = 0; i < entry_count; ++i )
 		{
 			uint16_t sub_idx = 0;
@@ -613,13 +647,27 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 				sub_idx,
 				rows[i].base_op,
 			};
-			p.words_n += fits_one_word( p.entries[i] ) ? 1u : 3u;
+			if ( fits_one_halfword( p.entries[i], prev_number ) )
+				p.words_n += 1u;
+			else if ( fits_two_halfwords( p.entries[i] ) )
+				p.words_n += 2u;
+			else
+			{
+				p.has_wide = true;
+				p.words_n += 5u;
+			}
+			prev_number = rows[i].number;
 		}
 		return p;
 	}
 
 	static constexpr plan layout = build_plan();
 	static_assert( layout.subs_n <= 255 && layout.words_n <= 65535 );
+#ifndef MICROPB_WIDE_TABLES
+	static_assert( !layout.has_wide,
+	               "pb: wide_table_required: define MICROPB_WIDE_TABLES for tags > 4095, offsets > 4095, "
+	               "more than 73 compound types, multiple oneofs, or more than 32 oneof alternatives" );
+#endif
 
 	using table_type = message_table_data<layout.subs_n, layout.words_n>;
 
@@ -637,22 +685,37 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 		if constexpr ( layout.words_n > 0 )
 		{
 			size_t w = 0;
+			uint32_t prev_number = 0;
 			for ( size_t i = 0; i < entry_count; ++i )
 			{
 				const field_entry& e = layout.entries[i];
-				if ( fits_one_word( e ) )
+				if ( fits_one_halfword( e, prev_number ) )
+				{
+					const uint32_t op =
+					  e.base_op == op_sub_base ? ( uint32_t{ op_sub_base } + e.sub_idx ) : uint32_t{ e.base_op };
+					const uint32_t delta = e.number - prev_number - 1u;
+					out.words[w++] =
+					  static_cast<uint16_t>( ( delta << 12 ) | ( static_cast<uint32_t>( e.offset ) << 5 ) | op );
+				}
+				else if ( fits_two_halfwords( e ) )
 				{
 					const uint32_t op = e.alternative != 0 ? ( uint32_t{ op_oneof_base } + e.alternative - 1u )
 					                         : e.base_op == op_sub_base ? ( uint32_t{ op_sub_base } + e.sub_idx )
 					                                                    : uint32_t{ e.base_op };
-					out.words[w++] = ( op << 24 ) | ( static_cast<uint32_t>( e.offset ) << 12 ) | e.number;
+					const uint32_t packed =
+					  0x80000000u | ( op << 24 ) | ( static_cast<uint32_t>( e.offset ) << 12 ) | e.number;
+					out.words[w++] = static_cast<uint16_t>( packed >> 16 );
+					out.words[w++] = static_cast<uint16_t>( packed & 0xFFFFu );
 				}
 				else
 				{
-					out.words[w++] = 0x80000000u | e.number;
-					out.words[w++] = ( static_cast<uint32_t>( e.offset ) << 16 ) | e.alternative;
-					out.words[w++] = ( static_cast<uint32_t>( e.sub_idx ) << 8 ) | e.base_op;
+					out.words[w++] = static_cast<uint16_t>( 0xFF00u | e.base_op );
+					out.words[w++] = static_cast<uint16_t>( e.number & 0xFFFFu );
+					out.words[w++] = static_cast<uint16_t>( e.number >> 16 );
+					out.words[w++] = e.offset;
+					out.words[w++] = static_cast<uint16_t>( ( static_cast<uint32_t>( e.sub_idx ) << 8 ) | e.alternative );
 				}
+				prev_number = e.number;
 			}
 		}
 		return out;
@@ -723,38 +786,53 @@ constexpr value_desc value_descriptor<T, Encoding>::value = describe_value<T, En
 	return static_cast<const value_desc* const*>( message.table );
 }
 
-[[nodiscard]] inline const uint32_t* message_words( const value_desc& message )
+[[nodiscard]] inline const uint16_t* message_words( const value_desc& message )
 {
 	if ( message.table == nullptr )
 		return nullptr;
-	return static_cast<const uint32_t*>(
+	return static_cast<const uint16_t*>(
 	  member_at( message.table, size_t{ message.scalar } * sizeof( const value_desc* ) ) );
 }
 
-[[nodiscard]] constexpr field_entry decode_entry( const uint32_t* words, size_t& pos )
+[[nodiscard]] constexpr field_entry decode_entry( const uint16_t* words, size_t& pos, uint32_t prev_number )
 {
-	const uint32_t w0 = words[pos++];
-	if ( ( w0 & 0x80000000u ) == 0 )
+	const uint16_t w0 = words[pos++];
+	if ( ( w0 & 0x8000u ) == 0 )
 	{
-		const auto op = static_cast<uint8_t>( w0 >> 24 );
-		const auto offset = static_cast<uint16_t>( ( w0 >> 12 ) & 0xFFFu );
-		const uint32_t number = w0 & 0xFFFu;
-		if ( op >= op_oneof_base )
-			return { number, offset, static_cast<uint16_t>( uint32_t{ op } - op_oneof_base + 1u ), 0, op_sub_base };
+		const uint32_t number = prev_number + ( ( w0 >> 12 ) & 7u ) + 1u;
+		const auto offset = static_cast<uint16_t>( ( w0 >> 5 ) & 0x7Fu );
+		const auto op = static_cast<uint8_t>( w0 & 0x1Fu );
 		if ( op >= op_sub_base )
 			return { number, offset, 0, static_cast<uint16_t>( uint32_t{ op } - op_sub_base ), op_sub_base };
 		return { number, offset, 0, 0, op };
 	}
 
-	const uint32_t w1 = words[pos++];
-	const uint32_t w2 = words[pos++];
-	return {
-		w0 & 0x7FFFFFFFu,
-		static_cast<uint16_t>( w1 >> 16 ),
-		static_cast<uint16_t>( w1 & 0xFFFFu ),
-		static_cast<uint16_t>( w2 >> 8 ),
-		static_cast<uint8_t>( w2 & 0xFFu ),
-	};
+#ifdef MICROPB_WIDE_TABLES
+	if ( ( w0 >> 8 ) == 0xFFu )
+	{
+		const uint32_t number = uint32_t{ words[pos] } | ( uint32_t{ words[pos + 1] } << 16 );
+		const uint16_t offset = words[pos + 2];
+		const uint16_t tail = words[pos + 3];
+		pos += 4;
+		return {
+			number,
+			offset,
+			static_cast<uint16_t>( tail & 0xFFu ),
+			static_cast<uint16_t>( tail >> 8 ),
+			static_cast<uint8_t>( w0 & 0xFFu ),
+		};
+	}
+#endif
+
+	const uint32_t packed = ( uint32_t{ w0 } << 16 ) | words[pos++];
+	const auto op = static_cast<uint8_t>( ( w0 >> 8 ) & 0x7Fu );
+	const auto offset = static_cast<uint16_t>( ( packed >> 12 ) & 0xFFFu );
+	const uint32_t number = packed & 0xFFFu;
+	if ( op >= op_oneof_base )
+		return { number, offset, static_cast<uint16_t>( uint32_t{ op } - op_oneof_base + 1u ), 0, op_sub_base };
+	if ( op >= op_sub_base )
+		return { number, offset, 0, static_cast<uint16_t>( uint32_t{ op } - op_sub_base ), op_sub_base };
+	return { number, offset, 0, 0, op };
 }
 
 [[nodiscard]] constexpr value_desc resolve_type( const value_desc* const* subs, const field_entry& entry )
@@ -882,9 +960,9 @@ inline void set_oneof_index( const value_desc& type, void* object, size_t index 
 		const unsigned shift = 64 - ( 8u << ( code & scalar_size_mask ) );
 		bits = static_cast<uint64_t>( static_cast<int64_t>( bits << shift ) >> shift );
 	}
-	if ( code & scalar_enum )
+	if ( code == scalar_enum )
 		bits = static_cast<uint64_t>( static_cast<int64_t>( static_cast<int32_t>( bits ) ) );
-	if ( code & scalar_zigzag )
+	if ( is_scalar_zigzag( code ) )
 		bits = zigzag_encode( static_cast<int64_t>( bits ) );
 	return bits;
 }
@@ -1081,27 +1159,30 @@ inline void emit_value( writer& sink, uint32_t number, const value_desc& type, c
 inline void emit_message( writer& sink, const value_desc& message, const void* object )
 {
 	const value_desc* const* subs = message_subs( message );
-	const uint32_t* words = message_words( message );
+	const uint16_t* words = message_words( message );
+	uint32_t prev = 0;
 	for ( size_t pos = 0; pos < message.words; )
 	{
-		const uint32_t w0 = words[pos];
-		if ( ( w0 & 0x80000000u ) == 0 )
+		const uint16_t w0 = words[pos];
+		if ( ( w0 & 0x8000u ) == 0 )
 		{
-			const auto op = static_cast<uint8_t>( w0 >> 24 );
+			const auto op = static_cast<uint8_t>( w0 & 0x1Fu );
 			if ( op < op_string )
 			{
+				prev += ( ( w0 >> 12 ) & 7u ) + 1u;
 				++pos;
-				const uint64_t bits = load_scalar( member_at( object, ( w0 >> 12 ) & 0xFFFu ), op );
+				const uint64_t bits = load_scalar( member_at( object, ( w0 >> 5 ) & 0x7Fu ), op );
 				if ( bits != 0 )
 				{
-					sink.write_key( w0 & 0xFFFu, wire_of_scalar( op ) );
+					sink.write_key( prev, wire_of_scalar( op ) );
 					emit_scalar( sink, op, bits );
 				}
 				continue;
 			}
 		}
 
-		const field_entry field = decode_entry( words, pos );
+		const field_entry field = decode_entry( words, pos, prev );
+		prev = field.number;
 		const value_desc type = resolve_type( subs, field );
 		const void* member = member_at( object, field.offset );
 		if ( field.alternative == 0 )
@@ -1131,14 +1212,14 @@ MICROPB_ENTRY inline std::expected<size_t, error> encode(
 /// wide for the type loses its upper bits, as in the Google C++ runtime.
 inline void store_scalar( void* value, uint8_t code, uint64_t bits )
 {
-	if ( code & scalar_zigzag )
+	if ( is_scalar_zigzag( code ) )
 	{
 		if ( ( code & scalar_size_mask ) == 2 )
 			bits = static_cast<uint32_t>( zigzag_decode( static_cast<uint32_t>( bits ) ) );
 		else
 			bits = static_cast<uint64_t>( zigzag_decode( bits ) );
 	}
-	if ( code & scalar_bool )
+	if ( code == scalar_bool )
 		bits = bits != 0;
 
 	switch ( code & scalar_size_mask )
@@ -1220,29 +1301,29 @@ inline void reset_value( const value_desc& type, void* value )
 inline void reset_message( const value_desc& message, void* object )
 {
 	const value_desc* const* subs = message_subs( message );
-	const uint32_t* words = message_words( message );
+	const uint16_t* words = message_words( message );
 	for ( size_t pos = 0; pos < message.words; )
 	{
-		const uint32_t w0 = words[pos];
-		if ( ( w0 & 0x80000000u ) == 0 )
+		const uint16_t w0 = words[pos];
+		if ( ( w0 & 0x8000u ) == 0 )
 		{
-			const auto op = static_cast<uint8_t>( w0 >> 24 );
+			const auto op = static_cast<uint8_t>( w0 & 0x1Fu );
 			if ( op < op_string )
 			{
 				++pos;
-				store_scalar( member_at( object, ( w0 >> 12 ) & 0xFFFu ), op & scalar_size_mask, 0 );
-				continue;
-			}
-			// Skip extra alternatives of a 1-word oneof without decoding the entry.
-			if ( op > op_oneof_base )
-			{
-				++pos;
+				store_scalar( member_at( object, ( w0 >> 5 ) & 0x7Fu ), op & scalar_size_mask, 0 );
 				continue;
 			}
 		}
+		else if ( ( ( w0 >> 8 ) & 0x7Fu ) > op_oneof_base && ( w0 >> 8 ) != 0xFFu )
+		{
+			// Skip extra alternatives of a 2-halfword oneof without decoding the entry.
+			pos += 2;
+			continue;
+		}
 
-		// A `std::variant` member has one entry for each alternative. Reset it one time.
-		const field_entry field = decode_entry( words, pos );
+		// A `pb::oneof` member has one entry for each alternative. Reset it one time.
+		const field_entry field = decode_entry( words, pos, 0 );
 		if ( field.alternative <= 1 )
 		{
 			const value_desc type = resolve_type( subs, field );
@@ -1574,30 +1655,53 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 }
 
 /// Finds the entry of the field `number` in `words`. The search starts at the
-/// word index `cursor`. After the end of the table, it continues at 0. After a
-/// match, `cursor` is the start word index of the entry.
-[[nodiscard]] inline bool find_field( const uint32_t* words,
+/// halfword index `cursor` (with preceding field number `cursor_prev`). After
+/// the end of the table, it continues at 0. After a match, `cursor` and
+/// `cursor_prev` name the start of the entry.
+[[nodiscard]] inline bool find_field( const uint16_t* words,
                                       size_t total_words,
                                       uint32_t number,
                                       size_t& cursor,
+                                      uint32_t& cursor_prev,
                                       field_entry& out )
 {
 	for ( unsigned pass = 0; pass < 2; ++pass )
 	{
 		size_t pos = pass == 0 ? cursor : 0;
+		uint32_t prev = pass == 0 ? cursor_prev : 0;
 		const size_t stop = pass == 0 ? total_words : cursor;
 		while ( pos < stop )
 		{
-			const uint32_t w0 = words[pos];
-			const bool wide = ( w0 & 0x80000000u ) != 0;
-			const uint32_t entry_number = wide ? ( w0 & 0x7FFFFFFFu ) : ( w0 & 0xFFFu );
+			const uint16_t w0 = words[pos];
+			uint32_t entry_number;
+			size_t step;
+			if ( ( w0 & 0x8000u ) == 0 )
+			{
+				entry_number = prev + ( ( w0 >> 12 ) & 7u ) + 1u;
+				step = 1;
+			}
+#ifdef MICROPB_WIDE_TABLES
+			else if ( ( w0 >> 8 ) == 0xFFu )
+			{
+				entry_number = uint32_t{ words[pos + 1] } | ( uint32_t{ words[pos + 2] } << 16 );
+				step = 5;
+			}
+#endif
+			else
+			{
+				entry_number = words[pos + 1] & 0xFFFu;
+				step = 2;
+			}
+
 			if ( entry_number == number )
 			{
 				cursor = pos;
-				out = decode_entry( words, pos );
+				cursor_prev = prev;
+				out = decode_entry( words, pos, prev );
 				return true;
 			}
-			pos += wide ? 3u : 1u;
+			prev = entry_number;
+			pos += step;
 		}
 	}
 	return false;
@@ -1609,10 +1713,11 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 inline void decode_message( reader& in, const value_desc& message, void* object, arena* memory )
 {
 	const value_desc* const* subs = message_subs( message );
-	const uint32_t* words = message_words( message );
+	const uint16_t* words = message_words( message );
 	// Fields usually arrive in ascending order, and a repeated field arrives
 	// many times. The search starts at the entry of the last match.
 	size_t cursor = 0;
+	uint32_t cursor_prev = 0;
 	while ( !in.empty() )
 	{
 		const field_key key = in.read_key();
@@ -1620,7 +1725,7 @@ inline void decode_message( reader& in, const value_desc& message, void* object,
 			return;
 
 		field_entry field{};
-		if ( !find_field( words, message.words, key.number, cursor, field ) )
+		if ( !find_field( words, message.words, key.number, cursor, cursor_prev, field ) )
 		{
 			in.skip( key.type );
 			continue;
