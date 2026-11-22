@@ -52,9 +52,9 @@ struct Reading
 	pb::repeated<float, 4> channels = {};
 	pb::bytes<8> token = {};
 	std::array<uint8_t, 6> mac = {};
-	static constexpr size_t detail_uptime_s = 1;
-	static constexpr size_t detail_fault = 2;
-	std::variant<std::monostate, uint32_t, std::string_view> detail = {};
+	static constexpr size_t detail_uptime_s = 0;
+	static constexpr size_t detail_fault = 1;
+	pb::oneof<uint32_t, std::string_view> detail = {};
 };
 
 } // namespace sensor
@@ -94,36 +94,37 @@ bool round_trip()
 	if ( !pb::decode( std::span( wire ).first( *written ), rx ) )
 		return false;
 
-	const auto* uptime = std::get_if<uint32_t>( &rx.detail );
+	const auto* uptime = pb::get_if<uint32_t>( &rx.detail );
 	return rx.id == 1 && rx.temperature_mc == -250 && rx.label == "ambient" && uptime && *uptime == 3600;
 }
 ```
 
 ## Why MicroPB
 
-* **Plain C++23 types, no callbacks:** structs use `int32_t`/`uint32_t`, `enum class`, `std::optional`, `std::variant`, `pb::string<N>`, `pb::bytes<N>`, `pb::repeated<T, N>`, `std::string_view`, `std::span`, and `std::array`, default-initialized to their proto3 defaults. No `has_x` booleans, manual union tags, integer wrapper structs, or stream callbacks.
-* **Smaller Flash footprint than NanoPB on Arm Cortex-M:** one non-template interpreter handles all messages from compact `constexpr` word tables in ROM. Measured on Arm Cortex-M4 / Cortex-M33 (`arm-none-eabi-gcc 16.2.0 -Os -mthumb --gc-sections`; x86-64 tables in [DETAILS.md](DETAILS.md#binary-size-comparison)):
+* **Plain C++23 types, no callbacks:** structs use `int32_t`/`uint32_t`, `enum class`, `std::optional`, `pb::oneof`, `pb::string<N>`, `pb::bytes<N>`, `pb::repeated<T, N>`, `pb::map<K, V, N>`, `std::string_view`, `std::span`, and `std::array`, default-initialized to their proto3 defaults. No `has_x` booleans, manual union tags, integer wrapper structs, or stream callbacks.
+* **Smaller Flash footprint than NanoPB on Arm Cortex-M:** one non-template interpreter handles all messages from compact `constexpr` halfword tables in ROM. By default, MicroPB optimizes for minimum ROM size; define `MICROPB_FAST` to enable speed-oriented fast paths. Measured on Arm Cortex-M4 / Cortex-M33 (`arm-none-eabi-gcc 16.2.0 -Os -mthumb --gc-sections`; x86-64 tables in [DETAILS.md](DETAILS.md#binary-size-comparison)):
 
   | Configuration (Cortex-M4 / M33) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Extra 8-field type |
   | --- | ---: | ---: | ---: | ---: |
-  | **MicroPB** | **4,098 B** | **5,386 B** | **6,706 B** | **82 B** |
+  | **MicroPB (default)** | **3,610 B** | **4,298 B** | **4,978 B** | **42 B** |
+  | **MicroPB (`MICROPB_FAST`)** | **4,256 B** | **4,944 B** | **5,624 B** | **42 B** |
   | NanoPB 0.4.9.3 — fixed-size (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,150 B | 6,414 B | 7,774 B | 85 B |
   | NanoPB 0.4.9.3 — `pb_callback_t` (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,210 B | 6,606 B | 8,078 B | 92 B |
   | NanoPB 0.4.9.3 — fixed-size (default flags) | 6,616 B | 7,880 B | 9,240 B | 85 B |
   | NanoPB 0.4.9.3 — `pb_callback_t` (default flags) | 6,676 B | 8,072 B | 9,544 B | 92 B |
 
-* **Faster encode and decode than NanoPB:** measured on Linux x86-64 (`GCC 16.2.1 -O2`, median ns/op, byte-identical wire output) against NanoPB 0.4.9.3 with `PB_BUFFER_ONLY + PB_NO_ERRMSG` (`-Os` and default-flag tables in [DETAILS.md](DETAILS.md#encode-and-decode-speed-comparison)):
+* **Faster encode and decode than NanoPB:** measured on Linux x86-64 (`GCC 16.2.1 -O2`, median ns/op, byte-identical wire output) with `MICROPB_FAST` against NanoPB 0.4.9.3 (`PB_BUFFER_ONLY + PB_NO_ERRMSG`; default-mode, `-Os`, and NanoPB default-flag tables in [DETAILS.md](DETAILS.md#encode-and-decode-speed-comparison)):
 
-  | Workload | Wire | MicroPB enc | NanoPB enc | MicroPB dec | NanoPB dec |
+  | Workload | Wire | MicroPB (`MICROPB_FAST`) enc | NanoPB enc | MicroPB (`MICROPB_FAST`) dec | NanoPB dec |
   | --- | ---: | ---: | ---: | ---: | ---: |
-  | 12 mixed scalars | 76 B | **57 ns** (2.8x) | 163 ns | **77 ns** (2.9x) | 226 ns |
-  | Sensor `Reading` (above) | 73 B | **47 ns** (2.6x) | 122 ns | **82 ns** (2.2x) | 180 ns |
-  | 32 packed `int32` (fixed) | 143 B | **178 ns** (2.1x) | 369 ns | **128 ns** (1.6x) | 208 ns |
-  | 32 packed `float` (fixed) | 131 B | **11 ns** (4.8x) | 52 ns | **30 ns** (3.7x) | 111 ns |
-  | `oneof` envelope (16 submsgs) | 44 B | **92 ns** (3.2x) | 296 ns | **74 ns** (3.1x) | 230 ns |
+  | 12 mixed scalars | 76 B | **49 ns** (3.4x) | 165 ns | **87 ns** (2.6x) | 222 ns |
+  | Sensor `Reading` (above) | 73 B | **43 ns** (2.9x) | 124 ns | **79 ns** (2.2x) | 175 ns |
+  | 32 packed `int32` (fixed) | 143 B | **183 ns** (2.0x) | 370 ns | **112 ns** (2.1x) | 230 ns |
+  | 32 packed `float` (fixed) | 131 B | **12 ns** (4.5x) | 53 ns | **36 ns** (3.2x) | 115 ns |
+  | `oneof` envelope (16 submsgs) | 44 B | **77 ns** (3.8x) | 287 ns | **80 ns** (2.8x) | 223 ns |
 
 * **No heap, no exceptions, no RTTI, no startup code:** compiles with `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`. Tables live in `.rodata` with zero static constructors before `main()`.
-* **Compile-time schema validation:** invalid tags, unmapped types, recursive messages, and missing scratch buffers fail at compile time with named `static_assert` diagnostics (`pb: <rule>:`).
+* **Compile-time safety checks:** recursive messages, encode-only `std::array` decodes, missing scratch buffers, and table/offset limits fail at compile time with named `static_assert` diagnostics (`pb: <rule>:`).
 * **Wire-identical to `protoc` & zero external dependencies:** verified byte-for-byte against `protoc`, using 5 standard-library-only C++23 headers and a single-file Python 3 plugin (stdlib only).
 
 > [!NOTE]
@@ -167,7 +168,8 @@ void on_packet( std::span<const uint8_t> packet )
 | `string` | *(none)* / `max_length:N` (`max_size:N+1`) | `std::string_view` / `pb::string<N>` (null-terminated) |
 | `bytes` | *(none)* / `max_size:N` / `max_size:N fixed_length:true` | `std::span<const uint8_t>` / `pb::bytes<N>` / `std::array<uint8_t, N>` |
 | `repeated T` | *(none)* / `max_count:N` / `max_count:N fixed_count:true` | `std::span<const T>` / `pb::repeated<T, N>` / `std::array<T, N>` |
-| `optional T` / `oneof` | — | `std::optional<T>` / `std::variant<std::monostate, ...>` |
+| `map<K, V>` | *(none)* / `max_count:N` / `max_count:N fixed_count:true` | `std::span<const pb::kv_pair<K, V>>` / `pb::map<K, V, N>` / `std::array<pb::kv_pair<K, V>, N>` |
+| `optional T` / `oneof` | — | `std::optional<T>` / `pb::oneof<...>` |
 
 ## API
 
@@ -211,6 +213,16 @@ cmake -S . -B .build -G Ninja
 cmake --build .build
 ctest --test-dir .build --output-on-failure
 ```
+
+## Limitations & trade-offs
+
+* **Contiguous buffers only:** MicroPB encodes into and decodes from contiguous `std::span` buffers. Streaming I/O and user callbacks (`pb_callback_t`) are not supported.
+* **Proto3 subset:** no proto2, editions, groups, well-known types (`Any`, `Timestamp`), JSON, or unknown-field preservation (unknown fields are skipped on decode).
+* **No recursive messages:** recursive schemas are rejected at compile time so call stack depth stays bounded.
+* **C++23 and runtime-only codec:** requires C++23 (`std::expected`). `pb::encode`, `pb::decode`, and `pb::encoded_size` access members by byte offset and cannot run in `constexpr` evaluation.
+* **Compact table limits vs. `MICROPB_WIDE_TABLES`:** default compact tables support field numbers up to `4095`, member offsets up to `4095` bytes, up to `73` distinct compound types per message, and one `pb::oneof` of up to `32` alternatives per message. Define `MICROPB_WIDE_TABLES` to support field numbers up to `2^29 - 1`, offsets up to `65535` bytes, `255` compound types, multiple `pb::oneof` members, and `255` alternatives per `oneof`, at the cost of larger ROM tables.
+* **ROM size vs. speed (`MICROPB_FAST`):** the default build minimizes Flash/ROM (`3,610 B` base on Cortex-M4) with linear field lookup and element-by-element packed loops. Define `MICROPB_FAST` (`+646 B` on Cortex-M4) to enable inline scalar dispatch, cursor field lookup, 1-byte varint fast path, and bulk packed scalar encode/decode.
+* **Two-pass `std::span<const T>` decode:** decoding a dynamic `repeated` span scans the input first to count elements and allocate one contiguous block in scratch memory, which is slower than a single-pass callback.
 
 ## Further reading
 

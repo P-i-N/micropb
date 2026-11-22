@@ -13,7 +13,6 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
-#include <variant>
 
 #include <micropb/schema.hpp>
 #include <micropb/types.hpp>
@@ -34,17 +33,24 @@ namespace detail {
 // Part 1: descriptors
 
 /// A scalar code tells the interpreter how to load and store a scalar. The low
-/// two bits are log2 of the size in bytes. The other bits are flags.
+/// two bits are log2 of the size in bytes. All codes fit in `0..19` so every
+/// scalar fits in a 1-halfword (5-bit op) field entry.
 inline constexpr uint8_t scalar_size_mask = 0x03;
 /// The type has a sign: the loaded value sign-extends to 64 bits.
 inline constexpr uint8_t scalar_signed = 0x04;
-/// `sint32` or `sint64`: ZigZag varint.
-inline constexpr uint8_t scalar_zigzag = 0x08;
-/// Fixed width on the wire: 4 bytes or 8 bytes, the size of the type.
+/// `bool`: 1 byte (`code == scalar_bool`).
+inline constexpr uint8_t scalar_bool = 0x08;
+/// Unsigned 32-bit enum (`code == scalar_enum`): `int32` on the wire, sign-extends bit 31.
+inline constexpr uint8_t scalar_enum = 0x0A;
+/// `sint8`..`sint64`: ZigZag varint (always combined with `scalar_signed`, so `0x0C..0x0F`).
+inline constexpr uint8_t scalar_zigzag = 0x0C;
+/// Fixed width on the wire: 4 bytes (`0x12`) or 8 bytes (`0x13`).
 inline constexpr uint8_t scalar_fixed = 0x10;
-inline constexpr uint8_t scalar_bool = 0x20;
-/// An enum: `int32` on the wire.
-inline constexpr uint8_t scalar_enum = 0x40;
+
+[[nodiscard]] constexpr bool is_scalar_zigzag( uint8_t code )
+{
+	return ( code & scalar_zigzag ) == scalar_zigzag;
+}
 
 template <typename T, int_encoding Encoding = int_encoding::VARINT>
 [[nodiscard]] consteval uint8_t scalar_code_of()
@@ -52,11 +58,18 @@ template <typename T, int_encoding Encoding = int_encoding::VARINT>
 	constexpr uint8_t size = sizeof( T ) == 1 ? 0 : sizeof( T ) == 2 ? 1 : sizeof( T ) == 4 ? 2 : 3;
 
 	if constexpr ( std::is_same_v<T, bool> )
-		return size | scalar_bool;
+		return scalar_bool;
 	else if constexpr ( std::is_enum_v<T> )
-		return size | scalar_enum | ( std::is_signed_v<std::underlying_type_t<T>> ? scalar_signed : 0 );
+	{
+		if constexpr ( std::is_signed_v<std::underlying_type_t<T>> )
+			return size | scalar_signed;
+		else if constexpr ( sizeof( T ) == 4 )
+			return scalar_enum;
+		else
+			return size;
+	}
 	else if constexpr ( Encoding == int_encoding::ZIGZAG )
-		return size | scalar_signed | scalar_zigzag;
+		return size | scalar_zigzag;
 	else if constexpr ( Encoding == int_encoding::FIXED || wire_type_of<T>() != wire_type::VARINT )
 		return size | scalar_fixed;
 	else
@@ -65,7 +78,6 @@ template <typename T, int_encoding Encoding = int_encoding::VARINT>
 
 struct sequence_desc;
 struct optional_desc;
-struct variant_desc;
 
 /// How to read and write a value of one type. All members, elements, optional
 /// values and alternatives of the same type share one descriptor.
@@ -73,8 +85,10 @@ struct value_desc
 {
 	field_kind kind;
 	/// SCALAR: the scalar code. MESSAGE: the number of distinct compound types in `table`.
+	/// ONEOF: size of `_index` in bytes (1 or 2).
 	uint8_t scalar;
 	/// MESSAGE: the number of `uint32_t` words in `table`.
+	/// ONEOF: byte offset of `_index` inside `pb::oneof`.
 	uint16_t words;
 	union
 	{
@@ -86,30 +100,36 @@ struct value_desc
 		const sequence_desc* sequence;
 		/// OPTIONAL.
 		const optional_desc* optional;
-		/// ONEOF.
-		const variant_desc* variant;
+		/// ONEOF: array of `const value_desc*` for alternatives `1..K` (at index `alt - 1`).
+		const value_desc* const* oneof;
 	};
 };
 
-// Each field of a message encodes into 1 or 3 `uint32_t` words, sorted in
-// ascending field number:
-// - 1 word (bit 31 == 0): `[30:24 op] [23:12 offset] [11:0 number]`
-//     op 0..70:   inline SCALAR (`op` is the scalar code)
-//     op 71:      inline STRING (`std::string_view`)
-//     op 72:      inline BYTES view (`std::span<const uint8_t>`)
-//     op 73..95:  compound member at `subs[op - 73]`
-//     op 96..127: ONEOF alternative `op - 95` (1..32) on `subs[0]`
-// - 3 words (bit 31 == 1), when `number > 4095`, `offset > 4095`, `sub_idx >= 23`,
-//   a second `std::variant` member, or `alternative > 32`:
-//     word 0: `0x80000000u | number`
-//     word 1: `(offset << 16) | alternative`
-//     word 2: `(sub_idx << 8) | base_op`
-inline constexpr uint8_t op_string = 71;
-inline constexpr uint8_t op_bytes_view = 72;
-inline constexpr uint8_t op_sub_base = 73;
-inline constexpr uint8_t op_sub_limit = 23;
-inline constexpr uint8_t op_oneof_base = 96;
+// Each field of a message encodes into 1, 2, or (under `MICROPB_WIDE_TABLES`) 5
+// `uint16_t` halfwords, sorted in ascending field number:
+// - 1 halfword (bit 15 == 0): `[14:12 tag_delta - 1 (1..8)] [11:5 offset (0..127)] [4:0 op (0..31)]`
+//     op 0..19:   inline SCALAR (`op` is the scalar code)
+//     op 20:      inline STRING (`std::string_view`)
+//     op 21:      inline BYTES view (`std::span<const uint8_t>`)
+//     op 22..31:  compound member at `subs[op - 22]`
+// - 2 halfwords (bit 15 == 1, `op != 127`): 31 bits across `(w0 << 16) | w1`:
+//     `[30:24 op (0..126)] [23:12 offset (0..4095)] [11:0 number (1..4095)]`
+//     op 22..94:  compound member at `subs[op - 22]`
+//     op 95..126: ONEOF alternative `op - 94` (1..32) on `subs[0]`
+// - 5 halfwords (`(w0 >> 8) == 0xFFu`, requires `MICROPB_WIDE_TABLES`):
+//     w0: `0xFF00u | base_op`
+//     w1: `number & 0xFFFFu`
+//     w2: `number >> 16`
+//     w3: `offset`
+//     w4: `(sub_idx << 8) | alternative`
+inline constexpr uint8_t op_string = 20;
+inline constexpr uint8_t op_bytes_view = 21;
+inline constexpr uint8_t op_sub_base = 22;
+inline constexpr uint8_t op_short_sub_limit = 10;
+inline constexpr uint8_t op_sub_limit = 73;
+inline constexpr uint8_t op_oneof_base = 95;
 inline constexpr uint8_t op_oneof_max_alt = 32;
+inline constexpr uint8_t op_wide = 127;
 
 /// Unpacked entry of a message field table.
 struct field_entry
@@ -142,10 +162,22 @@ using item_constructor = void ( * )( void* item );
 using sequence_reserver =
   bool ( * )( reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory );
 
+/// Decodes one `pb::kv_pair` record and upserts it into a `pb::map`.
+using map_decoder =
+  void ( * )( reader& in, wire_type wire, const sequence_desc& sequence, void* value, arena* memory );
+
+inline constexpr uint16_t message_always_emit = 0x8000u;
+
 enum class sequence_storage : uint8_t
 {
-	/// `pb::repeated`: the items are at offset 0, the count is at `count_offset`.
-	REPEATED,
+	/// `pb::repeated`, `pb::bytes`, `pb::string` with a `uint8_t` count (`max_size <= 255`).
+	REPEATED_8,
+	/// `pb::repeated`, `pb::bytes`, `pb::string` with a `uint16_t` count (`max_size <= 65535`).
+	REPEATED_16,
+	/// `pb::map` with a `uint8_t` count (`max_size <= 255`).
+	MAP_8,
+	/// `pb::map` with a `uint16_t` count (`max_size <= 65535`).
+	MAP_16,
 	/// `std::array`: the items are at offset 0, the count is `capacity`.
 	ARRAY,
 	/// `std::span<const T>`: `span->access` gives the items.
@@ -169,10 +201,15 @@ struct span_desc
 struct sequence_desc
 {
 	const value_desc* element;
-	/// Non-null only for `sequence_storage::ACCESSOR`.
-	const span_desc* span;
-	uint32_t element_size;
-	uint32_t capacity;
+	union
+	{
+		/// Active for `sequence_storage::ACCESSOR`.
+		const span_desc* span;
+		/// Active for `sequence_storage::MAP_8` and `MAP_16`.
+		map_decoder map_decode;
+	};
+	uint16_t element_size;
+	uint16_t capacity;
 	uint16_t count_offset;
 	sequence_storage storage;
 };
@@ -195,19 +232,6 @@ struct optional_desc
 	optional_accessor access;
 };
 
-/// Gives the address of alternative `index` when it is active. If it is not
-/// active and `select` is `true`, makes it active with a value-initialized
-/// value first. Else gives null. Index 0 is `std::monostate`, so
-/// `access(variant, 0, true)` resets the variant.
-using variant_accessor = void* ( * )( void* variant, size_t index, bool select );
-
-struct variant_desc
-{
-	/// One entry for each alternative. The entry of `std::monostate` is null.
-	const value_desc* const* alternatives;
-	variant_accessor access;
-};
-
 static_assert( sizeof( value_desc ) <= 2 * sizeof( void* ) );
 
 template <typename T, int_encoding Encoding = int_encoding::VARINT>
@@ -226,6 +250,20 @@ struct sequence_access
 	static constexpr size_t items_offset = offsetof( S, _items );
 	template <typename S>
 	static constexpr size_t count_offset = offsetof( S, _count );
+	template <typename S>
+	static constexpr size_t count_size = sizeof( typename S::count_type );
+};
+
+/// The storage and index members of `pb::oneof` are private. The codec reads
+/// and writes them through this friend of the type.
+struct oneof_access
+{
+	template <typename O>
+	static constexpr size_t storage_offset = offsetof( O, _storage );
+	template <typename O>
+	static constexpr size_t index_offset = offsetof( O, _index );
+	template <typename O>
+	static constexpr size_t index_size = sizeof( typename O::index_type );
 };
 
 /// Accessor of `std::span<const T>`. The span keeps its items in a different
@@ -263,9 +301,13 @@ template <typename O>
 	O& value = *static_cast<O*>( optional );
 	if ( op == optional_op::RESET )
 	{
-		value.reset();
+		if constexpr ( std::is_trivially_destructible_v<O> )
+			::new ( optional ) O();
+		else
+			value.reset();
+		return nullptr;
 	}
-	else if ( op == optional_op::ENGAGE && !value )
+	if ( op == optional_op::ENGAGE && !value )
 	{
 		if constexpr ( requires { value.emplace(); } )
 			value.emplace();
@@ -273,45 +315,23 @@ template <typename O>
 	return value ? &*value : nullptr;
 }
 
-/// Makes alternative `I` of `value` active and gives its address. An
-/// alternative that is `const` or has a `const` member is encode-only: null.
-template <size_t I, typename V>
-[[nodiscard]] void* emplace_alternative( V& value )
-{
-	if constexpr ( !std::is_const_v<std::variant_alternative_t<I, V>> && requires { value.template emplace<I>(); } )
-		return &value.template emplace<I>();
-	return nullptr;
-}
-
-template <typename V, size_t... I>
-[[nodiscard]] void* access_alternative( V& value, size_t index, bool select, std::index_sequence<I...> )
-{
-	void* result = nullptr;
-	if ( value.index() == index )
-	{
-		static_cast<void>(
-		  ( ( index == I && ( result = const_cast<void*>( static_cast<const void*>( std::get_if<I>( &value ) ) ), true ) ) ||
-		    ... ) );
-		return result;
-	}
-	if ( !select )
-		return nullptr;
-
-	static_cast<void>( ( ( index == I && ( result = emplace_alternative<I>( value ), true ) ) || ... ) );
-	return result;
-}
-
-template <typename V>
-[[nodiscard]] void* access_variant( void* variant, size_t index, bool select )
-{
-	return access_alternative(
-	  *static_cast<V*>( variant ), index, select, std::make_index_sequence<std::variant_size_v<V>>{} );
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 
 [[nodiscard]] inline bool reserve(
   reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory );
+inline void decode_value( reader& in, wire_type wire, const value_desc& type, void* value, arena* memory );
+
+/// Decodes one `pb::kv_pair` record and upserts it into a `pb::map`.
+template <typename M>
+void decode_map_entry( reader& in, wire_type wire, const sequence_desc& sequence, void* value, arena* memory )
+{
+	typename M::value_type entry{};
+	decode_value( in, wire, *sequence.element, &entry, memory );
+	if ( in.failed() )
+		return;
+	if ( !static_cast<M*>( value )->insert_or_assign( entry.key, entry.value ) )
+		in.fail( error::CAPACITY_EXCEEDED );
+}
 
 template <typename S>
 [[nodiscard]] consteval span_desc describe_span()
@@ -344,39 +364,70 @@ template <typename S, int_encoding Encoding = int_encoding::VARINT>
 		static_assert( sequence_access::items_offset<S> == 0 );
 		static_assert( sequence_access::count_offset<S> <= max_offset,
 		               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
-		return { nullptr,
-		         nullptr,
-		         1,
-		         static_cast<uint32_t>( S::max_size ),
-		         static_cast<uint16_t>( sequence_access::count_offset<S> ),
-		         sequence_storage::REPEATED };
+		static_assert( S::max_size <= max_offset );
+		constexpr auto storage =
+		  sequence_access::count_size<S> == 1 ? sequence_storage::REPEATED_8 : sequence_storage::REPEATED_16;
+		return { .element = nullptr,
+		         .span = nullptr,
+		         .element_size = 1,
+		         .capacity = static_cast<uint16_t>( S::max_size ),
+		         .count_offset = static_cast<uint16_t>( sequence_access::count_offset<S> ),
+		         .storage = storage };
 	}
 	else
 	{
 		using element = element_t<S>;
 		constexpr const value_desc* item = &value_descriptor<element, Encoding>::value;
-		constexpr uint32_t item_size = sizeof( element );
-		constexpr auto capacity = static_cast<uint32_t>( sequence_traits<S>::capacity );
+		static_assert( sizeof( element ) <= max_offset );
+		constexpr auto item_size = static_cast<uint16_t>( sizeof( element ) );
+		static_assert( sequence_traits<S>::capacity <= max_offset );
+		constexpr auto capacity = static_cast<uint16_t>( sequence_traits<S>::capacity );
 
-		if constexpr ( is_repeated<S> || is_bytes<S> )
+		if constexpr ( is_repeated<S> || is_bytes<S> || is_map<S> )
 		{
 			static_assert( sequence_access::items_offset<S> == 0 );
 			static_assert( sequence_access::count_offset<S> <= max_offset,
 			               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
-			return { item,
-			         nullptr,
-			         item_size,
-			         capacity,
-			         static_cast<uint16_t>( sequence_access::count_offset<S> ),
-			         sequence_storage::REPEATED };
+			if constexpr ( is_map<S> )
+			{
+				constexpr auto storage =
+				  sequence_access::count_size<S> == 1 ? sequence_storage::MAP_8 : sequence_storage::MAP_16;
+				return { .element = item,
+				         .map_decode = decode_map_entry<S>,
+				         .element_size = item_size,
+				         .capacity = capacity,
+				         .count_offset = static_cast<uint16_t>( sequence_access::count_offset<S> ),
+				         .storage = storage };
+			}
+			else
+			{
+				constexpr auto storage =
+				  sequence_access::count_size<S> == 1 ? sequence_storage::REPEATED_8 : sequence_storage::REPEATED_16;
+				return { .element = item,
+				         .span = nullptr,
+				         .element_size = item_size,
+				         .capacity = capacity,
+				         .count_offset = static_cast<uint16_t>( sequence_access::count_offset<S> ),
+				         .storage = storage };
+			}
 		}
 		else if constexpr ( is_std_array<S> )
 		{
-			return { item, nullptr, item_size, capacity, 0, sequence_storage::ARRAY };
+			return { .element = item,
+			         .span = nullptr,
+			         .element_size = item_size,
+			         .capacity = capacity,
+			         .count_offset = 0,
+			         .storage = sequence_storage::ARRAY };
 		}
 		else
 		{
-			return { item, &span_descriptor<S>, item_size, 0, 0, sequence_storage::ACCESSOR };
+			return { .element = item,
+			         .span = &span_descriptor<S>,
+			         .element_size = item_size,
+			         .capacity = 0,
+			         .count_offset = 0,
+			         .storage = sequence_storage::ACCESSOR };
 		}
 	}
 }
@@ -388,44 +439,40 @@ template <typename O, int_encoding Encoding = int_encoding::VARINT>
 inline constexpr optional_desc optional_descriptor{ &value_descriptor<typename O::value_type, Encoding>::value,
                                                     access_optional<O> };
 
-/// The descriptor of the alternative `A` of a `std::variant`. Null for `std::monostate`.
-template <typename A, int_encoding Encoding = int_encoding::VARINT>
-[[nodiscard]] consteval const value_desc* describe_alternative()
+template <typename V, int_encoding... AltEncodings>
+struct oneof_alternatives;
+
+template <typename... A, int_encoding... AltEncodings>
+struct oneof_alternatives<oneof<A...>, AltEncodings...>
 {
-	if constexpr ( std::is_same_v<A, std::monostate> )
-		return nullptr;
-	else
-		return &value_descriptor<A, Encoding>::value;
+	static constexpr const value_desc* value[sizeof...( A )] = { &value_descriptor<A, AltEncodings>::value... };
+};
+
+template <typename V, int_encoding... AltEncodings>
+[[nodiscard]] consteval value_desc describe_oneof()
+{
+	static_assert( oneof_access::storage_offset<V> == 0 );
+	static_assert( oneof_access::index_offset<V> <= max_offset,
+	               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
+	return {
+		.kind = field_kind::ONEOF,
+		.scalar = static_cast<uint8_t>( oneof_access::index_size<V> ),
+		.words = static_cast<uint16_t>( oneof_access::index_offset<V> ),
+		.oneof = oneof_alternatives<V, AltEncodings...>::value,
+	};
 }
 
 template <typename V, int_encoding... AltEncodings>
-struct variant_alternatives;
-
-template <typename... A, int_encoding... AltEncodings>
-struct variant_alternatives<std::variant<A...>, AltEncodings...>
-{
-	static constexpr const value_desc* value[sizeof...( A )] = { describe_alternative<A, AltEncodings>()... };
-};
-
-template <typename V, int_encoding... AltEncodings>
-inline constexpr variant_desc variant_descriptor{ variant_alternatives<V, AltEncodings...>::value, access_variant<V> };
+inline constexpr value_desc oneof_value_desc = describe_oneof<V, AltEncodings...>();
 
 template <typename V>
-struct default_variant_descriptor;
+struct default_oneof_value_desc;
 
 template <typename... A>
-struct default_variant_descriptor<std::variant<A...>>
+struct default_oneof_value_desc<oneof<A...>>
 {
-	static constexpr const variant_desc* value =
-	  &variant_descriptor<std::variant<A...>, ( static_cast<void>( sizeof( A ) ), int_encoding::VARINT )...>;
-};
-
-template <typename V, int_encoding... AltEncodings>
-inline constexpr value_desc variant_value_desc{
-	.kind = field_kind::ONEOF,
-	.scalar = 0,
-	.words = 0,
-	.variant = &variant_descriptor<V, AltEncodings...>,
+	static constexpr value_desc value =
+	  describe_oneof<oneof<A...>, ( static_cast<void>( sizeof( A ) ), int_encoding::VARINT )...>();
 };
 
 /// Compound descriptor of the member type `M`, or null when `M` encodes inline
@@ -461,7 +508,19 @@ template <typename M, int_encoding Encoding = int_encoding::VARINT>
 		return op_sub_base;
 }
 
-[[nodiscard]] consteval bool fits_one_word( const field_entry& entry )
+[[nodiscard]] consteval bool fits_one_halfword( const field_entry& entry, uint32_t prev_number )
+{
+	if ( entry.alternative != 0 || entry.offset > 0x7Fu )
+		return false;
+	const uint32_t delta = entry.number - prev_number;
+	if ( delta < 1u || delta > 8u )
+		return false;
+	if ( entry.base_op == op_sub_base )
+		return entry.sub_idx < op_short_sub_limit;
+	return true;
+}
+
+[[nodiscard]] consteval bool fits_two_halfwords( const field_entry& entry )
 {
 	if ( entry.number > 0xFFFu || entry.offset > 0xFFFu )
 		return false;
@@ -476,13 +535,13 @@ template <size_t SubCount, size_t WordCount>
 struct message_table_data
 {
 	std::array<const value_desc*, SubCount> subs;
-	std::array<uint32_t, WordCount> words;
+	std::array<uint16_t, WordCount> words;
 };
 
 template <size_t WordCount>
 struct message_table_data<0, WordCount>
 {
-	std::array<uint32_t, WordCount> words;
+	std::array<uint16_t, WordCount> words;
 };
 
 template <>
@@ -527,24 +586,24 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 			const size_t alts[]{ Alternative... };
 			const int_encoding encs[]{ Encoding... };
 			for ( size_t i = 0; i < entry_count; ++i )
-				if ( offsets[i] == VarOffset && alts[i] == AltIdx )
+				if ( offsets[i] == VarOffset && alts[i] == AltIdx + 1 )
 					result = encs[i];
 		}
 		return result;
 	}
 
 	template <typename V, size_t VarOffset, size_t... Is>
-	[[nodiscard]] static consteval const value_desc* variant_sub_of( std::index_sequence<Is...> )
+	[[nodiscard]] static consteval const value_desc* oneof_sub_of( std::index_sequence<Is...> )
 	{
 		constexpr bool all_varint = ( ( alt_encoding_at<VarOffset, Is>() == int_encoding::VARINT ) && ... );
 		if constexpr ( all_varint )
 			return &value_descriptor<V>::value;
 		else
-			return &variant_value_desc<V, alt_encoding_at<VarOffset, Is>()...>;
+			return &oneof_value_desc<V, alt_encoding_at<VarOffset, Is>()...>;
 	}
 
 	template <typename V, size_t VarOffset, size_t... Is>
-	[[nodiscard]] static consteval size_t variant_key_of( std::index_sequence<Is...> )
+	[[nodiscard]] static consteval size_t oneof_key_of( std::index_sequence<Is...> )
 	{
 		constexpr bool all_varint = ( ( alt_encoding_at<VarOffset, Is>() == int_encoding::VARINT ) && ... );
 		if constexpr ( all_varint )
@@ -557,8 +616,8 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 	[[nodiscard]] static consteval const value_desc* row_sub_of()
 	{
 		using U = std::remove_const_t<FieldM>;
-		if constexpr ( FieldAlt != 0 && is_variant<U> )
-			return variant_sub_of<U, FieldOffset>( std::make_index_sequence<std::variant_size_v<U>>{} );
+		if constexpr ( FieldAlt != 0 && is_oneof<U> )
+			return oneof_sub_of<U, FieldOffset>( std::make_index_sequence<U::alternative_count>{} );
 		else
 			return sub_desc_of<FieldM, FieldEnc>();
 	}
@@ -567,8 +626,8 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 	[[nodiscard]] static consteval size_t row_key_of()
 	{
 		using U = std::remove_const_t<FieldM>;
-		if constexpr ( FieldAlt != 0 && is_variant<U> )
-			return variant_key_of<U, FieldOffset>( std::make_index_sequence<std::variant_size_v<U>>{} );
+		if constexpr ( FieldAlt != 0 && is_oneof<U> )
+			return oneof_key_of<U, FieldOffset>( std::make_index_sequence<U::alternative_count>{} );
 		else
 			return type_id_of<U, FieldEnc>();
 	}
@@ -577,6 +636,7 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 	{
 		size_t subs_n;
 		size_t words_n;
+		bool has_wide;
 		std::array<const value_desc*, entry_count> subs;
 		std::array<field_entry, entry_count> entries;
 	};
@@ -622,6 +682,7 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 			}
 		}
 
+		uint32_t prev_number = 0;
 		for ( size_t i = 0; i < entry_count; ++i )
 		{
 			uint16_t sub_idx = 0;
@@ -638,13 +699,27 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 				sub_idx,
 				rows[i].base_op,
 			};
-			p.words_n += fits_one_word( p.entries[i] ) ? 1u : 3u;
+			if ( fits_one_halfword( p.entries[i], prev_number ) )
+				p.words_n += 1u;
+			else if ( fits_two_halfwords( p.entries[i] ) )
+				p.words_n += 2u;
+			else
+			{
+				p.has_wide = true;
+				p.words_n += 5u;
+			}
+			prev_number = rows[i].number;
 		}
 		return p;
 	}
 
 	static constexpr plan layout = build_plan();
 	static_assert( layout.subs_n <= 255 && layout.words_n <= 65535 );
+#ifndef MICROPB_WIDE_TABLES
+	static_assert( !layout.has_wide,
+	               "pb: wide_table_required: define MICROPB_WIDE_TABLES for tags > 4095, offsets > 4095, "
+	               "more than 73 compound types, multiple oneofs, or more than 32 oneof alternatives" );
+#endif
 
 	using table_type = message_table_data<layout.subs_n, layout.words_n>;
 
@@ -662,22 +737,37 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 		if constexpr ( layout.words_n > 0 )
 		{
 			size_t w = 0;
+			uint32_t prev_number = 0;
 			for ( size_t i = 0; i < entry_count; ++i )
 			{
 				const field_entry& e = layout.entries[i];
-				if ( fits_one_word( e ) )
+				if ( fits_one_halfword( e, prev_number ) )
+				{
+					const uint32_t op =
+					  e.base_op == op_sub_base ? ( uint32_t{ op_sub_base } + e.sub_idx ) : uint32_t{ e.base_op };
+					const uint32_t delta = e.number - prev_number - 1u;
+					out.words[w++] =
+					  static_cast<uint16_t>( ( delta << 12 ) | ( static_cast<uint32_t>( e.offset ) << 5 ) | op );
+				}
+				else if ( fits_two_halfwords( e ) )
 				{
 					const uint32_t op = e.alternative != 0 ? ( uint32_t{ op_oneof_base } + e.alternative - 1u )
 					                         : e.base_op == op_sub_base ? ( uint32_t{ op_sub_base } + e.sub_idx )
 					                                                    : uint32_t{ e.base_op };
-					out.words[w++] = ( op << 24 ) | ( static_cast<uint32_t>( e.offset ) << 12 ) | e.number;
+					const uint32_t packed =
+					  0x80000000u | ( op << 24 ) | ( static_cast<uint32_t>( e.offset ) << 12 ) | e.number;
+					out.words[w++] = static_cast<uint16_t>( packed >> 16 );
+					out.words[w++] = static_cast<uint16_t>( packed & 0xFFFFu );
 				}
 				else
 				{
-					out.words[w++] = 0x80000000u | e.number;
-					out.words[w++] = ( static_cast<uint32_t>( e.offset ) << 16 ) | e.alternative;
-					out.words[w++] = ( static_cast<uint32_t>( e.sub_idx ) << 8 ) | e.base_op;
+					out.words[w++] = static_cast<uint16_t>( 0xFF00u | e.base_op );
+					out.words[w++] = static_cast<uint16_t>( e.number & 0xFFFFu );
+					out.words[w++] = static_cast<uint16_t>( e.number >> 16 );
+					out.words[w++] = e.offset;
+					out.words[w++] = static_cast<uint16_t>( ( static_cast<uint32_t>( e.sub_idx ) << 8 ) | e.alternative );
 				}
+				prev_number = e.number;
 			}
 		}
 		return out;
@@ -706,24 +796,23 @@ template <typename T, int_encoding Encoding>
 		return { .kind = kind, .scalar = 0, .words = 0, .sequence = &sequence_descriptor<T, Encoding> };
 	else if constexpr ( kind == field_kind::MESSAGE )
 	{
-		// The field list of `T` must name `T`: a list of a different type has the offsets of that type.
 		using list = field_list_of<T>;
-		static_assert( std::is_same_v<typename list_traits<list>::message, T>,
-		               "pb: field_list_type: pb::fields_of<T> must derive from pb::field_list<T, ...> with the same T" );
 		const void* table = nullptr;
 		if constexpr ( field_table<list>::layout.words_n > 0 )
 			table = &field_table<list>::value;
+		constexpr uint16_t words =
+		  static_cast<uint16_t>( field_table<list>::layout.words_n ) | ( is_kv_pair<T> ? message_always_emit : uint16_t{ 0 } );
 		return {
 			.kind = kind,
 			.scalar = static_cast<uint8_t>( field_table<list>::layout.subs_n ),
-			.words = static_cast<uint16_t>( field_table<list>::layout.words_n ),
+			.words = words,
 			.table = table,
 		};
 	}
 	else if constexpr ( kind == field_kind::OPTIONAL )
 		return { .kind = kind, .scalar = 0, .words = 0, .optional = &optional_descriptor<T, Encoding> };
 	else
-		return { .kind = kind, .scalar = 0, .words = 0, .variant = default_variant_descriptor<T>::value };
+		return default_oneof_value_desc<T>::value;
 }
 
 template <typename T, int_encoding Encoding>
@@ -748,38 +837,53 @@ constexpr value_desc value_descriptor<T, Encoding>::value = describe_value<T, En
 	return static_cast<const value_desc* const*>( message.table );
 }
 
-[[nodiscard]] inline const uint32_t* message_words( const value_desc& message )
+[[nodiscard]] inline const uint16_t* message_words( const value_desc& message )
 {
 	if ( message.table == nullptr )
 		return nullptr;
-	return static_cast<const uint32_t*>(
+	return static_cast<const uint16_t*>(
 	  member_at( message.table, size_t{ message.scalar } * sizeof( const value_desc* ) ) );
 }
 
-[[nodiscard]] constexpr field_entry decode_entry( const uint32_t* words, size_t& pos )
+[[nodiscard]] constexpr field_entry decode_entry( const uint16_t* words, size_t& pos, uint32_t prev_number )
 {
-	const uint32_t w0 = words[pos++];
-	if ( ( w0 & 0x80000000u ) == 0 )
+	const uint16_t w0 = words[pos++];
+	if ( ( w0 & 0x8000u ) == 0 )
 	{
-		const auto op = static_cast<uint8_t>( w0 >> 24 );
-		const auto offset = static_cast<uint16_t>( ( w0 >> 12 ) & 0xFFFu );
-		const uint32_t number = w0 & 0xFFFu;
-		if ( op >= op_oneof_base )
-			return { number, offset, static_cast<uint16_t>( uint32_t{ op } - op_oneof_base + 1u ), 0, op_sub_base };
+		const uint32_t number = prev_number + ( ( w0 >> 12 ) & 7u ) + 1u;
+		const auto offset = static_cast<uint16_t>( ( w0 >> 5 ) & 0x7Fu );
+		const auto op = static_cast<uint8_t>( w0 & 0x1Fu );
 		if ( op >= op_sub_base )
 			return { number, offset, 0, static_cast<uint16_t>( uint32_t{ op } - op_sub_base ), op_sub_base };
 		return { number, offset, 0, 0, op };
 	}
 
-	const uint32_t w1 = words[pos++];
-	const uint32_t w2 = words[pos++];
-	return {
-		w0 & 0x7FFFFFFFu,
-		static_cast<uint16_t>( w1 >> 16 ),
-		static_cast<uint16_t>( w1 & 0xFFFFu ),
-		static_cast<uint16_t>( w2 >> 8 ),
-		static_cast<uint8_t>( w2 & 0xFFu ),
-	};
+#ifdef MICROPB_WIDE_TABLES
+	if ( ( w0 >> 8 ) == 0xFFu )
+	{
+		const uint32_t number = uint32_t{ words[pos] } | ( uint32_t{ words[pos + 1] } << 16 );
+		const uint16_t offset = words[pos + 2];
+		const uint16_t tail = words[pos + 3];
+		pos += 4;
+		return {
+			number,
+			offset,
+			static_cast<uint16_t>( tail & 0xFFu ),
+			static_cast<uint16_t>( tail >> 8 ),
+			static_cast<uint8_t>( w0 & 0xFFu ),
+		};
+	}
+#endif
+
+	const uint32_t packed = ( uint32_t{ w0 } << 16 ) | words[pos++];
+	const auto op = static_cast<uint8_t>( ( w0 >> 8 ) & 0x7Fu );
+	const auto offset = static_cast<uint16_t>( ( packed >> 12 ) & 0xFFFu );
+	const uint32_t number = packed & 0xFFFu;
+	if ( op >= op_oneof_base )
+		return { number, offset, static_cast<uint16_t>( uint32_t{ op } - op_oneof_base + 1u ), 0, op_sub_base };
+	if ( op >= op_sub_base )
+		return { number, offset, 0, static_cast<uint16_t>( uint32_t{ op } - op_sub_base ), op_sub_base };
+	return { number, offset, 0, 0, op };
 }
 
 [[nodiscard]] constexpr value_desc resolve_type( const value_desc* const* subs, const field_entry& entry )
@@ -813,21 +917,78 @@ constexpr value_desc value_descriptor<T, Encoding>::value = describe_value<T, En
 	return wire_type::LENGTH_DELIMITED;
 }
 
-[[nodiscard]] inline size_t* repeated_count( const sequence_desc& sequence, void* object )
+[[nodiscard]] inline size_t message_word_count( const value_desc& message )
 {
-	return static_cast<size_t*>( member_at( object, sequence.count_offset ) );
+	return static_cast<size_t>( message.words & ~message_always_emit );
+}
+
+[[nodiscard]] inline bool is_map_storage( sequence_storage storage )
+{
+	return storage == sequence_storage::MAP_8 || storage == sequence_storage::MAP_16;
+}
+
+[[nodiscard]] inline bool is_repeated_storage( sequence_storage storage )
+{
+	return storage == sequence_storage::REPEATED_8 || storage == sequence_storage::REPEATED_16 || is_map_storage( storage );
+}
+
+[[nodiscard]] inline const span_desc* sequence_span( const sequence_desc& sequence )
+{
+	return sequence.storage == sequence_storage::ACCESSOR ? sequence.span : nullptr;
+}
+
+[[nodiscard]] inline size_t load_count( const sequence_desc& sequence, const void* object )
+{
+	const void* ptr = member_at( object, sequence.count_offset );
+	if ( sequence.storage == sequence_storage::REPEATED_8 || sequence.storage == sequence_storage::MAP_8 )
+		return *static_cast<const uint8_t*>( ptr );
+	uint16_t count;
+	std::memcpy( &count, ptr, sizeof count );
+	return count;
+}
+
+inline void store_count( const sequence_desc& sequence, void* object, size_t count )
+{
+	void* ptr = member_at( object, sequence.count_offset );
+	if ( sequence.storage == sequence_storage::REPEATED_8 || sequence.storage == sequence_storage::MAP_8 )
+	{
+		*static_cast<uint8_t*>( ptr ) = static_cast<uint8_t>( count );
+		return;
+	}
+	const auto narrow = static_cast<uint16_t>( count );
+	std::memcpy( ptr, &narrow, sizeof narrow );
+}
+
+[[nodiscard]] inline size_t oneof_index( const value_desc& type, const void* object )
+{
+	const void* ptr = member_at( object, type.words );
+	if ( type.scalar == 1 )
+		return *static_cast<const uint8_t*>( ptr );
+	uint16_t index;
+	std::memcpy( &index, ptr, sizeof index );
+	return index;
+}
+
+inline void set_oneof_index( const value_desc& type, void* object, size_t index )
+{
+	void* ptr = member_at( object, type.words );
+	if ( type.scalar == 1 )
+	{
+		*static_cast<uint8_t*>( ptr ) = static_cast<uint8_t>( index );
+		return;
+	}
+	const auto narrow = static_cast<uint16_t>( index );
+	std::memcpy( ptr, &narrow, sizeof narrow );
 }
 
 /// The items of the sequence at `object`. The interpreter writes through the
 /// result only when it decodes.
 [[nodiscard]] inline sequence_view view_of( const sequence_desc& sequence, void* object )
 {
-	switch ( sequence.storage )
-	{
-		case sequence_storage::REPEATED: return { object, *repeated_count( sequence, object ) };
-		case sequence_storage::ARRAY: return { object, sequence.capacity };
-		case sequence_storage::ACCESSOR: break;
-	}
+	if ( is_repeated_storage( sequence.storage ) )
+		return { object, load_count( sequence, object ) };
+	if ( sequence.storage == sequence_storage::ARRAY )
+		return { object, sequence.capacity };
 	return sequence.span->access( object );
 }
 
@@ -865,9 +1026,9 @@ constexpr value_desc value_descriptor<T, Encoding>::value = describe_value<T, En
 		const unsigned shift = 64 - ( 8u << ( code & scalar_size_mask ) );
 		bits = static_cast<uint64_t>( static_cast<int64_t>( bits << shift ) >> shift );
 	}
-	if ( code & scalar_enum )
+	if ( code == scalar_enum )
 		bits = static_cast<uint64_t>( static_cast<int64_t>( static_cast<int32_t>( bits ) ) );
-	if ( code & scalar_zigzag )
+	if ( is_scalar_zigzag( code ) )
 		bits = zigzag_encode( static_cast<int64_t>( bits ) );
 	return bits;
 }
@@ -945,6 +1106,7 @@ inline void emit_submessage( writer& sink, uint32_t number, const value_desc& me
 inline void emit_packed( writer& sink, uint32_t number, const sequence_desc& sequence, const sequence_view& items )
 {
 	const uint8_t code = sequence.element->scalar;
+#ifdef MICROPB_FAST
 	const bool fixed = ( code & scalar_fixed ) != 0;
 
 	// The length prefix comes before the values, so measure them first.
@@ -985,6 +1147,19 @@ inline void emit_packed( writer& sink, uint32_t number, const sequence_desc& seq
 		for ( size_t i = 0; i < items.count; ++i, ptr += sequence.element_size )
 			sink.write_varint( load_scalar( ptr, code ) );
 	}
+#else
+	const auto write_all = [&]( writer& out ) {
+		const auto* ptr = static_cast<const unsigned char*>( items.data );
+		for ( size_t i = 0; i < items.count; ++i, ptr += sequence.element_size )
+			emit_scalar( out, code, load_scalar( ptr, code ) );
+	};
+
+	writer counter( std::span<uint8_t>{} );
+	write_all( counter );
+	sink.write_key( number, wire_type::LENGTH_DELIMITED );
+	sink.write_varint( counter.size() );
+	write_all( sink );
+#endif
 }
 
 /// Writes one field. `always` is `true` for explicit presence: the function
@@ -1064,38 +1239,44 @@ inline void emit_value( writer& sink, uint32_t number, const value_desc& type, c
 inline void emit_message( writer& sink, const value_desc& message, const void* object )
 {
 	const value_desc* const* subs = message_subs( message );
-	const uint32_t* words = message_words( message );
-	for ( size_t pos = 0; pos < message.words; )
+	const uint16_t* words = message_words( message );
+	const size_t total_words = message_word_count( message );
+	const bool always = ( message.words & message_always_emit ) != 0;
+	uint32_t prev = 0;
+	for ( size_t pos = 0; pos < total_words; )
 	{
-		const uint32_t w0 = words[pos];
-		if ( ( w0 & 0x80000000u ) == 0 )
+#ifdef MICROPB_FAST
+		const uint16_t w0 = words[pos];
+		if ( ( w0 & 0x8000u ) == 0 )
 		{
-			const auto op = static_cast<uint8_t>( w0 >> 24 );
+			const auto op = static_cast<uint8_t>( w0 & 0x1Fu );
 			if ( op < op_string )
 			{
+				prev += ( ( w0 >> 12 ) & 7u ) + 1u;
 				++pos;
-				const uint64_t bits = load_scalar( member_at( object, ( w0 >> 12 ) & 0xFFFu ), op );
-				if ( bits != 0 )
+				const uint64_t bits = load_scalar( member_at( object, ( w0 >> 5 ) & 0x7Fu ), op );
+				if ( always || bits != 0 )
 				{
-					sink.write_key( w0 & 0xFFFu, wire_of_scalar( op ) );
+					sink.write_key( prev, wire_of_scalar( op ) );
 					emit_scalar( sink, op, bits );
 				}
 				continue;
 			}
 		}
+#endif
 
-		const field_entry field = decode_entry( words, pos );
+		const field_entry field = decode_entry( words, pos, prev );
+		prev = field.number;
 		const value_desc type = resolve_type( subs, field );
 		const void* member = member_at( object, field.offset );
 		if ( field.alternative == 0 )
 		{
-			emit_value( sink, field.number, type, member, false );
+			emit_value( sink, field.number, type, member, always );
 			continue;
 		}
 
-		const variant_desc& variant = *type.variant;
-		if ( const void* active = variant.access( const_cast<void*>( member ), field.alternative, false ) )
-			emit_value( sink, field.number, *variant.alternatives[field.alternative], active, true );
+		if ( oneof_index( type, member ) == field.alternative )
+			emit_value( sink, field.number, *type.oneof[field.alternative - 1], member, true );
 	}
 }
 
@@ -1115,14 +1296,14 @@ MICROPB_ENTRY inline std::expected<size_t, error> encode(
 /// wide for the type loses its upper bits, as in the Google C++ runtime.
 inline void store_scalar( void* value, uint8_t code, uint64_t bits )
 {
-	if ( code & scalar_zigzag )
+	if ( is_scalar_zigzag( code ) )
 	{
 		if ( ( code & scalar_size_mask ) == 2 )
 			bits = static_cast<uint32_t>( zigzag_decode( static_cast<uint32_t>( bits ) ) );
 		else
 			bits = static_cast<uint64_t>( zigzag_decode( bits ) );
 	}
-	if ( code & scalar_bool )
+	if ( code == scalar_bool )
 		bits = bits != 0;
 
 	switch ( code & scalar_size_mask )
@@ -1177,7 +1358,7 @@ inline void reset_value( const value_desc& type, void* value )
 			else
 			{
 				*static_cast<char*>( value ) = '\0';
-				*repeated_count( *type.sequence, value ) = 0;
+				store_count( *type.sequence, value, 0 );
 			}
 			break;
 		case field_kind::BYTES:
@@ -1189,14 +1370,14 @@ inline void reset_value( const value_desc& type, void* value )
 			}
 			[[fallthrough]];
 		case field_kind::REPEATED:
-			if ( type.sequence->span != nullptr && type.sequence->span->bind != nullptr )
-				type.sequence->span->bind( value, nullptr, 0 );
-			else if ( type.sequence->storage == sequence_storage::REPEATED )
-				*repeated_count( *type.sequence, value ) = 0;
+			if ( const span_desc* span = sequence_span( *type.sequence ); span != nullptr && span->bind != nullptr )
+				span->bind( value, nullptr, 0 );
+			else if ( is_repeated_storage( type.sequence->storage ) )
+				store_count( *type.sequence, value, 0 );
 			break;
 		case field_kind::MESSAGE: reset_message( type, value ); break;
 		case field_kind::OPTIONAL: static_cast<void>( type.optional->access( value, optional_op::RESET ) ); break;
-		case field_kind::ONEOF: static_cast<void>( type.variant->access( value, 0, true ) ); break;
+		case field_kind::ONEOF: set_oneof_index( type, value, 0 ); break;
 	}
 }
 
@@ -1204,29 +1385,32 @@ inline void reset_value( const value_desc& type, void* value )
 inline void reset_message( const value_desc& message, void* object )
 {
 	const value_desc* const* subs = message_subs( message );
-	const uint32_t* words = message_words( message );
-	for ( size_t pos = 0; pos < message.words; )
+	const uint16_t* words = message_words( message );
+	const size_t total_words = message_word_count( message );
+	for ( size_t pos = 0; pos < total_words; )
 	{
-		const uint32_t w0 = words[pos];
-		if ( ( w0 & 0x80000000u ) == 0 )
+#ifdef MICROPB_FAST
+		const uint16_t w0 = words[pos];
+		if ( ( w0 & 0x8000u ) == 0 )
 		{
-			const auto op = static_cast<uint8_t>( w0 >> 24 );
+			const auto op = static_cast<uint8_t>( w0 & 0x1Fu );
 			if ( op < op_string )
 			{
 				++pos;
-				store_scalar( member_at( object, ( w0 >> 12 ) & 0xFFFu ), op & scalar_size_mask, 0 );
-				continue;
-			}
-			// Skip extra alternatives of a 1-word oneof without decoding the entry.
-			if ( op > op_oneof_base )
-			{
-				++pos;
+				store_scalar( member_at( object, ( w0 >> 5 ) & 0x7Fu ), op & scalar_size_mask, 0 );
 				continue;
 			}
 		}
+		else if ( ( ( w0 >> 8 ) & 0x7Fu ) > op_oneof_base && ( w0 >> 8 ) != 0xFFu )
+		{
+			// Skip extra alternatives of a 2-halfword oneof without decoding the entry.
+			pos += 2;
+			continue;
+		}
+#endif
 
-		// A `std::variant` member has one entry for each alternative. Reset it one time.
-		const field_entry field = decode_entry( words, pos );
+		// A `pb::oneof` member has one entry for each alternative. Reset it one time.
+		const field_entry field = decode_entry( words, pos, 0 );
 		if ( field.alternative <= 1 )
 		{
 			const value_desc type = resolve_type( subs, field );
@@ -1236,7 +1420,6 @@ inline void reset_message( const value_desc& message, void* object )
 }
 
 inline void decode_message( reader& in, const value_desc& message, void* object, arena* memory );
-inline void decode_value( reader& in, wire_type wire, const value_desc& type, void* value, arena* memory );
 
 /// Capacity of the arena block at `data`: a `size_t` just before the first
 /// item. 0 for a span without a block.
@@ -1252,7 +1435,7 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 /// the capacity of its arena block.
 [[nodiscard]] inline size_t decode_capacity( const sequence_desc& sequence, const sequence_view& items )
 {
-	if ( sequence.span != nullptr && sequence.span->bind != nullptr )
+	if ( const span_desc* span = sequence_span( sequence ); span != nullptr && span->bind != nullptr )
 		return block_capacity( items.data );
 	return sequence.capacity;
 }
@@ -1347,6 +1530,25 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 	return grow( sequence, value, items, items.count + count_elements( in, key, sequence ), memory );
 }
 
+[[nodiscard]] inline bool is_bound_span( const sequence_desc& sequence )
+{
+	const span_desc* span = sequence_span( sequence );
+	return span != nullptr && span->bind != nullptr;
+}
+
+[[nodiscard]] inline error capacity_error( const sequence_desc& sequence )
+{
+	return is_bound_span( sequence ) ? error::TRUNCATED : error::CAPACITY_EXCEEDED;
+}
+
+inline void commit_count( const sequence_desc& sequence, void* value, void* data, size_t count )
+{
+	if ( is_bound_span( sequence ) )
+		sequence.span->bind( value, data, count );
+	else
+		store_count( sequence, value, count );
+}
+
 /// Reads one element from `in` into the next free item of the sequence at
 /// `value`. A full sequence is an error: the function examines the capacity
 /// before it reads the element. A full span block means that the count of the
@@ -1354,25 +1556,25 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 /// its initial state: records of a repeated field do not merge.
 inline void decode_element( reader& in, wire_type wire, const sequence_desc& sequence, void* value, arena* memory )
 {
+	if ( is_map_storage( sequence.storage ) )
+		return sequence.map_decode( in, wire, sequence, value, memory );
+
 	const sequence_view items = view_of( sequence, value );
-	const bool is_span = sequence.span != nullptr && sequence.span->bind != nullptr;
 	if ( items.count >= decode_capacity( sequence, items ) )
-		return in.fail( is_span ? error::TRUNCATED : error::CAPACITY_EXCEEDED );
+		return in.fail( capacity_error( sequence ) );
 
 	void* item = member_at( items.data, items.count * sequence.element_size );
-	if ( sequence.span != nullptr && sequence.span->construct != nullptr )
-		sequence.span->construct( item );
+	if ( const span_desc* span = sequence_span( sequence ); span != nullptr && span->construct != nullptr )
+		span->construct( item );
 	reset_value( *sequence.element, item );
 	decode_value( in, wire, *sequence.element, item, memory );
 	if ( in.failed() )
 		return;
 
-	if ( is_span )
-		sequence.span->bind( value, items.data, items.count + 1 );
-	else
-		*repeated_count( sequence, value ) = items.count + 1;
+	commit_count( sequence, value, items.data, items.count + 1 );
 }
 
+#ifdef MICROPB_FAST
 /// Reads a packed scalar record into `value`. Scalar elements are trivially
 /// copyable and implicit-lifetime, so the loop writes directly into storage.
 inline void decode_packed_scalars( reader& in, const sequence_desc& sequence, void* value )
@@ -1382,8 +1584,7 @@ inline void decode_packed_scalars( reader& in, const sequence_desc& sequence, vo
 		return;
 
 	const sequence_view items = view_of( sequence, value );
-	const bool is_span = sequence.span != nullptr && sequence.span->bind != nullptr;
-	const error full_err = is_span ? error::TRUNCATED : error::CAPACITY_EXCEEDED;
+	const error full_err = capacity_error( sequence );
 	const size_t capacity = decode_capacity( sequence, items );
 	const uint8_t code = sequence.element->scalar;
 	const size_t elem_size = sequence.element_size;
@@ -1440,26 +1641,29 @@ inline void decode_packed_scalars( reader& in, const sequence_desc& sequence, vo
 	}
 
 	if ( count != items.count )
-	{
-		if ( is_span )
-			sequence.span->bind( value, items.data, count );
-		else
-			*repeated_count( sequence, value ) = count;
-	}
+		commit_count( sequence, value, items.data, count );
 }
+#endif
 
 /// Reads one record of a repeated field. A scalar element can be a packed
 /// record or a single value, also mixed in one message.
 inline void decode_repeated( reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory )
 {
-	if ( sequence.span != nullptr && sequence.span->reserve != nullptr &&
-	     !sequence.span->reserve( in, key, sequence, value, memory ) )
+	if ( const span_desc* span = sequence_span( sequence );
+	     span != nullptr && span->reserve != nullptr && !span->reserve( in, key, sequence, value, memory ) )
 		return in.fail( error::ARENA_FULL );
 
 	const value_desc& element = *sequence.element;
 	if ( element.kind == field_kind::SCALAR && key.type == wire_type::LENGTH_DELIMITED )
 	{
+#ifdef MICROPB_FAST
 		decode_packed_scalars( in, sequence, value );
+#else
+		reader packed( in.read_length_delimited() );
+		while ( !packed.empty() )
+			decode_element( packed, wire_of( element ), sequence, value, memory );
+		in.absorb( packed );
+#endif
 	}
 	else if ( key.type == wire_of( element ) )
 	{
@@ -1527,7 +1731,7 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 				std::memcpy( value, bytes.data(), bytes.size() );
 			if ( type.kind == field_kind::STRING )
 				static_cast<char*>( value )[bytes.size()] = '\0';
-			*repeated_count( *type.sequence, value ) = bytes.size();
+			store_count( *type.sequence, value, bytes.size() );
 			break;
 		}
 		case field_kind::FIXED_BYTES:
@@ -1549,35 +1753,77 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 	}
 }
 
+#ifdef MICROPB_FAST
 /// Finds the entry of the field `number` in `words`. The search starts at the
-/// word index `cursor`. After the end of the table, it continues at 0. After a
-/// match, `cursor` is the start word index of the entry.
-[[nodiscard]] inline bool find_field( const uint32_t* words,
+/// halfword index `cursor` (with preceding field number `cursor_prev`). After
+/// the end of the table, it continues at 0. After a match, `cursor` and
+/// `cursor_prev` name the start of the entry.
+[[nodiscard]] inline bool find_field( const uint16_t* words,
                                       size_t total_words,
                                       uint32_t number,
                                       size_t& cursor,
+                                      uint32_t& cursor_prev,
                                       field_entry& out )
 {
 	for ( unsigned pass = 0; pass < 2; ++pass )
 	{
 		size_t pos = pass == 0 ? cursor : 0;
+		uint32_t prev = pass == 0 ? cursor_prev : 0;
 		const size_t stop = pass == 0 ? total_words : cursor;
 		while ( pos < stop )
 		{
-			const uint32_t w0 = words[pos];
-			const bool wide = ( w0 & 0x80000000u ) != 0;
-			const uint32_t entry_number = wide ? ( w0 & 0x7FFFFFFFu ) : ( w0 & 0xFFFu );
+			const uint16_t w0 = words[pos];
+			uint32_t entry_number;
+			size_t step;
+			if ( ( w0 & 0x8000u ) == 0 )
+			{
+				entry_number = prev + ( ( w0 >> 12 ) & 7u ) + 1u;
+				step = 1;
+			}
+#ifdef MICROPB_WIDE_TABLES
+			else if ( ( w0 >> 8 ) == 0xFFu )
+			{
+				entry_number = uint32_t{ words[pos + 1] } | ( uint32_t{ words[pos + 2] } << 16 );
+				step = 5;
+			}
+#endif
+			else
+			{
+				entry_number = words[pos + 1] & 0xFFFu;
+				step = 2;
+			}
+
 			if ( entry_number == number )
 			{
 				cursor = pos;
-				out = decode_entry( words, pos );
+				cursor_prev = prev;
+				out = decode_entry( words, pos, prev );
 				return true;
 			}
-			pos += wide ? 3u : 1u;
+			prev = entry_number;
+			pos += step;
 		}
 	}
 	return false;
 }
+#else
+/// Finds the entry of the field `number` in `words`.
+[[nodiscard]] inline bool find_field( const uint16_t* words, size_t total_words, uint32_t number, field_entry& out )
+{
+	uint32_t prev = 0;
+	for ( size_t pos = 0; pos < total_words; )
+	{
+		const field_entry entry = decode_entry( words, pos, prev );
+		if ( entry.number == number )
+		{
+			out = entry;
+			return true;
+		}
+		prev = entry.number;
+	}
+	return false;
+}
+#endif
 
 /// Reads all fields of `in` into the message at `object`, until the end of
 /// the input or the first error. Does not reset the message: a field that
@@ -1585,10 +1831,14 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 inline void decode_message( reader& in, const value_desc& message, void* object, arena* memory )
 {
 	const value_desc* const* subs = message_subs( message );
-	const uint32_t* words = message_words( message );
+	const uint16_t* words = message_words( message );
+	const size_t total_words = message_word_count( message );
+#ifdef MICROPB_FAST
 	// Fields usually arrive in ascending order, and a repeated field arrives
 	// many times. The search starts at the entry of the last match.
 	size_t cursor = 0;
+	uint32_t cursor_prev = 0;
+#endif
 	while ( !in.empty() )
 	{
 		const field_key key = in.read_key();
@@ -1596,13 +1846,18 @@ inline void decode_message( reader& in, const value_desc& message, void* object,
 			return;
 
 		field_entry field{};
-		if ( !find_field( words, message.words, key.number, cursor, field ) )
+#ifdef MICROPB_FAST
+		if ( !find_field( words, total_words, key.number, cursor, cursor_prev, field ) )
+#else
+		if ( !find_field( words, total_words, key.number, field ) )
+#endif
 		{
 			in.skip( key.type );
 			continue;
 		}
 
 		void* member = member_at( object, field.offset );
+#ifdef MICROPB_FAST
 		if ( field.base_op < op_string )
 		{
 			if ( key.type != wire_of_scalar( field.base_op ) )
@@ -1615,6 +1870,7 @@ inline void decode_message( reader& in, const value_desc& message, void* object,
 			}
 			continue;
 		}
+#endif
 
 		const value_desc type = resolve_type( subs, field );
 		if ( type.kind == field_kind::REPEATED )
@@ -1632,21 +1888,19 @@ inline void decode_message( reader& in, const value_desc& message, void* object,
 		// state, as each member of `msg` has. The same alternative stays, so a
 		// message merges. The codec skips a field with a wrong wire type and
 		// keeps the variant.
-		const variant_desc& variant = *type.variant;
-		const value_desc& alternative = *variant.alternatives[field.alternative];
+		const value_desc& alternative = *type.oneof[field.alternative - 1];
 		if ( key.type != wire_of( alternative ) )
 		{
 			in.skip( key.type );
 			continue;
 		}
 
-		void* active = variant.access( member, field.alternative, false );
-		if ( active == nullptr )
+		if ( oneof_index( type, member ) != field.alternative )
 		{
-			active = variant.access( member, field.alternative, true );
-			reset_value( alternative, active );
+			set_oneof_index( type, member, field.alternative );
+			reset_value( alternative, member );
 		}
-		decode_value( in, key.type, alternative, active, memory );
+		decode_value( in, key.type, alternative, member, memory );
 	}
 }
 

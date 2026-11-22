@@ -6,7 +6,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string_view>
-#include <variant>
 
 #include <micropb/types.hpp>
 
@@ -85,7 +84,7 @@ struct ping
 struct envelope
 {
 	uint32_t id;
-	std::variant<std::monostate, pose, ping, text> payload;
+	pb::oneof<pose, ping, text> payload;
 };
 
 } // namespace messages

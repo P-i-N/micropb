@@ -2,6 +2,7 @@
 #include "vectors/messages.hpp"
 #include "vectors/vectors.hpp"
 
+#define MICROPB_WIDE_TABLES
 #include <algorithm>
 #include <array>
 #include <optional>
@@ -10,7 +11,6 @@
 #include <stdint.h>
 #include <string>
 #include <string_view>
-#include <variant>
 
 #include <micropb/codec.hpp>
 
@@ -120,20 +120,20 @@ struct const_middle
 struct const_holder
 {
 	std::optional<const_middle> maybe;
-	std::variant<std::monostate, const_middle> choice;
+	pb::oneof<const_middle> choice;
 };
 
 struct const_elements
 {
 	std::array<const uint8_t, 3> mac;
-	std::variant<std::monostate, const int32_t> choice;
+	pb::oneof<const int32_t> choice;
 };
 
 struct same_type_oneof
 {
 	uint32_t id = 0;
-	std::variant<std::monostate, std::string_view, std::string_view, std::string_view> msg = {};
-	std::variant<std::monostate, int32_t, int32_t, int32_t> delta = {};
+	pb::oneof<std::string_view, std::string_view, std::string_view> msg = {};
+	pb::oneof<int32_t, int32_t, int32_t> delta = {};
 };
 
 } // namespace
@@ -449,26 +449,26 @@ bool test_encode_const_nested()
 	constexpr std::array<uint8_t, 16> expected{ 0x0a, 0x06, 0x0a, 0x02, 0x08, 0x01, 0x10, 0x02,
 	                                                 0x12, 0x06, 0x0a, 0x02, 0x08, 0x03, 0x10, 0x04 };
 	constexpr std::array<uint8_t, 7> expected_elements{ 0x0a, 0x03, 1, 2, 3, 0x10, 0x05 };
-	const const_elements elements{ { 1, 2, 3 }, std::variant<std::monostate, const int32_t>( std::in_place_index<1>, 5 ) };
+	const const_elements elements{ { 1, 2, 3 }, pb::oneof<const int32_t>( std::in_place_index<0>, 5 ) };
 	return matches( const_holder{ const_middle{ { 1, {} }, 2 }, const_middle{ { 3, {} }, 4 } }, expected ) &&
 	       matches( elements, expected_elements );
 }
 
-/// Alternatives of the same C++ type in one `std::variant` encode with their distinct field numbers and encodings.
+/// Alternatives of the same C++ type in one `pb::oneof` encode with their distinct field numbers and encodings.
 bool test_encode_same_type_oneof()
 {
-	const same_type_oneof err{ .id = 7, .msg{ std::in_place_index<1>, "bad" } };
+	const same_type_oneof err{ .id = 7, .msg{ std::in_place_index<0>, "bad" } };
 	same_type_oneof info{ .id = 7 };
-	info.msg.emplace<2>( "ok" );
+	info.msg.emplace<1>( "ok" );
 	same_type_oneof html{ .id = 7 };
-	html.msg.emplace<3>( "<b>" );
+	html.msg.emplace<2>( "<b>" );
 
 	same_type_oneof raw{};
-	raw.delta.emplace<1>( -2 );
+	raw.delta.emplace<0>( -2 );
 	same_type_oneof zz{};
-	zz.delta.emplace<2>( -2 );
+	zz.delta.emplace<1>( -2 );
 	same_type_oneof fx{};
-	fx.delta.emplace<3>( -2 );
+	fx.delta.emplace<2>( -2 );
 
 	return matches( err, std::array<uint8_t, 7>{ 0x08, 0x07, 0x12, 0x03, 0x62, 0x61, 0x64 } ) &&
 	       matches( info, std::array<uint8_t, 6>{ 0x08, 0x07, 0x1a, 0x02, 0x6f, 0x6b } ) &&

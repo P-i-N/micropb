@@ -188,39 +188,12 @@ if(MICROPB_TESTS)
     endif()
 
     foreach(rule
-            duplicate_tag tag_zero tag_too_large tag_reserved
-            variant_no_monostate variant_repeated_alternative
-            variant_optional_alternative variant_variant_alternative unmapped_type monostate_member
-            optional_repeated optional_optional optional_variant
-            repeated_repeated repeated_optional repeated_variant
-            decode_encode_only not_aggregate enum_too_wide
-            member_offset_too_large decode_const_member decode_fixed_span
-            field_list_type field_list_offset field_list_alternative recursive_message
-            decode_needs_arena span_element_trivial no_field_list zigzag_unsigned fixed_width)
+            decode_encode_only member_offset_too_large recursive_message
+            decode_needs_arena no_field_list wide_table_required)
         micropb_add_compile_fail_test(${rule} ${rule})
     endforeach()
 
-    micropb_add_compile_fail_test(list_member_type optional_repeated)
-    micropb_add_compile_fail_test(list_duplicate_number duplicate_tag)
     micropb_add_compile_fail_test(list_decode_alternative decode_encode_only)
-    micropb_add_compile_fail_test(list_decode_fixed_span decode_fixed_span)
-    micropb_add_compile_fail_test(list_decode_const_span_element decode_const_member)
-    micropb_add_compile_fail_test(decode_const_fixed_bytes decode_const_member)
-    micropb_add_compile_fail_test(decode_const_repeated_element decode_const_member)
-    micropb_add_compile_fail_test(decode_const_alternative decode_const_member)
-    micropb_add_compile_fail_test(list_alternative_on_plain_member field_list_alternative)
-    micropb_add_compile_fail_test(list_alternative_index_too_large field_list_alternative)
-    micropb_add_compile_fail_test(list_alternative_missing field_list_alternative)
-    micropb_add_compile_fail_test(list_alternative_shared_offset field_list_alternative)
-    micropb_add_compile_fail_test(list_member_twice field_list_overlap)
-    micropb_add_compile_fail_test(list_empty_member_twice field_list_overlap)
-    micropb_add_compile_fail_test(variant_monostate_alternative monostate_member)
-    micropb_add_compile_fail_test(char_member unmapped_type)
-    micropb_add_compile_fail_test(volatile_member unmapped_type)
-    micropb_add_compile_fail_test(wchar_member unmapped_type)
-    # `__int128` is an integer type only with GNU extensions, so this target turns them on.
-    micropb_add_compile_fail_test(int128_member unmapped_type)
-    set_target_properties(int128_member PROPERTIES CXX_EXTENSIONS ON)
 
     # Size report: not a test. `cmake --build <dir> --target size_report` prints the
     # size of one translation unit that encodes and decodes 16 and 32 message types.

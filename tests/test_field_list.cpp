@@ -5,7 +5,6 @@
 #include <stdint.h>
 #include <string_view>
 #include <type_traits>
-#include <variant>
 
 #include <micropb/micropb.hpp>
 
@@ -22,7 +21,7 @@ struct message
 	uint32_t id;
 	pb::repeated<float, 3> values;
 	std::optional<inner> child;
-	std::variant<std::monostate, inner, uint32_t> choice;
+	pb::oneof<inner, uint32_t> choice;
 	std::array<uint8_t, 4> key;
 	int32_t delta;
 };
@@ -33,7 +32,7 @@ struct empty
 struct shared_offset
 {
 	[[no_unique_address]] empty e;
-	std::variant<std::monostate, int32_t, float> choice;
+	pb::oneof<int32_t, float> choice;
 };
 
 /// Encode only: a `std::array` of a type that is not a byte, and a `const` member.
@@ -48,7 +47,7 @@ struct constants
 {
 	const uint32_t id;
 	const std::optional<int32_t> maybe;
-	const std::variant<std::monostate, uint32_t, float> choice;
+	const pb::oneof<uint32_t, float> choice;
 	const pb::repeated<uint8_t, 4> data;
 	const std::string_view name;
 };
@@ -107,7 +106,7 @@ struct var_link
 
 struct var_node
 {
-	std::variant<std::monostate, var_link> choice;
+	pb::oneof<var_link> choice;
 };
 
 } // namespace manual
@@ -225,7 +224,7 @@ namespace d = pb::detail;
 // The table is in the order of the field numbers.
 using message_table = d::field_table<d::field_list_of<manual::message>>;
 constexpr const auto& layout = message_table::layout;
-static_assert( message_table::entry_count == 7 && layout.words_n == 7 );
+static_assert( message_table::entry_count == 7 && layout.words_n == 9 );
 static_assert( layout.entries[0].number == 1 && layout.entries[1].number == 2 && layout.entries[2].number == 3 &&
                layout.entries[3].number == 4 && layout.entries[4].number == 5 && layout.entries[5].number == 10 &&
                layout.entries[6].number == 11 );
@@ -236,7 +235,7 @@ static_assert( layout.entries[5].offset == offsetof( manual::message, choice ) &
                layout.subs[layout.entries[6].sub_idx] == &d::value_descriptor<decltype( manual::message::choice )>::value );
 static_assert( d::value_descriptor<manual::empty>::value.words == 0 &&
                d::value_descriptor<manual::empty>::value.table == nullptr );
-static_assert( d::value_descriptor<manual::shared_offset>::value.words == 3 );
+static_assert( d::value_descriptor<manual::shared_offset>::value.words == 5 );
 
 static_assert( !d::is_recursive<manual::inner>() && !d::is_recursive<manual::message>() &&
                !d::is_recursive<manual::empty>() && !d::is_recursive<manual::fixed>() &&
@@ -279,7 +278,7 @@ bool test_decode()
 {
 	manual::message message{};
 	const auto size = pb::decode( std::span<const uint8_t>( message_wire ), message );
-	const auto* second = std::get_if<uint32_t>( &message.choice );
+	const auto* second = pb::get_if<uint32_t>( &message.choice );
 	return size && *size == message_wire.size() && message.id == 7 && message.values.size() == 1 &&
 	       message.values[0] == 1.0f && message.child && message.child->x == 2 && second && *second == 9 &&
 	       message.key[3] == 4 && message.delta == -1 && encodes_to( message, message_wire );
@@ -292,7 +291,7 @@ bool test_decode_message_alternative()
 	manual::message message{};
 	message.choice = uint32_t{ 1 };
 	const auto size = pb::decode( std::span<const uint8_t>( wire ), message );
-	const auto* first = std::get_if<manual::inner>( &message.choice );
+	const auto* first = pb::get_if<manual::inner>( &message.choice );
 	return size && first && first->x == 3 && first->label == "b";
 }
 

@@ -1,3 +1,4 @@
+#define MICROPB_WIDE_TABLES
 #include <array>
 #include <cstring>
 #include <optional>
@@ -5,7 +6,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string_view>
-#include <variant>
 
 #include <micropb/codec.hpp>
 
@@ -35,7 +35,7 @@ struct holder
 	std::span<const int32_t> view;
 	std::string_view name;
 	nothing none;
-	std::variant<std::monostate, plain, float> choice;
+	pb::oneof<plain, float> choice;
 };
 
 enum class small : uint8_t
@@ -86,9 +86,13 @@ template <typename Table>
 consteval d::field_entry entry_at( size_t index )
 {
 	size_t pos = 0;
+	uint32_t prev = 0;
 	d::field_entry entry{};
 	for ( size_t i = 0; i <= index; ++i )
-		entry = d::decode_entry( Table::value.words.data(), pos );
+	{
+		entry = d::decode_entry( Table::value.words.data(), pos, prev );
+		prev = entry.number;
+	}
 	return entry;
 }
 
@@ -103,23 +107,23 @@ consteval d::value_desc type_at( size_t index )
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// `plain`: three inline scalars at offsets 0, 4, 8, numbers 1, 2, 3, zero compound pointers, 3 words (12 B).
-static_assert( p.kind == K::MESSAGE && p.scalar == 0 && p.words == 3 && sizeof( plain_table::value ) == 12 );
+// `plain`: three inline scalars at offsets 0, 4, 8, numbers 1, 2, 3, zero compound pointers, 3 halfwords (6 B).
+static_assert( p.kind == K::MESSAGE && p.scalar == 0 && p.words == 3 && sizeof( plain_table::value ) == 6 );
 static_assert( entry_at<plain_table>( 0 ).offset == 0 && entry_at<plain_table>( 1 ).offset == 4 &&
                entry_at<plain_table>( 2 ).offset == 8 );
 static_assert( entry_at<plain_table>( 2 ).number == 3 && type_at<plain_table>( 2 ).kind == K::SCALAR &&
                entry_at<plain_table>( 0 ).alternative == 0 );
 static_assert( type_at<plain_table>( 1 ).scalar == d::scalar_code_of<uint32_t>() );
 
-// `holder`: 11 1-word entries, with the numbers 1 5 6 7 8 9 10 11 12 13 14, and 8 deduplicated compound pointers.
-static_assert( h.kind == K::MESSAGE && h.scalar == 8 && h.words == 11 );
+// `holder`: 9 1-halfword entries + 2 2-halfword oneof entries = 13 halfwords, and 8 deduplicated compound pointers.
+static_assert( h.kind == K::MESSAGE && h.scalar == 8 && h.words == 13 );
 static_assert( entry_at<holder_table>( 1 ).number == 5 && entry_at<holder_table>( 8 ).number == 12 &&
                entry_at<holder_table>( 10 ).number == 14 );
 static_assert( type_at<holder_table>( 1 ).kind == K::MESSAGE && type_at<holder_table>( 1 ).table == p.table );
 static_assert( type_at<holder_table>( 2 ).kind == K::OPTIONAL &&
                type_at<holder_table>( 2 ).optional->value == &d::value_descriptor<float>::value );
 static_assert( type_at<holder_table>( 3 ).kind == K::REPEATED &&
-               type_at<holder_table>( 3 ).sequence->storage == d::sequence_storage::REPEATED &&
+               type_at<holder_table>( 3 ).sequence->storage == d::sequence_storage::REPEATED_8 &&
                type_at<holder_table>( 3 ).sequence->capacity == 4 &&
                type_at<holder_table>( 3 ).sequence->element_size == 4 &&
                type_at<holder_table>( 3 ).sequence->element == &d::value_descriptor<float>::value );
@@ -134,8 +138,8 @@ static_assert( entry_at<holder_table>( 9 ).alternative == 1 && entry_at<holder_t
                entry_at<holder_table>( 9 ).offset == entry_at<holder_table>( 10 ).offset &&
                entry_at<holder_table>( 9 ).sub_idx == 0 && entry_at<holder_table>( 10 ).sub_idx == 0 &&
                type_at<holder_table>( 9 ).kind == K::ONEOF &&
-               type_at<holder_table>( 9 ).variant->alternatives[1] == &d::value_descriptor<plain>::value &&
-               type_at<holder_table>( 9 ).variant->alternatives[2] == &d::value_descriptor<float>::value );
+               type_at<holder_table>( 9 ).oneof[0] == &d::value_descriptor<plain>::value &&
+               type_at<holder_table>( 9 ).oneof[1] == &d::value_descriptor<float>::value );
 
 static_assert( d::value_descriptor<std::span<const uint8_t>>::value.kind == K::BYTES &&
                d::value_descriptor<std::span<const uint8_t>>::value.sequence == nullptr );
@@ -148,8 +152,8 @@ static_assert( d::scalar_code_of<uint16_t>() == 1 && d::scalar_code_of<uint64_t>
 static_assert( d::scalar_code_of<int32_t, pb::int_encoding::ZIGZAG>() == ( 2 | d::scalar_signed | d::scalar_zigzag ) );
 static_assert( d::scalar_code_of<float>() == ( 2 | d::scalar_fixed ) &&
                d::value_descriptor<int64_t, pb::int_encoding::FIXED>::value.scalar == ( 3 | d::scalar_fixed ) );
-static_assert( d::scalar_code_of<small>() == ( 0 | d::scalar_enum ) );
-static_assert( d::scalar_code_of<level>() == ( 2 | d::scalar_enum | d::scalar_signed ) );
+static_assert( d::scalar_code_of<small>() == 0 );
+static_assert( d::scalar_code_of<level>() == ( 2 | d::scalar_signed ) );
 
 static_assert( sizeof( d::value_desc ) <= 2 * sizeof( void* ) );
 
@@ -177,23 +181,18 @@ bool test_optional_accessor()
 
 bool test_variant_accessor()
 {
-	using choice = std::variant<std::monostate, plain, float>;
-	const d::variant_desc& desc = *d::value_descriptor<choice>::value.variant;
+	using choice = pb::oneof<plain, float>;
+	const d::value_desc& desc = d::value_descriptor<choice>::value;
 	choice value;
-	if ( desc.access( &value, 1, false ) != nullptr )
+	if ( d::oneof_index( desc, &value ) != 0 )
 		return false;
 
-	auto* first = static_cast<plain*>( desc.access( &value, 1, true ) );
-	if ( first == nullptr || value.index() != 1 || first->b != 0 )
+	value.emplace<plain>().b = 7;
+	if ( d::oneof_index( desc, &value ) != 1 || pb::get_if<plain>( &value )->b != 7 )
 		return false;
 
-	first->b = 7;
-	if ( desc.access( &value, 1, true ) != first || std::get<plain>( value ).b != 7 )
-		return false;
-	if ( desc.access( &value, 2, false ) != nullptr || value.index() != 1 )
-		return false;
-
-	return desc.access( &value, 0, true ) != nullptr && value.index() == 0;
+	d::set_oneof_index( desc, &value, 0 );
+	return !value.has_value() && value.index() == choice::npos;
 }
 
 bool test_sequence_accessor()
@@ -277,7 +276,7 @@ struct ping
 	uint32_t seq;
 };
 
-using choice = std::variant<std::monostate, pose, ping, uint32_t>;
+using choice = pb::oneof<pose, ping, uint32_t>;
 
 /// One member of each kind, with the storage types that `decode` accepts.
 struct all
@@ -558,7 +557,7 @@ bool test_all_kinds()
 	append_all( where.pos, std::array<float, 3>{ 1, 2, 3 } );
 	append_all( where.rot, std::array<float, 4>{ 0, 0, 0, 1 } );
 
-	const choice payloads[]{ std::monostate{}, where, ping{ 0 }, uint32_t{ 0 } };
+	const choice payloads[]{ choice{}, where, ping{ 0 }, uint32_t{ 0 } };
 	for ( const choice& payload : payloads )
 	{
 		value.payload = payload;
@@ -585,9 +584,9 @@ struct wide_variant_msg;
 template <size_t... I>
 struct wide_variant_msg<std::index_sequence<I...>>
 {
-	using variant_t = std::variant<std::monostate, alt_tag<I>...>;
+	using variant_t = pb::oneof<alt_tag<I>...>;
 	variant_t first;
-	std::variant<std::monostate, int32_t, double> second;
+	pb::oneof<int32_t, double> second;
 	pb::repeated<uint8_t, 4100> pad;
 	uint32_t far_scalar;
 	uint32_t max_tag_scalar;
@@ -626,10 +625,10 @@ bool test_wide_entries()
 {
 	using wt = d::field_table<d::field_list_of<wide_msg>>;
 	// 32 1-word entries (`first` 1..32) + 1 (`pad`) = 33 1-word entries, plus 5 3-word entries = 48 words.
-	static_assert( wt::entry_count == 38 && wt::layout.words_n == 33 + 5 * 3 );
+	static_assert( wt::entry_count == 38 && wt::layout.words_n == 32 * 2 + 1 + 5 * 5 + 1 );
 
 	wide_msg tx{};
-	tx.first.emplace<33>( alt_tag<32>{ 42 } );
+	tx.first.emplace<32>( alt_tag<32>{ 42 } );
 	tx.second = 3.5;
 	tx.far_scalar = 777;
 	tx.max_tag_scalar = 999;
@@ -640,13 +639,13 @@ bool test_wide_entries()
 		return false;
 
 	wide_msg rx{};
-	rx.first.emplace<1>( alt_tag<0>{ 9 } );
+	rx.first.emplace<0>( alt_tag<0>{ 9 } );
 	rx.second = int32_t{ 5 };
 	if ( !pb::decode( std::span<const uint8_t>( wire ).first( *n ), rx ) )
 		return false;
 
-	const auto* a33 = std::get_if<33>( &rx.first );
-	const auto* s2 = std::get_if<double>( &rx.second );
+	const auto* a33 = pb::get_if<32>( &rx.first );
+	const auto* s2 = pb::get_if<double>( &rx.second );
 	return a33 != nullptr && a33->v == 42 && s2 != nullptr && *s2 == 3.5 && rx.far_scalar == 777 &&
 	       rx.max_tag_scalar == 999 && rx.pad.empty();
 }
@@ -655,7 +654,7 @@ struct encoded_compounds
 {
 	std::optional<int32_t> opt_zz;
 	std::optional<uint32_t> opt_fx;
-	std::variant<std::monostate, int32_t, uint32_t> oneof_enc;
+	pb::oneof<int32_t, uint32_t> oneof_enc;
 };
 
 } // namespace
@@ -687,7 +686,7 @@ bool test_encoded_compounds()
 
 	encoded_compounds rx_a{};
 	if ( !pb::decode( expected_a, rx_a ) || rx_a.opt_zz != -1 || rx_a.opt_fx != 0x04030201u ||
-	     !std::holds_alternative<int32_t>( rx_a.oneof_enc ) || std::get<int32_t>( rx_a.oneof_enc ) != -2 )
+	     !pb::holds_alternative<int32_t>( rx_a.oneof_enc ) || *pb::get_if<int32_t>( &rx_a.oneof_enc ) != -2 )
 		return false;
 
 	// field 4 (fixed32 0x89ABCDEF): 0x25 0xEF 0xCD 0xAB 0x89
@@ -699,10 +698,124 @@ bool test_encoded_compounds()
 		return false;
 
 	if ( !pb::decode( expected_b, rx_a ) || rx_a.opt_zz.has_value() || rx_a.opt_fx.has_value() ||
-	     !std::holds_alternative<uint32_t>( rx_a.oneof_enc ) ||
-	     std::get<uint32_t>( rx_a.oneof_enc ) != 0x89ABCDEFu )
+	     !pb::holds_alternative<uint32_t>( rx_a.oneof_enc ) ||
+	     *pb::get_if<uint32_t>( &rx_a.oneof_enc ) != 0x89ABCDEFu )
 		return false;
 	return true;
+}
+
+struct map_sub
+{
+	int32_t x = 0;
+
+	[[nodiscard]] constexpr bool operator==( const map_sub& ) const = default;
+};
+
+struct map_holder
+{
+	pb::map<pb::string<8>, int32_t, 2> s2i = {};
+	pb::map<int32_t, uint32_t, 4, pb::int_encoding::ZIGZAG, pb::int_encoding::FIXED> zz = {};
+	pb::map<uint32_t, map_sub, 4> subs = {};
+};
+
+struct map_span_holder
+{
+	std::span<const pb::kv_pair<std::string_view, int32_t>> s2i = {};
+};
+
+} // namespace
+
+template <>
+struct pb::fields_of<map_sub> : pb::field_list<map_sub, pb::field_at<decltype( map_sub::x ), 1, offsetof( map_sub, x )>>
+{};
+
+template <>
+struct pb::fields_of<map_holder>
+  : pb::field_list<map_holder,
+                   pb::field_at<decltype( map_holder::s2i ), 1, offsetof( map_holder, s2i )>,
+                   pb::field_at<decltype( map_holder::zz ), 2, offsetof( map_holder, zz )>,
+                   pb::field_at<decltype( map_holder::subs ), 3, offsetof( map_holder, subs )>>
+{};
+
+template <>
+struct pb::fields_of<map_span_holder>
+  : pb::field_list<map_span_holder, pb::field_at<decltype( map_span_holder::s2i ), 1, offsetof( map_span_holder, s2i )>>
+{};
+
+namespace {
+
+/// `pb::map` and `std::span<const pb::kv_pair<...>>` wire bytes match `protoc --encode`.
+bool test_maps()
+{
+	// `protoc --encode` bytes for:
+	//   s2i { key: "a" value: 1 } s2i { key: "" value: 0 }
+	//   zz { key: -1 value: 42 }
+	//   subs { key: 7 value { x: 9 } } subs { key: 8 value {} }
+	constexpr auto expected = std::to_array<uint8_t>( {
+	  0x0a, 0x05, 0x0a, 0x01, 0x61, 0x10, 0x01, // s2i["a"] = 1
+	  0x0a, 0x04, 0x0a, 0x00, 0x10, 0x00,       // s2i[""] = 0
+	  0x12, 0x07, 0x08, 0x01, 0x15, 0x2a, 0x00, 0x00, 0x00, // zz[-1] = 42
+	  0x1a, 0x06, 0x08, 0x07, 0x12, 0x02, 0x08, 0x09,       // subs[7] = {9}
+	  0x1a, 0x04, 0x08, 0x08, 0x12, 0x00,                   // subs[8] = {}
+	} );
+
+	map_holder tx{
+		.s2i = { { { "a", 1 }, { "", 0 } } },
+		.zz = { { { -1, 42u } } },
+		.subs = { { { 7u, map_sub{ 9 } }, { 8u, map_sub{ 0 } } } },
+	};
+	std::array<uint8_t, 64> out{};
+	const auto n = pb::encode( tx, out );
+	if ( !n || *n != expected.size() || !std::equal( expected.begin(), expected.end(), out.begin() ) )
+		return false;
+
+	map_holder rx{};
+	if ( !pb::decode( expected, rx ) )
+		return false;
+	if ( !( rx.s2i == tx.s2i ) || !( rx.zz == tx.zz ) || !( rx.subs == tx.subs ) )
+		return false;
+
+	// Duplicate keys on the wire overwrite in-place, even when capacity (2) is full.
+	constexpr auto dup_wire = std::to_array<uint8_t>( {
+	  0x0a, 0x05, 0x0a, 0x01, 0x61, 0x10, 0x01, // "a" -> 1
+	  0x0a, 0x05, 0x0a, 0x01, 0x62, 0x10, 0x02, // "b" -> 2
+	  0x0a, 0x05, 0x0a, 0x01, 0x61, 0x10, 0x09, // "a" -> 9 (overwrites)
+	} );
+	if ( !pb::decode( dup_wire, rx ) )
+		return false;
+	if ( rx.s2i.size() != 2 || !rx.zz.empty() || !rx.subs.empty() )
+		return false;
+	const int32_t* va = rx.s2i.find( "a" );
+	const int32_t* vb = rx.s2i.find( "b" );
+	if ( va == nullptr || *va != 9 || vb == nullptr || *vb != 2 )
+		return false;
+
+	// A third distinct key exceeds capacity 2.
+	constexpr auto over_wire = std::to_array<uint8_t>( {
+	  0x0a, 0x05, 0x0a, 0x01, 0x61, 0x10, 0x01,
+	  0x0a, 0x05, 0x0a, 0x01, 0x62, 0x10, 0x02,
+	  0x0a, 0x05, 0x0a, 0x01, 0x63, 0x10, 0x03,
+	} );
+	const auto over = pb::decode( over_wire, rx );
+	if ( over.has_value() || over.error() != pb::error::CAPACITY_EXCEEDED )
+		return false;
+
+	// Unbounded `std::span<const pb::kv_pair<...>>` round-trips via scratch memory.
+	constexpr std::array<pb::kv_pair<std::string_view, int32_t>, 2> pairs{
+		pb::kv_pair<std::string_view, int32_t>{ "a", 1 },
+		pb::kv_pair<std::string_view, int32_t>{ "", 0 },
+	};
+	const map_span_holder span_tx{ .s2i = pairs };
+	const auto sn = pb::encode( span_tx, out );
+	if ( !sn || *sn != 13 || !std::equal( expected.begin(), expected.begin() + 13, out.begin() ) )
+		return false;
+
+	uint8_t scratch[128]{};
+	map_span_holder span_rx{};
+	if ( !pb::decode( std::span( out ).first( *sn ), span_rx, scratch ) )
+		return false;
+	return span_rx.s2i.size() == 2 && span_rx.s2i[0].key == "a" && span_rx.s2i[0].value == 1 &&
+	       span_rx.s2i[1].key.empty() && span_rx.s2i[1].value == 0;
 }
 
 } // namespace
@@ -710,6 +823,7 @@ bool test_encoded_compounds()
 int main()
 {
 	const bool ok = test_optional_accessor() && test_variant_accessor() && test_sequence_accessor() &&
-	                test_block_bound() && test_all_kinds() && test_wide_entries() && test_encoded_compounds();
+	                test_block_bound() && test_all_kinds() && test_wide_entries() && test_encoded_compounds() &&
+	                test_maps();
 	return ok ? 0 : 1;
 }

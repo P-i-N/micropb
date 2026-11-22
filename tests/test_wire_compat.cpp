@@ -10,7 +10,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string_view>
-#include <variant>
 
 #include <micropb/micropb.hpp>
 
@@ -31,7 +30,7 @@ struct pose_owned
 struct envelope_owned
 {
 	uint32_t id;
-	std::variant<std::monostate, pose_owned, ping, text> payload;
+	pb::oneof<pose_owned, ping, text> payload;
 };
 
 /// `lists` with spans: `decode` puts the items in a `pb::arena`.
@@ -252,9 +251,9 @@ bool test_envelope_stream()
 		offset += sizes[i];
 	}
 
-	const auto* pos = std::get_if<pose_owned>( &received[0].payload );
-	const auto* seq = std::get_if<ping>( &received[1].payload );
-	const auto* message = std::get_if<text>( &received[2].payload );
+	const auto* pos = pb::get_if<pose_owned>( &received[0].payload );
+	const auto* seq = pb::get_if<ping>( &received[1].payload );
+	const auto* message = pb::get_if<text>( &received[2].payload );
 	return received[0].id == 2 && pos && pos->pos.size() == 3 && pos->pos[2] == 3 && pos->rot[3] == 1 &&
 	       received[1].id == 3 && seq && seq->seq == 7 && received[2].id == 4 && message && message->name == "hi" &&
 	       message->mac == mac &&

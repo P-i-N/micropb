@@ -223,7 +223,6 @@ INCLUDES = [
     ("<stddef.h>", r"\b(offsetof\(|size_t\b)"),
     ("<stdint.h>", r"\bu?int\d+_t\b"),
     ("<string_view>", r"std::string_view\b"),
-    ("<variant>", r"std::variant<"),
 ]
 
 KEYWORDS = set("""
@@ -473,7 +472,31 @@ class Header:
         if field.type in (Field.TYPE_MESSAGE, Field.TYPE_ENUM):
             target = self.types[field.type_name]
             if not target.is_enum and target.desc.options.map_entry:
-                raise self.error(f"{name}: map fields are not supported")
+                key_field = next(f for f in target.desc.field if f.number == 1)
+                val_field = next(f for f in target.desc.field if f.number == 2)
+                key_t = self.field_type(target, key_field, member_names)
+                val_t = self.field_type(target, val_field, member_names)
+                key_enc = ENCODINGS.get(key_field.type)
+                val_enc = ENCODINGS.get(val_field.type)
+                enc_args = []
+                if key_enc or val_enc:
+                    enc_args.append(key_enc or "pb::int_encoding::VARINT")
+                    if val_enc:
+                        enc_args.append(val_enc)
+                pointer = option("type")
+                count = option("max_count") if not pointer else None
+                if not pointer and not count and option("fixed_count"):
+                    raise self.error(f"{name}: fixed_count needs max_count")
+                pair_args = ", ".join([key_t, val_t] + enc_args)
+                if count and option("fixed_count"):
+                    text = f"std::array<pb::kv_pair<{pair_args}>, {count}>"
+                elif count:
+                    map_args = ", ".join([key_t, val_t, str(count)] + enc_args)
+                    text = f"pb::map<{map_args}>"
+                else:
+                    text = f"std::span<const pb::kv_pair<{pair_args}>>"
+                self.options.check_use(name, found, used)
+                return text
             text = self.reference(target, member_names)
         else:
             text = SCALARS[field.type]
@@ -563,10 +586,10 @@ class Header:
                 group = [other for other in desc.field if oneof_of(other) == index]
                 name = desc.oneof_decl[index].name
                 types = [self.field_type(message, other, member_names) for other in group]
-                for position, other in enumerate(group, 1):
+                for position, other in enumerate(group):
                     const_name = ident(f"{name}_{other.name}")
                     lines.append(f"    static constexpr size_t {const_name} = {position};")
-                lines.append(f"    std::variant<std::monostate, {', '.join(types)}> {ident(name)} = {{}};")
+                lines.append(f"    pb::oneof<{', '.join(types)}> {ident(name)} = {{}};")
                 entries += [(ident(name), other.number, position, ENCODINGS.get(other.type))
                             for position, other in enumerate(group, 1)]
 
@@ -600,7 +623,13 @@ class Header:
             for field in message.desc.field:
                 if field.type == Field.TYPE_MESSAGE:
                     target = self.types[field.type_name]
-                    if target.file.name == self.file.name and not target.desc.options.map_entry:
+                    if target.desc.options.map_entry:
+                        val_field = next(f for f in target.desc.field if f.number == 2)
+                        if val_field.type == Field.TYPE_MESSAGE:
+                            val_target = self.types[val_field.type_name]
+                            if val_target.file.name == self.file.name:
+                                visit(val_target)
+                    elif target.file.name == self.file.name:
                         visit(target)
             stack.pop()
             order.append(message)
@@ -623,9 +652,10 @@ class Header:
 
         # The warning for a rule that matches no field must not get lost when an error comes later.
         messages = [each for each in types if not each.is_enum]
-        for message in messages:
-            for field in message.desc.field:
-                self.options.of(f"{message.proto_name}.{field.name}", self.file.package)
+        for message in self.types.values():
+            if message.file.name == self.file.name and not message.is_enum:
+                for field in message.desc.field:
+                    self.options.of(f"{message.proto_name}.{field.name}", self.file.package)
         for each in types:
             if each.is_enum:
                 self.options.of(each.proto_name, self.file.package)

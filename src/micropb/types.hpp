@@ -2,17 +2,20 @@
 
 #include <algorithm>
 #include <array>
+#include <memory>
 #include <span>
 #include <stddef.h>
 #include <stdint.h>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 
 namespace pb {
 
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Error codes of the codec. Functions return them as `std::expected` values.
-enum class error
+enum class error : uint8_t
 {
 	/// encode: the output span is too short.
 	BUFFER_TOO_SMALL,
@@ -80,6 +83,119 @@ struct fields_of;
 namespace detail {
 /// Gives the codec the `_items` and `_count` members of `repeated`, `bytes` and `string`.
 struct sequence_access;
+
+/// Gives the codec the `_storage` and `_index` members of `oneof`.
+struct oneof_access;
+
+/// Smallest unsigned integer type that holds counts `0..N`.
+template <size_t N>
+using count_type_t = std::conditional_t<N <= 255, uint8_t, std::conditional_t<N <= 65535, uint16_t, size_t>>;
+
+template <size_t I, typename... Ts>
+struct type_at;
+
+template <typename Head, typename... Tail>
+struct type_at<0, Head, Tail...>
+{
+	using type = Head;
+};
+
+template <size_t I, typename Head, typename... Tail>
+struct type_at<I, Head, Tail...> : type_at<I - 1, Tail...>
+{};
+
+template <typename T, typename... Ts>
+inline constexpr size_t type_count_v = ( static_cast<size_t>( std::is_same_v<T, Ts> ) + ... + 0 );
+
+inline constexpr size_t oneof_npos = size_t( -1 );
+
+template <typename T, typename... Ts>
+[[nodiscard]] consteval size_t find_type_index()
+{
+	constexpr bool match[]{ std::is_same_v<T, Ts>... };
+	for ( size_t i = 0; i < sizeof...( Ts ); ++i )
+		if ( match[i] )
+			return i;
+	return oneof_npos;
+}
+
+template <typename U, typename... Ts>
+[[nodiscard]] consteval size_t find_convertible_index()
+{
+	using D = std::decay_t<U>;
+	if constexpr ( type_count_v<D, Ts...> == 1 )
+		return find_type_index<D, Ts...>();
+	else if constexpr ( type_count_v<D, Ts...> == 0 )
+	{
+		constexpr bool conv[]{ ( !std::is_same_v<std::remove_cv_t<Ts>, bool> && std::is_convertible_v<U, Ts> )... };
+		size_t found = oneof_npos;
+		for ( size_t i = 0; i < sizeof...( Ts ); ++i )
+		{
+			if ( conv[i] )
+			{
+				if ( found != oneof_npos )
+					return oneof_npos;
+				found = i;
+			}
+		}
+		return found;
+	}
+	else
+		return oneof_npos;
+}
+
+template <typename... Ts>
+union oneof_storage;
+
+template <>
+union oneof_storage<>
+{};
+
+template <typename Head, typename... Tail>
+union oneof_storage<Head, Tail...>
+{
+	Head head;
+	oneof_storage<Tail...> tail;
+
+	constexpr oneof_storage() noexcept {}
+	constexpr oneof_storage( const oneof_storage& ) = default;
+	constexpr oneof_storage& operator=( const oneof_storage& ) = default;
+	constexpr ~oneof_storage() = default;
+
+	template <size_t I, typename... Args>
+	constexpr auto& emplace_at( Args&&... args )
+	{
+		if constexpr ( I == 0 )
+		{
+			std::construct_at( const_cast<std::remove_const_t<Head>*>( &head ), std::forward<Args>( args )... );
+			return head;
+		}
+		else
+		{
+			std::construct_at( &tail );
+			return tail.template emplace_at<I - 1>( std::forward<Args>( args )... );
+		}
+	}
+
+	template <size_t I>
+	[[nodiscard]] constexpr auto& at() noexcept
+	{
+		if constexpr ( I == 0 )
+			return head;
+		else
+			return tail.template at<I - 1>();
+	}
+
+	template <size_t I>
+	[[nodiscard]] constexpr const auto& at() const noexcept
+	{
+		if constexpr ( I == 0 )
+			return head;
+		else
+			return tail.template at<I - 1>();
+	}
+};
+
 } // namespace detail
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -94,7 +210,7 @@ struct repeated
 
 	template <size_t M>
 		requires( M <= N )
-	constexpr repeated( const T ( &items )[M] ) : _count( M )
+	constexpr repeated( const T ( &items )[M] ) : _count( static_cast<count_type>( M ) )
 	{
 		std::copy_n( items, M, _items.data() );
 	}
@@ -139,8 +255,162 @@ struct repeated
 private:
 	friend struct detail::sequence_access;
 
+	using count_type = detail::count_type_t<N>;
+
 	std::array<T, N> _items;
-	size_t _count = 0;
+	count_type _count = 0;
+};
+
+/// Key-value pair of a proto3 `map<K, V>` field.
+template <typename K,
+          typename V,
+          int_encoding KeyEnc = int_encoding::VARINT,
+          int_encoding ValEnc = int_encoding::VARINT>
+struct kv_pair
+{
+	using key_type = K;
+	using mapped_type = V;
+	static constexpr int_encoding key_encoding = KeyEnc;
+	static constexpr int_encoding value_encoding = ValEnc;
+
+	K key = {};
+	V value = {};
+
+	[[nodiscard]] constexpr bool operator==( const kv_pair& ) const = default;
+};
+
+namespace detail {
+
+template <typename Pair>
+using kv_pair_field_list = field_list<Pair,
+                                      field_at<typename Pair::key_type, 1, offsetof( Pair, key ), 0, Pair::key_encoding>,
+                                      field_at<typename Pair::mapped_type, 2, offsetof( Pair, value ), 0, Pair::value_encoding>>;
+
+} // namespace detail
+
+template <typename K, typename V, int_encoding KeyEnc, int_encoding ValEnc>
+struct fields_of<kv_pair<K, V, KeyEnc, ValEnc>> : detail::kv_pair_field_list<kv_pair<K, V, KeyEnc, ValEnc>>
+{};
+
+/// Fixed-capacity proto3 `map<K, V>` that keeps up to `N` entries in the object.
+/// Does not allocate. Lookup is linear in `size()`.
+template <typename K,
+          typename V,
+          size_t N,
+          int_encoding KeyEnc = int_encoding::VARINT,
+          int_encoding ValEnc = int_encoding::VARINT>
+struct map
+{
+	using key_type = K;
+	using mapped_type = V;
+	using value_type = kv_pair<K, V, KeyEnc, ValEnc>;
+	static constexpr size_t max_size = N;
+
+	constexpr map() = default;
+
+	template <size_t M>
+		requires( M <= N )
+	constexpr map( const value_type ( &items )[M] )
+	{
+		for ( size_t i = 0; i < M; ++i )
+			static_cast<void>( insert_or_assign( items[i].key, items[i].value ) );
+	}
+
+	[[nodiscard]] constexpr size_t size() const noexcept { return _count; }
+	[[nodiscard]] constexpr size_t capacity() const noexcept { return N; }
+	[[nodiscard]] constexpr bool empty() const noexcept { return _count == 0; }
+	[[nodiscard]] constexpr bool full() const noexcept { return _count == N; }
+
+	[[nodiscard]] constexpr value_type* data() noexcept { return _items.data(); }
+	[[nodiscard]] constexpr const value_type* data() const noexcept { return _items.data(); }
+
+	[[nodiscard]] constexpr value_type* begin() noexcept { return _items.data(); }
+	[[nodiscard]] constexpr value_type* end() noexcept { return _items.data() + _count; }
+	[[nodiscard]] constexpr const value_type* begin() const noexcept { return _items.data(); }
+	[[nodiscard]] constexpr const value_type* end() const noexcept { return _items.data() + _count; }
+
+	[[nodiscard]] constexpr std::span<value_type> span() noexcept { return { _items.data(), _count }; }
+	[[nodiscard]] constexpr std::span<const value_type> span() const noexcept { return { _items.data(), _count }; }
+
+	/// Returns a pointer to the value for `key`, or null if absent.
+	template <typename Key = K>
+	[[nodiscard]] constexpr V* find( const Key& key ) noexcept
+	{
+		for ( size_t i = 0; i < _count; ++i )
+			if ( _items[i].key == key )
+				return &_items[i].value;
+		return nullptr;
+	}
+
+	template <typename Key = K>
+	[[nodiscard]] constexpr const V* find( const Key& key ) const noexcept
+	{
+		for ( size_t i = 0; i < _count; ++i )
+			if ( _items[i].key == key )
+				return &_items[i].value;
+		return nullptr;
+	}
+
+	template <typename Key = K>
+	[[nodiscard]] constexpr bool contains( const Key& key ) const noexcept
+	{
+		return find( key ) != nullptr;
+	}
+
+	/// Updates the entry for `key`, or appends a new one. Returns `false` when full.
+	[[nodiscard]] constexpr bool insert_or_assign( const K& key, const V& value )
+	{
+		if ( V* existing = find( key ) )
+		{
+			*existing = value;
+			return true;
+		}
+		if ( _count == N )
+			return false;
+		_items[_count++] = value_type{ key, value };
+		return true;
+	}
+
+	/// Removes the entry for `key`. Returns `true` if an entry was removed.
+	template <typename Key = K>
+	[[nodiscard]] constexpr bool erase( const Key& key )
+	{
+		for ( size_t i = 0; i < _count; ++i )
+		{
+			if ( _items[i].key == key )
+			{
+				for ( size_t j = i + 1; j < _count; ++j )
+					_items[j - 1] = _items[j];
+				--_count;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	constexpr void clear() noexcept { _count = 0; }
+
+	template <size_t M>
+	[[nodiscard]] constexpr bool operator==( const map<K, V, M, KeyEnc, ValEnc>& other ) const
+	{
+		if ( _count != other.size() )
+			return false;
+		for ( size_t i = 0; i < _count; ++i )
+		{
+			const V* found = other.find( _items[i].key );
+			if ( found == nullptr || !( *found == _items[i].value ) )
+				return false;
+		}
+		return true;
+	}
+
+private:
+	friend struct detail::sequence_access;
+
+	using count_type = detail::count_type_t<N>;
+
+	std::array<value_type, N> _items;
+	count_type _count = 0;
 };
 
 /// Byte sequence that keeps up to `N` bytes in the object. Does not allocate.
@@ -153,14 +423,14 @@ struct bytes
 
 	template <size_t M>
 		requires( M <= N )
-	constexpr bytes( const uint8_t ( &data )[M] ) noexcept : _count( M )
+	constexpr bytes( const uint8_t ( &data )[M] ) noexcept : _count( static_cast<count_type>( M ) )
 	{
 		std::copy_n( data, M, _items.data() );
 	}
 
 	template <size_t M>
 		requires( M <= N )
-	constexpr bytes( const std::array<uint8_t, M>& data ) noexcept : _count( M )
+	constexpr bytes( const std::array<uint8_t, M>& data ) noexcept : _count( static_cast<count_type>( M ) )
 	{
 		std::copy_n( data.data(), M, _items.data() );
 	}
@@ -202,7 +472,7 @@ struct bytes
 			return false;
 
 		std::copy_n( data.data(), data.size(), _items.data() );
-		_count = data.size();
+		_count = static_cast<count_type>( data.size() );
 		return true;
 	}
 
@@ -222,8 +492,10 @@ struct bytes
 private:
 	friend struct detail::sequence_access;
 
+	using count_type = detail::count_type_t<N>;
+
 	std::array<uint8_t, N> _items;
-	size_t _count = 0;
+	count_type _count = 0;
 };
 
 /// Null-terminated text that keeps up to `N` bytes (plus a trailing `'\0'`) in the object. Does not allocate.
@@ -254,7 +526,7 @@ struct string
 			_items.fill( '\0' );
 		}
 		const char* stop = std::find( text, text + ( M - 1 ), '\0' );
-		_count = static_cast<size_t>( stop - text );
+		_count = static_cast<count_type>( stop - text );
 		std::copy_n( text, _count, _items.data() );
 		_items[_count] = '\0';
 	}
@@ -298,7 +570,7 @@ struct string
 			return false;
 
 		std::copy_n( text.data(), text.size(), _items.data() );
-		_count = text.size();
+		_count = static_cast<count_type>( text.size() );
 		_items[_count] = '\0';
 		return true;
 	}
@@ -323,9 +595,166 @@ struct string
 private:
 	friend struct detail::sequence_access;
 
+	using count_type = detail::count_type_t<N>;
+
 	std::array<char, N + 1> _items;
-	size_t _count = 0;
+	count_type _count = 0;
 };
+
+/// Tagged union for proto3 `oneof` fields. Alternatives use 0-based indices
+/// `0..sizeof...(Ts) - 1` in declaration order; `index()` returns `npos` when
+/// unset. Does not allocate and requires no `std::monostate`.
+template <typename... Ts>
+struct oneof
+{
+	static_assert( sizeof...( Ts ) > 0, "pb::oneof must have at least one alternative" );
+	static_assert( ( std::is_trivially_destructible_v<Ts> && ... ),
+	               "pb::oneof alternatives must be trivially destructible" );
+
+	static constexpr size_t alternative_count = sizeof...( Ts );
+	static constexpr size_t npos = detail::oneof_npos;
+
+	template <size_t I>
+		requires( I < sizeof...( Ts ) )
+	using alternative_t = typename detail::type_at<I, Ts...>::type;
+
+	constexpr oneof() noexcept = default;
+
+	template <size_t I, typename... Args>
+		requires( I < sizeof...( Ts ) )
+	constexpr explicit oneof( std::in_place_index_t<I>, Args&&... args )
+	{
+		emplace<I>( std::forward<Args>( args )... );
+	}
+
+	template <typename U>
+		requires( !std::is_same_v<std::decay_t<U>, oneof> && detail::find_convertible_index<U, Ts...>() != npos )
+	constexpr oneof( U&& value )
+	{
+		emplace<detail::find_convertible_index<U, Ts...>()>( std::forward<U>( value ) );
+	}
+
+	[[nodiscard]] constexpr size_t index() const noexcept { return _index == 0 ? npos : size_t{ _index - 1u }; }
+	[[nodiscard]] constexpr bool has_value() const noexcept { return _index != 0; }
+	[[nodiscard]] constexpr explicit operator bool() const noexcept { return _index != 0; }
+
+	constexpr void reset() noexcept { _index = 0; }
+
+	template <size_t I, typename... Args>
+		requires( I < sizeof...( Ts ) )
+	constexpr alternative_t<I>& emplace( Args&&... args )
+	{
+		alternative_t<I>& slot = _storage.template emplace_at<I>( std::forward<Args>( args )... );
+		_index = static_cast<index_type>( I + 1 );
+		return slot;
+	}
+
+	template <typename T, typename... Args>
+		requires( detail::type_count_v<T, Ts...> == 1 )
+	constexpr T& emplace( Args&&... args )
+	{
+		return emplace<detail::find_type_index<T, Ts...>()>( std::forward<Args>( args )... );
+	}
+
+	template <size_t I>
+		requires( I < sizeof...( Ts ) )
+	[[nodiscard]] constexpr alternative_t<I>* get_if() noexcept
+	{
+		return _index == I + 1 ? &_storage.template at<I>() : nullptr;
+	}
+
+	template <size_t I>
+		requires( I < sizeof...( Ts ) )
+	[[nodiscard]] constexpr const alternative_t<I>* get_if() const noexcept
+	{
+		return _index == I + 1 ? &_storage.template at<I>() : nullptr;
+	}
+
+	template <typename T>
+		requires( detail::type_count_v<T, Ts...> == 1 )
+	[[nodiscard]] constexpr T* get_if() noexcept
+	{
+		return get_if<detail::find_type_index<T, Ts...>()>();
+	}
+
+	template <typename T>
+		requires( detail::type_count_v<T, Ts...> == 1 )
+	[[nodiscard]] constexpr const T* get_if() const noexcept
+	{
+		return get_if<detail::find_type_index<T, Ts...>()>();
+	}
+
+	template <size_t I>
+		requires( I < sizeof...( Ts ) )
+	[[nodiscard]] constexpr bool holds() const noexcept
+	{
+		return _index == I + 1;
+	}
+
+	template <typename T>
+		requires( detail::type_count_v<T, Ts...> == 1 )
+	[[nodiscard]] constexpr bool holds() const noexcept
+	{
+		return holds<detail::find_type_index<T, Ts...>()>();
+	}
+
+	[[nodiscard]] constexpr bool operator==( const oneof& other ) const
+	{
+		if ( _index != other._index )
+			return false;
+		if ( _index == 0 )
+			return true;
+		return equal_at( other, std::make_index_sequence<sizeof...( Ts )>{} );
+	}
+
+private:
+	friend struct detail::oneof_access;
+
+	using index_type = detail::count_type_t<sizeof...( Ts )>;
+
+	template <size_t... Is>
+	[[nodiscard]] constexpr bool equal_at( const oneof& other, std::index_sequence<Is...> ) const
+	{
+		bool eq = false;
+		static_cast<void>(
+		  ( ( _index == Is + 1 && ( eq = ( _storage.template at<Is>() == other._storage.template at<Is>() ), true ) ) ||
+		    ... ) );
+		return eq;
+	}
+
+	detail::oneof_storage<Ts...> _storage;
+	index_type _index = 0;
+};
+
+template <size_t I, typename... Ts>
+[[nodiscard]] constexpr auto* get_if( oneof<Ts...>* value ) noexcept
+{
+	return value != nullptr ? value->template get_if<I>() : nullptr;
+}
+
+template <size_t I, typename... Ts>
+[[nodiscard]] constexpr auto* get_if( const oneof<Ts...>* value ) noexcept
+{
+	return value != nullptr ? value->template get_if<I>() : nullptr;
+}
+
+template <typename T, typename... Ts>
+[[nodiscard]] constexpr T* get_if( oneof<Ts...>* value ) noexcept
+{
+	return value != nullptr ? value->template get_if<T>() : nullptr;
+}
+
+template <typename T, typename... Ts>
+[[nodiscard]] constexpr const T* get_if( const oneof<Ts...>* value ) noexcept
+{
+	return value != nullptr ? value->template get_if<T>() : nullptr;
+}
+
+template <typename T, typename... Ts>
+[[nodiscard]] constexpr bool holds_alternative( const oneof<Ts...>& value ) noexcept
+{
+	return value.template holds<T>();
+}
 
 /// Memory for the items of repeated fields that `decode` makes. The caller owns
 /// the storage. The arena gives out aligned blocks from the start of the storage
