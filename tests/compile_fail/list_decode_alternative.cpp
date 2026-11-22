@@ -2,7 +2,6 @@
 #include <optional>
 #include <stddef.h>
 #include <stdint.h>
-#include <variant>
 
 #include <micropb/micropb.hpp>
 
@@ -14,7 +13,7 @@ struct fixed
 
 struct msg
 {
-	std::variant<std::monostate, fixed> v;
+	pb::oneof<fixed> v;
 };
 
 template <>

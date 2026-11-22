@@ -189,8 +189,8 @@ if(MICROPB_TESTS)
 
     foreach(rule
             duplicate_tag tag_zero tag_too_large tag_reserved
-            variant_no_monostate variant_repeated_alternative
-            variant_optional_alternative variant_variant_alternative unmapped_type monostate_member
+            variant_repeated_alternative
+            variant_optional_alternative variant_variant_alternative unmapped_type
             optional_repeated optional_optional optional_variant
             repeated_repeated repeated_optional repeated_variant
             decode_encode_only not_aggregate enum_too_wide
@@ -214,7 +214,6 @@ if(MICROPB_TESTS)
     micropb_add_compile_fail_test(list_alternative_shared_offset field_list_alternative)
     micropb_add_compile_fail_test(list_member_twice field_list_overlap)
     micropb_add_compile_fail_test(list_empty_member_twice field_list_overlap)
-    micropb_add_compile_fail_test(variant_monostate_alternative monostate_member)
     micropb_add_compile_fail_test(char_member unmapped_type)
     micropb_add_compile_fail_test(volatile_member unmapped_type)
     micropb_add_compile_fail_test(wchar_member unmapped_type)

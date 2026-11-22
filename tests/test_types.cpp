@@ -6,7 +6,6 @@
 #include <stdint.h>
 #include <string_view>
 #include <type_traits>
-#include <variant>
 
 #include <micropb/types.hpp>
 
@@ -78,13 +77,39 @@ constexpr bool test_string()
 		return false;
 
 	const std::optional<string<8>> opt = "ok";
-	const std::variant<std::monostate, bool, string<8>> var = "ok";
-	if ( !opt || *opt != "ok" || !std::holds_alternative<string<8>>( var ) || std::get<string<8>>( var ) != "ok" )
+	const pb::oneof<bool, string<8>> var = "ok";
+	if ( !opt || *opt != "ok" || !pb::holds_alternative<string<8>>( var ) || *pb::get_if<string<8>>( &var ) != "ok" )
 		return false;
 
 	const string<0> zero = "";
 	s.clear();
 	return s.empty() && s.c_str()[0] == '\0' && zero.empty() && zero.c_str()[0] == '\0';
+}
+
+constexpr bool test_oneof()
+{
+	oneof<uint32_t, string<8>> v;
+	if ( v.has_value() || v.index() != 0 || v.get_if<uint32_t>() != nullptr )
+		return false;
+
+	v = uint32_t{ 42 };
+	if ( !v.has_value() || v.index() != 1 || !v.holds<uint32_t>() || *v.get_if<uint32_t>() != 42 )
+		return false;
+
+	v.emplace<string<8>>( "hi" );
+	if ( v.index() != 2 || !holds_alternative<string<8>>( v ) || *get_if<2>( &v ) != "hi" )
+		return false;
+
+	const oneof<uint32_t, string<8>> same( std::in_place_index<2>, "hi" );
+	if ( !( v == same ) )
+		return false;
+
+	oneof<int32_t, int32_t> dup( std::in_place_index<2>, -7 );
+	if ( dup.index() != 2 || *dup.get_if<2>() != -7 || dup.get_if<1>() != nullptr )
+		return false;
+
+	v.reset();
+	return !v.has_value() && v.index() == 0 && !( v == same );
 }
 
 constexpr bool test_arena_empty()
@@ -149,7 +174,10 @@ bool test_arena_overflow()
 static_assert( test_repeated() );
 static_assert( test_bytes() );
 static_assert( test_string() );
+static_assert( test_oneof() );
 static_assert( test_arena_empty() );
+static_assert( std::is_trivially_copyable_v<oneof<int32_t, string<8>>> &&
+               std::is_trivially_destructible_v<oneof<int32_t, string<8>>> );
 static_assert( std::is_trivially_copyable_v<repeated<int, 4>> && std::is_trivially_destructible_v<repeated<int, 4>> );
 static_assert( std::is_trivially_copyable_v<bytes<8>> && std::is_trivially_destructible_v<bytes<8>> );
 static_assert( std::is_trivially_copyable_v<string<8>> && std::is_trivially_destructible_v<string<8>> );

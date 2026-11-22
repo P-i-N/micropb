@@ -10,7 +10,6 @@
 #include <stdint.h>
 #include <string>
 #include <string_view>
-#include <variant>
 
 #include <micropb/codec.hpp>
 
@@ -120,20 +119,20 @@ struct const_middle
 struct const_holder
 {
 	std::optional<const_middle> maybe;
-	std::variant<std::monostate, const_middle> choice;
+	pb::oneof<const_middle> choice;
 };
 
 struct const_elements
 {
 	std::array<const uint8_t, 3> mac;
-	std::variant<std::monostate, const int32_t> choice;
+	pb::oneof<const int32_t> choice;
 };
 
 struct same_type_oneof
 {
 	uint32_t id = 0;
-	std::variant<std::monostate, std::string_view, std::string_view, std::string_view> msg = {};
-	std::variant<std::monostate, int32_t, int32_t, int32_t> delta = {};
+	pb::oneof<std::string_view, std::string_view, std::string_view> msg = {};
+	pb::oneof<int32_t, int32_t, int32_t> delta = {};
 };
 
 } // namespace
@@ -449,7 +448,7 @@ bool test_encode_const_nested()
 	constexpr std::array<uint8_t, 16> expected{ 0x0a, 0x06, 0x0a, 0x02, 0x08, 0x01, 0x10, 0x02,
 	                                                 0x12, 0x06, 0x0a, 0x02, 0x08, 0x03, 0x10, 0x04 };
 	constexpr std::array<uint8_t, 7> expected_elements{ 0x0a, 0x03, 1, 2, 3, 0x10, 0x05 };
-	const const_elements elements{ { 1, 2, 3 }, std::variant<std::monostate, const int32_t>( std::in_place_index<1>, 5 ) };
+	const const_elements elements{ { 1, 2, 3 }, pb::oneof<const int32_t>( std::in_place_index<1>, 5 ) };
 	return matches( const_holder{ const_middle{ { 1, {} }, 2 }, const_middle{ { 3, {} }, 4 } }, expected ) &&
 	       matches( elements, expected_elements );
 }

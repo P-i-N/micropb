@@ -11,7 +11,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string_view>
-#include <variant>
 
 #include <micropb/codec.hpp>
 
@@ -137,7 +136,7 @@ struct pose_owned
 struct envelope_owned
 {
 	uint32_t id;
-	std::variant<std::monostate, pose_owned, ping, text> payload;
+	pb::oneof<pose_owned, ping, text> payload;
 };
 
 struct ints_only
@@ -171,7 +170,7 @@ struct arena_holder
 struct arena_choices
 {
 	std::optional<arena_lists> maybe;
-	std::variant<std::monostate, arena_lists, uint32_t> choice;
+	pb::oneof<arena_lists, uint32_t> choice;
 };
 
 struct arena_aligned
@@ -189,7 +188,7 @@ struct byte_lists
 struct fragile
 {
 	std::optional<int32_t> o;
-	std::variant<std::monostate, uint32_t, float> c;
+	pb::oneof<uint32_t, float> c;
 	bool flag;
 };
 
@@ -201,9 +200,9 @@ struct fragile_items
 struct same_type_oneof
 {
 	uint32_t id = 0;
-	std::variant<std::monostate, std::string_view, std::string_view, std::string_view> msg = {};
-	std::variant<std::monostate, int32_t, int32_t, int32_t> delta = {};
-	std::variant<std::monostate, inner, inner> sub = {};
+	pb::oneof<std::string_view, std::string_view, std::string_view> msg = {};
+	pb::oneof<int32_t, int32_t, int32_t> delta = {};
+	pb::oneof<inner, inner> sub = {};
 };
 
 } // namespace
@@ -411,7 +410,7 @@ struct defaulted_optional
 
 struct defaulted_choice
 {
-	std::variant<std::monostate, defaulted, uint32_t> c;
+	pb::oneof<defaulted, uint32_t> c;
 };
 
 struct wide_buffers
@@ -650,12 +649,12 @@ bool same( const envelope_owned& a, const envelope_owned& b )
 {
 	if ( a.id != b.id || a.payload.index() != b.payload.index() )
 		return false;
-	if ( const auto* pose = std::get_if<pose_owned>( &a.payload ) )
-		return same( *pose, std::get<pose_owned>( b.payload ) );
-	if ( const auto* message = std::get_if<text>( &a.payload ) )
-		return same( *message, std::get<text>( b.payload ) );
-	if ( const auto* message = std::get_if<ping>( &a.payload ) )
-		return message->seq == std::get<ping>( b.payload ).seq;
+	if ( const auto* pose = pb::get_if<pose_owned>( &a.payload ) )
+		return same( *pose, *pb::get_if<pose_owned>( &b.payload ) );
+	if ( const auto* message = pb::get_if<text>( &a.payload ) )
+		return same( *message, *pb::get_if<text>( &b.payload ) );
+	if ( const auto* message = pb::get_if<ping>( &a.payload ) )
+		return message->seq == pb::get_if<ping>( &b.payload )->seq;
 	return true;
 }
 
@@ -770,7 +769,7 @@ bool test_oneof_merge()
 	constexpr std::array<uint8_t, 8> in{ 0x1a, 0x02, 0x08, 0x01, 0x1a, 0x00, 0x08, 0x05 };
 	envelope_owned message{};
 	const auto result = decode( bytes_of( in ), message );
-	const auto* active = std::get_if<ping>( &message.payload );
+	const auto* active = pb::get_if<ping>( &message.payload );
 	return result && active && active->seq == 1 && message.id == 5;
 }
 
@@ -779,7 +778,7 @@ bool test_oneof_replace()
 	constexpr std::array<uint8_t, 10> in{ 0x1a, 0x02, 0x08, 0x07, 0x12, 0x00, 0x1a, 0x00, 0x08, 0x01 };
 	envelope_owned message{};
 	const auto result = decode( bytes_of( in ), message );
-	const auto* active = std::get_if<ping>( &message.payload );
+	const auto* active = pb::get_if<ping>( &message.payload );
 	return result && active && active->seq == 0 && message.id == 1;
 }
 
@@ -788,7 +787,7 @@ bool test_oneof_wrong_wire_type()
 	constexpr std::array<uint8_t, 7> in{ 0x1a, 0x00, 0x15, 1, 2, 3, 4 };
 	envelope_owned message{};
 	const auto result = decode( bytes_of( in ), message );
-	return result && std::holds_alternative<ping>( message.payload );
+	return result && pb::holds_alternative<ping>( message.payload );
 }
 
 /// The reset before `decode` only sets the count of a sequence to 0. The decoder must reset each new element.
@@ -811,15 +810,15 @@ bool test_reuse_oneof()
 	constexpr std::array<uint8_t, 2> second{ 0x1a, 0x00 };
 	envelope_owned message{};
 	const auto a = decode( bytes_of( first ), message );
-	const auto* seven = std::get_if<ping>( &message.payload );
+	const auto* seven = pb::get_if<ping>( &message.payload );
 	const bool filled = a && seven && seven->seq == 7;
 
 	const auto b = decode( bytes_of( second ), message );
-	const auto* zero = std::get_if<ping>( &message.payload );
+	const auto* zero = pb::get_if<ping>( &message.payload );
 	const bool replaced = b && zero && zero->seq == 0;
 
 	const auto c = decode( std::span<const uint8_t>(), message );
-	return filled && replaced && c && std::holds_alternative<std::monostate>( message.payload );
+	return filled && replaced && c && !message.payload.has_value();
 }
 
 struct nothing
@@ -1023,7 +1022,7 @@ bool test_arena_oneof_and_optional()
 	pb::arena memory = storage.memory();
 	arena_choices message{};
 	const auto result = decode( bytes_of( in ), message, memory );
-	const auto* chosen = std::get_if<arena_lists>( &message.choice );
+	const auto* chosen = pb::get_if<arena_lists>( &message.choice );
 	return result && message.maybe && holds_items( message.maybe->ints, std::to_array<int32_t>( { 7 } ) ) &&
 	       chosen && holds_items( chosen->ints, std::to_array<int32_t>( { 8, 9 } ) ) &&
 	       holds_items( chosen->names, std::to_array<std::string_view>( { "c" } ) ) && storage.intact();
@@ -1216,7 +1215,7 @@ bool test_arena_new_value_reset()
 	const auto ra = decode( bytes_of( in ), a, memory );
 	defaulted_choice b{};
 	const auto rb = decode( bytes_of( in ), b, memory );
-	const auto* chosen = std::get_if<defaulted>( &b.c );
+	const auto* chosen = pb::get_if<defaulted>( &b.c );
 
 	const bool caller_unchanged = caller.fake_capacity == 100 && caller.items == std::array<int32_t, 2>{ 10, 11 } &&
 	                              caller.after == std::array<int32_t, 4>{};
@@ -1241,7 +1240,7 @@ bool test_arena_new_items()
 
 	const fragile& empty = message.items[0];
 	const fragile& with_o = message.items[1];
-	const auto* chosen = std::get_if<uint32_t>( &message.items[2].c );
+	const auto* chosen = pb::get_if<uint32_t>( &message.items[2].c );
 	return !empty.o && empty.c.index() == 0 && !empty.flag && with_o.o == 5 && with_o.c.index() == 0 && !with_o.flag &&
 	       !message.items[2].o && chosen && *chosen == 7 && message.items[2].flag && storage.intact();
 }
@@ -1370,20 +1369,20 @@ bool test_same_type_oneof()
 	constexpr auto err_then_html =
 	  std::to_array<uint8_t>( { 0x12, 0x03, 'b', 'a', 'd', 0x22, 0x03, '<', 'b', '>' } );
 	if ( !decode( bytes_of( info_wire ), rx ) || rx.id != 7 || rx.msg.index() != 2 ||
-	     *std::get_if<2>( &rx.msg ) != "ok" )
+	     *pb::get_if<2>( &rx.msg ) != "ok" )
 		return false;
-	if ( !decode( bytes_of( err_then_html ), rx ) || rx.msg.index() != 3 || *std::get_if<3>( &rx.msg ) != "<b>" )
+	if ( !decode( bytes_of( err_then_html ), rx ) || rx.msg.index() != 3 || *pb::get_if<3>( &rx.msg ) != "<b>" )
 		return false;
 
 	constexpr auto raw_wire =
 	  std::to_array<uint8_t>( { 0x28, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01 } );
 	constexpr auto zz_wire = std::to_array<uint8_t>( { 0x30, 0x03 } );
 	constexpr auto fx_wire = std::to_array<uint8_t>( { 0x3d, 0xfe, 0xff, 0xff, 0xff } );
-	if ( !decode( bytes_of( raw_wire ), rx ) || rx.delta.index() != 1 || *std::get_if<1>( &rx.delta ) != -2 )
+	if ( !decode( bytes_of( raw_wire ), rx ) || rx.delta.index() != 1 || *pb::get_if<1>( &rx.delta ) != -2 )
 		return false;
-	if ( !decode( bytes_of( zz_wire ), rx ) || rx.delta.index() != 2 || *std::get_if<2>( &rx.delta ) != -2 )
+	if ( !decode( bytes_of( zz_wire ), rx ) || rx.delta.index() != 2 || *pb::get_if<2>( &rx.delta ) != -2 )
 		return false;
-	if ( !decode( bytes_of( fx_wire ), rx ) || rx.delta.index() != 3 || *std::get_if<3>( &rx.delta ) != -2 )
+	if ( !decode( bytes_of( fx_wire ), rx ) || rx.delta.index() != 3 || *pb::get_if<3>( &rx.delta ) != -2 )
 		return false;
 
 	// Two records of tag 8 merge into alternative 1; tag 8 followed by tag 9 switches to alternative 2 and resets x.
@@ -1391,11 +1390,11 @@ bool test_same_type_oneof()
 	  std::to_array<uint8_t>( { 0x42, 0x02, 0x08, 0x05, 0x42, 0x04, 0x12, 0x02, 'h', 'i' } );
 	constexpr auto diff_tag_replace =
 	  std::to_array<uint8_t>( { 0x42, 0x02, 0x08, 0x05, 0x4a, 0x04, 0x12, 0x02, 'h', 'i' } );
-	if ( !decode( bytes_of( same_tag_merge ), rx ) || rx.sub.index() != 1 || std::get_if<1>( &rx.sub )->x != 5 ||
-	     std::get_if<1>( &rx.sub )->label != "hi" )
+	if ( !decode( bytes_of( same_tag_merge ), rx ) || rx.sub.index() != 1 || pb::get_if<1>( &rx.sub )->x != 5 ||
+	     pb::get_if<1>( &rx.sub )->label != "hi" )
 		return false;
-	if ( !decode( bytes_of( diff_tag_replace ), rx ) || rx.sub.index() != 2 || std::get_if<2>( &rx.sub )->x != 0 ||
-	     std::get_if<2>( &rx.sub )->label != "hi" )
+	if ( !decode( bytes_of( diff_tag_replace ), rx ) || rx.sub.index() != 2 || pb::get_if<2>( &rx.sub )->x != 0 ||
+	     pb::get_if<2>( &rx.sub )->label != "hi" )
 		return false;
 	return true;
 }

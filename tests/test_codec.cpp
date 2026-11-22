@@ -5,7 +5,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string_view>
-#include <variant>
 
 #include <micropb/codec.hpp>
 
@@ -35,7 +34,7 @@ struct holder
 	std::span<const int32_t> view;
 	std::string_view name;
 	nothing none;
-	std::variant<std::monostate, plain, float> choice;
+	pb::oneof<plain, float> choice;
 };
 
 enum class small : uint8_t
@@ -134,8 +133,8 @@ static_assert( entry_at<holder_table>( 9 ).alternative == 1 && entry_at<holder_t
                entry_at<holder_table>( 9 ).offset == entry_at<holder_table>( 10 ).offset &&
                entry_at<holder_table>( 9 ).sub_idx == 0 && entry_at<holder_table>( 10 ).sub_idx == 0 &&
                type_at<holder_table>( 9 ).kind == K::ONEOF &&
-               type_at<holder_table>( 9 ).variant->alternatives[1] == &d::value_descriptor<plain>::value &&
-               type_at<holder_table>( 9 ).variant->alternatives[2] == &d::value_descriptor<float>::value );
+               type_at<holder_table>( 9 ).oneof[0] == &d::value_descriptor<plain>::value &&
+               type_at<holder_table>( 9 ).oneof[1] == &d::value_descriptor<float>::value );
 
 static_assert( d::value_descriptor<std::span<const uint8_t>>::value.kind == K::BYTES &&
                d::value_descriptor<std::span<const uint8_t>>::value.sequence == nullptr );
@@ -177,23 +176,18 @@ bool test_optional_accessor()
 
 bool test_variant_accessor()
 {
-	using choice = std::variant<std::monostate, plain, float>;
-	const d::variant_desc& desc = *d::value_descriptor<choice>::value.variant;
+	using choice = pb::oneof<plain, float>;
+	const d::value_desc& desc = d::value_descriptor<choice>::value;
 	choice value;
-	if ( desc.access( &value, 1, false ) != nullptr )
+	if ( d::oneof_index( desc, &value ) != 0 )
 		return false;
 
-	auto* first = static_cast<plain*>( desc.access( &value, 1, true ) );
-	if ( first == nullptr || value.index() != 1 || first->b != 0 )
+	value.emplace<plain>().b = 7;
+	if ( d::oneof_index( desc, &value ) != 1 || pb::get_if<plain>( &value )->b != 7 )
 		return false;
 
-	first->b = 7;
-	if ( desc.access( &value, 1, true ) != first || std::get<plain>( value ).b != 7 )
-		return false;
-	if ( desc.access( &value, 2, false ) != nullptr || value.index() != 1 )
-		return false;
-
-	return desc.access( &value, 0, true ) != nullptr && value.index() == 0;
+	d::set_oneof_index( desc, &value, 0 );
+	return value.index() == 0;
 }
 
 bool test_sequence_accessor()
@@ -277,7 +271,7 @@ struct ping
 	uint32_t seq;
 };
 
-using choice = std::variant<std::monostate, pose, ping, uint32_t>;
+using choice = pb::oneof<pose, ping, uint32_t>;
 
 /// One member of each kind, with the storage types that `decode` accepts.
 struct all
@@ -558,7 +552,7 @@ bool test_all_kinds()
 	append_all( where.pos, std::array<float, 3>{ 1, 2, 3 } );
 	append_all( where.rot, std::array<float, 4>{ 0, 0, 0, 1 } );
 
-	const choice payloads[]{ std::monostate{}, where, ping{ 0 }, uint32_t{ 0 } };
+	const choice payloads[]{ choice{}, where, ping{ 0 }, uint32_t{ 0 } };
 	for ( const choice& payload : payloads )
 	{
 		value.payload = payload;
@@ -585,9 +579,9 @@ struct wide_variant_msg;
 template <size_t... I>
 struct wide_variant_msg<std::index_sequence<I...>>
 {
-	using variant_t = std::variant<std::monostate, alt_tag<I>...>;
+	using variant_t = pb::oneof<alt_tag<I>...>;
 	variant_t first;
-	std::variant<std::monostate, int32_t, double> second;
+	pb::oneof<int32_t, double> second;
 	pb::repeated<uint8_t, 4100> pad;
 	uint32_t far_scalar;
 	uint32_t max_tag_scalar;
@@ -645,8 +639,8 @@ bool test_wide_entries()
 	if ( !pb::decode( std::span<const uint8_t>( wire ).first( *n ), rx ) )
 		return false;
 
-	const auto* a33 = std::get_if<33>( &rx.first );
-	const auto* s2 = std::get_if<double>( &rx.second );
+	const auto* a33 = pb::get_if<33>( &rx.first );
+	const auto* s2 = pb::get_if<double>( &rx.second );
 	return a33 != nullptr && a33->v == 42 && s2 != nullptr && *s2 == 3.5 && rx.far_scalar == 777 &&
 	       rx.max_tag_scalar == 999 && rx.pad.empty();
 }
@@ -655,7 +649,7 @@ struct encoded_compounds
 {
 	std::optional<int32_t> opt_zz;
 	std::optional<uint32_t> opt_fx;
-	std::variant<std::monostate, int32_t, uint32_t> oneof_enc;
+	pb::oneof<int32_t, uint32_t> oneof_enc;
 };
 
 } // namespace
@@ -687,7 +681,7 @@ bool test_encoded_compounds()
 
 	encoded_compounds rx_a{};
 	if ( !pb::decode( expected_a, rx_a ) || rx_a.opt_zz != -1 || rx_a.opt_fx != 0x04030201u ||
-	     !std::holds_alternative<int32_t>( rx_a.oneof_enc ) || std::get<int32_t>( rx_a.oneof_enc ) != -2 )
+	     !pb::holds_alternative<int32_t>( rx_a.oneof_enc ) || *pb::get_if<int32_t>( &rx_a.oneof_enc ) != -2 )
 		return false;
 
 	// field 4 (fixed32 0x89ABCDEF): 0x25 0xEF 0xCD 0xAB 0x89
@@ -699,8 +693,8 @@ bool test_encoded_compounds()
 		return false;
 
 	if ( !pb::decode( expected_b, rx_a ) || rx_a.opt_zz.has_value() || rx_a.opt_fx.has_value() ||
-	     !std::holds_alternative<uint32_t>( rx_a.oneof_enc ) ||
-	     std::get<uint32_t>( rx_a.oneof_enc ) != 0x89ABCDEFu )
+	     !pb::holds_alternative<uint32_t>( rx_a.oneof_enc ) ||
+	     *pb::get_if<uint32_t>( &rx_a.oneof_enc ) != 0x89ABCDEFu )
 		return false;
 	return true;
 }

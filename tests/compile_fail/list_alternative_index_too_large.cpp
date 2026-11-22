@@ -2,14 +2,13 @@
 #include <optional>
 #include <stddef.h>
 #include <stdint.h>
-#include <variant>
 
 #include <micropb/micropb.hpp>
 
 // The variant has the alternatives 1 and 2. The index 3 is not one of them.
 struct msg
 {
-	std::variant<std::monostate, int32_t, float> v;
+	pb::oneof<int32_t, float> v;
 };
 
 template <>

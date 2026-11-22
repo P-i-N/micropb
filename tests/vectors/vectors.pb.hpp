@@ -7,7 +7,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string_view>
-#include <variant>
 
 #include <micropb/types.hpp>
 
@@ -79,7 +78,7 @@ struct envelope {
     static constexpr size_t payload_pose = 1;
     static constexpr size_t payload_ping = 2;
     static constexpr size_t payload_text = 3;
-    std::variant<std::monostate, pose, ping, text> payload = {};
+    pb::oneof<pose, ping, text> payload = {};
 };
 
 } // namespace micropb::test

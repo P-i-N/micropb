@@ -1,13 +1,12 @@
 #include <stddef.h>
 #include <stdint.h>
-#include <variant>
 
 #include <micropb/codec.hpp>
 
 // An alternative of a `std::variant` is `const`: encode-only.
 struct msg
 {
-	std::variant<std::monostate, const int32_t> v;
+	pb::oneof<const int32_t> v;
 };
 
 template <>
