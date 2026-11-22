@@ -1040,6 +1040,7 @@ inline void emit_submessage( writer& sink, uint32_t number, const value_desc& me
 inline void emit_packed( writer& sink, uint32_t number, const sequence_desc& sequence, const sequence_view& items )
 {
 	const uint8_t code = sequence.element->scalar;
+#ifdef MICROPB_FAST
 	const bool fixed = ( code & scalar_fixed ) != 0;
 
 	// The length prefix comes before the values, so measure them first.
@@ -1080,6 +1081,19 @@ inline void emit_packed( writer& sink, uint32_t number, const sequence_desc& seq
 		for ( size_t i = 0; i < items.count; ++i, ptr += sequence.element_size )
 			sink.write_varint( load_scalar( ptr, code ) );
 	}
+#else
+	const auto write_all = [&]( writer& out ) {
+		const auto* ptr = static_cast<const unsigned char*>( items.data );
+		for ( size_t i = 0; i < items.count; ++i, ptr += sequence.element_size )
+			emit_scalar( out, code, load_scalar( ptr, code ) );
+	};
+
+	writer counter( std::span<uint8_t>{} );
+	write_all( counter );
+	sink.write_key( number, wire_type::LENGTH_DELIMITED );
+	sink.write_varint( counter.size() );
+	write_all( sink );
+#endif
 }
 
 /// Writes one field. `always` is `true` for explicit presence: the function
@@ -1163,6 +1177,7 @@ inline void emit_message( writer& sink, const value_desc& message, const void* o
 	uint32_t prev = 0;
 	for ( size_t pos = 0; pos < message.words; )
 	{
+#ifdef MICROPB_FAST
 		const uint16_t w0 = words[pos];
 		if ( ( w0 & 0x8000u ) == 0 )
 		{
@@ -1180,6 +1195,7 @@ inline void emit_message( writer& sink, const value_desc& message, const void* o
 				continue;
 			}
 		}
+#endif
 
 		const field_entry field = decode_entry( words, pos, prev );
 		prev = field.number;
@@ -1304,6 +1320,7 @@ inline void reset_message( const value_desc& message, void* object )
 	const uint16_t* words = message_words( message );
 	for ( size_t pos = 0; pos < message.words; )
 	{
+#ifdef MICROPB_FAST
 		const uint16_t w0 = words[pos];
 		if ( ( w0 & 0x8000u ) == 0 )
 		{
@@ -1321,6 +1338,7 @@ inline void reset_message( const value_desc& message, void* object )
 			pos += 2;
 			continue;
 		}
+#endif
 
 		// A `pb::oneof` member has one entry for each alternative. Reset it one time.
 		const field_entry field = decode_entry( words, pos, 0 );
@@ -1484,6 +1502,7 @@ inline void decode_element( reader& in, wire_type wire, const sequence_desc& seq
 	commit_count( sequence, value, items.data, items.count + 1 );
 }
 
+#ifdef MICROPB_FAST
 /// Reads a packed scalar record into `value`. Scalar elements are trivially
 /// copyable and implicit-lifetime, so the loop writes directly into storage.
 inline void decode_packed_scalars( reader& in, const sequence_desc& sequence, void* value )
@@ -1500,28 +1519,59 @@ inline void decode_packed_scalars( reader& in, const sequence_desc& sequence, vo
 	size_t count = items.count;
 	auto* dst = static_cast<unsigned char*>( member_at( items.data, count * elem_size ) );
 
-	reader packed( bytes );
-	while ( !packed.empty() )
+	if ( code & scalar_fixed )
 	{
-		if ( count >= capacity )
+		const unsigned shift = code & scalar_size_mask;
+		const size_t full = bytes.size() >> shift;
+		const size_t avail = capacity - count;
+		const size_t copy_count = std::min( full, avail );
+
+		if ( copy_count != 0 )
 		{
+			if constexpr ( std::endian::native == std::endian::little )
+			{
+				std::memcpy( dst, bytes.data(), copy_count << shift );
+			}
+			else
+			{
+				reader packed( bytes.first( copy_count << shift ) );
+				for ( size_t i = 0; i < copy_count; ++i, dst += elem_size )
+					store_scalar( dst, code, read_scalar( packed, code ) );
+			}
+			count += copy_count;
+		}
+
+		if ( full > avail )
 			in.fail( full_err );
-			break;
-		}
-		const uint64_t bits = read_scalar( packed, code );
-		if ( packed.failed() )
+		else if ( ( bytes.size() & ( elem_size - 1 ) ) != 0 )
+			in.fail( count >= capacity ? full_err : error::TRUNCATED );
+	}
+	else
+	{
+		reader packed( bytes );
+		while ( !packed.empty() )
 		{
-			in.absorb( packed );
-			break;
+			if ( count >= capacity )
+			{
+				in.fail( full_err );
+				break;
+			}
+			const uint64_t bits = packed.read_varint();
+			if ( packed.failed() )
+			{
+				in.absorb( packed );
+				break;
+			}
+			store_scalar( dst, code, bits );
+			dst += elem_size;
+			++count;
 		}
-		store_scalar( dst, code, bits );
-		dst += elem_size;
-		++count;
 	}
 
 	if ( count != items.count )
 		commit_count( sequence, value, items.data, count );
 }
+#endif
 
 /// Reads one record of a repeated field. A scalar element can be a packed
 /// record or a single value, also mixed in one message.
@@ -1534,7 +1584,14 @@ inline void decode_repeated( reader& in, field_key key, const sequence_desc& seq
 	const value_desc& element = *sequence.element;
 	if ( element.kind == field_kind::SCALAR && key.type == wire_type::LENGTH_DELIMITED )
 	{
+#ifdef MICROPB_FAST
 		decode_packed_scalars( in, sequence, value );
+#else
+		reader packed( in.read_length_delimited() );
+		while ( !packed.empty() )
+			decode_element( packed, wire_of( element ), sequence, value, memory );
+		in.absorb( packed );
+#endif
 	}
 	else if ( key.type == wire_of( element ) )
 	{
@@ -1624,6 +1681,7 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 	}
 }
 
+#ifdef MICROPB_FAST
 /// Finds the entry of the field `number` in `words`. The search starts at the
 /// halfword index `cursor` (with preceding field number `cursor_prev`). After
 /// the end of the table, it continues at 0. After a match, `cursor` and
@@ -1676,6 +1734,24 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 	}
 	return false;
 }
+#else
+/// Finds the entry of the field `number` in `words`.
+[[nodiscard]] inline bool find_field( const uint16_t* words, size_t total_words, uint32_t number, field_entry& out )
+{
+	uint32_t prev = 0;
+	for ( size_t pos = 0; pos < total_words; )
+	{
+		const field_entry entry = decode_entry( words, pos, prev );
+		if ( entry.number == number )
+		{
+			out = entry;
+			return true;
+		}
+		prev = entry.number;
+	}
+	return false;
+}
+#endif
 
 /// Reads all fields of `in` into the message at `object`, until the end of
 /// the input or the first error. Does not reset the message: a field that
@@ -1684,10 +1760,12 @@ inline void decode_message( reader& in, const value_desc& message, void* object,
 {
 	const value_desc* const* subs = message_subs( message );
 	const uint16_t* words = message_words( message );
+#ifdef MICROPB_FAST
 	// Fields usually arrive in ascending order, and a repeated field arrives
 	// many times. The search starts at the entry of the last match.
 	size_t cursor = 0;
 	uint32_t cursor_prev = 0;
+#endif
 	while ( !in.empty() )
 	{
 		const field_key key = in.read_key();
@@ -1695,14 +1773,33 @@ inline void decode_message( reader& in, const value_desc& message, void* object,
 			return;
 
 		field_entry field{};
+#ifdef MICROPB_FAST
 		if ( !find_field( words, message.words, key.number, cursor, cursor_prev, field ) )
+#else
+		if ( !find_field( words, message.words, key.number, field ) )
+#endif
 		{
 			in.skip( key.type );
 			continue;
 		}
 
-		const value_desc type = resolve_type( subs, field );
 		void* member = member_at( object, field.offset );
+#ifdef MICROPB_FAST
+		if ( field.base_op < op_string )
+		{
+			if ( key.type != wire_of_scalar( field.base_op ) )
+				in.skip( key.type );
+			else
+			{
+				const uint64_t bits = read_scalar( in, field.base_op );
+				if ( !in.failed() )
+					store_scalar( member, field.base_op, bits );
+			}
+			continue;
+		}
+#endif
+
+		const value_desc type = resolve_type( subs, field );
 		if ( type.kind == field_kind::REPEATED )
 		{
 			decode_repeated( in, key, *type.sequence, member, memory );
