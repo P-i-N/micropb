@@ -4,6 +4,7 @@
 #include "vectors/vectors.hpp"
 #include "vectors/vectors.pb.hpp"
 
+#include <algorithm>
 #include <array>
 #include <span>
 #include <stddef.h>
@@ -39,10 +40,29 @@ static_assert( std::is_same_v<decltype( features::Batch::blob ), std::span<const
 
 namespace d = pb::detail;
 
+template <typename L>
+struct number_list;
+
+template <typename T,
+          typename... M,
+          uint32_t... Number,
+          size_t... Offset,
+          size_t... Alternative,
+          pb::int_encoding... Encoding>
+struct number_list<pb::field_list<T, pb::field_at<M, Number, Offset, Alternative, Encoding>...>>
+{
+	static consteval std::array<uint32_t, sizeof...( M )> sorted()
+	{
+		std::array<uint32_t, sizeof...( M )> numbers{ Number... };
+		std::sort( numbers.begin(), numbers.end() );
+		return numbers;
+	}
+};
+
 /// The field numbers that the plugin wrote are those of the struct that a person wrote for the same message.
 template <typename Generated, typename Written>
-inline constexpr bool same_numbers = d::list_traits<d::field_list_of<Generated>>::sorted_numbers() ==
-                                     d::list_traits<d::field_list_of<Written>>::sorted_numbers();
+inline constexpr bool same_numbers =
+  number_list<d::field_list_of<Generated>>::sorted() == number_list<d::field_list_of<Written>>::sorted();
 
 static_assert( same_numbers<gen::scalars, messages::scalars> && same_numbers<gen::text, messages::text> &&
                same_numbers<gen::inner, messages::inner> && same_numbers<gen::outer, messages::outer> &&
