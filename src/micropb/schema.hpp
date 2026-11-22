@@ -77,7 +77,17 @@ inline constexpr bool is_string = false;
 template <size_t N>
 inline constexpr bool is_string<string<N>> = true;
 
-/// The sequence types: `std::array`, `std::span<const T>`, `pb::repeated` and `pb::bytes`. `element` has no `const`.
+template <typename T>
+inline constexpr bool is_kv_pair = false;
+template <typename K, typename V, int_encoding KeyEnc, int_encoding ValEnc>
+inline constexpr bool is_kv_pair<kv_pair<K, V, KeyEnc, ValEnc>> = true;
+
+template <typename T>
+inline constexpr bool is_map = false;
+template <typename K, typename V, size_t N, int_encoding KeyEnc, int_encoding ValEnc>
+inline constexpr bool is_map<map<K, V, N, KeyEnc, ValEnc>> = true;
+
+/// The sequence types: `std::array`, `std::span<const T>`, `pb::repeated`, `pb::map` and `pb::bytes`. `element` has no `const`.
 /// `capacity` is the size `N` of a type that has one, else 0.
 template <typename T>
 struct sequence_traits
@@ -107,6 +117,14 @@ struct sequence_traits<repeated<T, N>>
 	static constexpr bool is_sequence = true;
 	static constexpr size_t capacity = N;
 	using element = std::remove_const_t<T>;
+};
+
+template <typename K, typename V, size_t N, int_encoding KeyEnc, int_encoding ValEnc>
+struct sequence_traits<map<K, V, N, KeyEnc, ValEnc>>
+{
+	static constexpr bool is_sequence = true;
+	static constexpr size_t capacity = N;
+	using element = kv_pair<K, V, KeyEnc, ValEnc>;
 };
 
 template <size_t N>

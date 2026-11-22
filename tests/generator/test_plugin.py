@@ -734,15 +734,50 @@ class PackageTest(unittest.TestCase):
 PROTO3 = 'syntax = "proto3";\n'
 
 
+class MapTest(unittest.TestCase):
+    def test_unbounded_map(self):
+        text = header("package p; message m { map<string, int32> values = 1; }")
+        self.assertEqual(members(text, "m"), ["std::span<const pb::kv_pair<std::string_view, int32_t>> values = {};"])
+
+    def test_bounded_map_with_key_and_value_options(self):
+        text = header(
+            "package p; message m { map<string, bytes> values = 1; }",
+            "m.values max_count:4\nm.ValuesEntry.key max_length:15\nm.ValuesEntry.value max_size:8\n",
+        )
+        self.assertEqual(members(text, "m"), ["pb::map<pb::string<15>, pb::bytes<8>, 4> values = {};"])
+
+    def test_map_with_int_encodings(self):
+        text = header(
+            "package p; message m { map<sint32, fixed32> a = 1; map<uint32, sint64> b = 2; map<fixed64, float> c = 3; }",
+            "m.a max_count:8\nm.b max_count:4\n",
+        )
+        self.assertEqual(
+            members(text, "m"),
+            [
+                "pb::map<int32_t, uint32_t, 8, pb::int_encoding::ZIGZAG, pb::int_encoding::FIXED> a = {};",
+                "pb::map<uint32_t, int64_t, 4, pb::int_encoding::VARINT, pb::int_encoding::ZIGZAG> b = {};",
+                "std::span<const pb::kv_pair<uint64_t, float, pb::int_encoding::FIXED>> c = {};",
+            ],
+        )
+
+    def test_map_fixed_count(self):
+        text = header("package p; message m { map<uint32, float> a = 1; }", "m.a max_count:3 fixed_count:true\n")
+        self.assertEqual(members(text, "m"), ["std::array<pb::kv_pair<uint32_t, float>, 3> a = {};"])
+
+    def test_map_value_message_dependency_order(self):
+        text = header("package p; message outer { map<uint32, inner> items = 1; } message inner { int32 x = 1; }",
+                      "outer.items max_count:4\n")
+        self.assertLess(text.index("struct inner"), text.index("struct outer"))
+        self.assertEqual(members(text, "outer"), ["pb::map<uint32_t, inner, 4> items = {};"])
+
+
 class ErrorTest(unittest.TestCase):
     def test_proto2(self):
         self.assertIn("a.proto: only proto3 files are supported",
                       error('syntax = "proto2"; message m { optional int32 a = 1; }'))
 
-    def test_map(self):
-        self.assertIn("a.proto: m.values: map fields are not supported",
-                      error(PROTO3 + "message m { map<string, int32> values = 1; }"))
-        self.assertIn("a.proto: m.children: map fields are not supported",
+    def test_map_recursive(self):
+        self.assertIn("a.proto: a message cannot contain itself: m -> m",
                       error(PROTO3 + "message m { map<string, m> children = 1; }"))
 
     def test_repeated_without_max_count(self):

@@ -162,12 +162,22 @@ using item_constructor = void ( * )( void* item );
 using sequence_reserver =
   bool ( * )( reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory );
 
+/// Decodes one `pb::kv_pair` record and upserts it into a `pb::map`.
+using map_decoder =
+  void ( * )( reader& in, wire_type wire, const sequence_desc& sequence, void* value, arena* memory );
+
+inline constexpr uint16_t message_always_emit = 0x8000u;
+
 enum class sequence_storage : uint8_t
 {
 	/// `pb::repeated`, `pb::bytes`, `pb::string` with a `uint8_t` count (`max_size <= 255`).
 	REPEATED_8,
 	/// `pb::repeated`, `pb::bytes`, `pb::string` with a `uint16_t` count (`max_size <= 65535`).
 	REPEATED_16,
+	/// `pb::map` with a `uint8_t` count (`max_size <= 255`).
+	MAP_8,
+	/// `pb::map` with a `uint16_t` count (`max_size <= 65535`).
+	MAP_16,
 	/// `std::array`: the items are at offset 0, the count is `capacity`.
 	ARRAY,
 	/// `std::span<const T>`: `span->access` gives the items.
@@ -191,8 +201,13 @@ struct span_desc
 struct sequence_desc
 {
 	const value_desc* element;
-	/// Non-null only for `sequence_storage::ACCESSOR`.
-	const span_desc* span;
+	union
+	{
+		/// Active for `sequence_storage::ACCESSOR`.
+		const span_desc* span;
+		/// Active for `sequence_storage::MAP_8` and `MAP_16`.
+		map_decoder map_decode;
+	};
 	uint16_t element_size;
 	uint16_t capacity;
 	uint16_t count_offset;
@@ -304,6 +319,19 @@ template <typename O>
 
 [[nodiscard]] inline bool reserve(
   reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory );
+inline void decode_value( reader& in, wire_type wire, const value_desc& type, void* value, arena* memory );
+
+/// Decodes one `pb::kv_pair` record and upserts it into a `pb::map`.
+template <typename M>
+void decode_map_entry( reader& in, wire_type wire, const sequence_desc& sequence, void* value, arena* memory )
+{
+	typename M::value_type entry{};
+	decode_value( in, wire, *sequence.element, &entry, memory );
+	if ( in.failed() )
+		return;
+	if ( !static_cast<M*>( value )->insert_or_assign( entry.key, entry.value ) )
+		in.fail( error::CAPACITY_EXCEEDED );
+}
 
 template <typename S>
 [[nodiscard]] consteval span_desc describe_span()
@@ -339,12 +367,12 @@ template <typename S, int_encoding Encoding = int_encoding::VARINT>
 		static_assert( S::max_size <= max_offset );
 		constexpr auto storage =
 		  sequence_access::count_size<S> == 1 ? sequence_storage::REPEATED_8 : sequence_storage::REPEATED_16;
-		return { nullptr,
-		         nullptr,
-		         1,
-		         static_cast<uint16_t>( S::max_size ),
-		         static_cast<uint16_t>( sequence_access::count_offset<S> ),
-		         storage };
+		return { .element = nullptr,
+		         .span = nullptr,
+		         .element_size = 1,
+		         .capacity = static_cast<uint16_t>( S::max_size ),
+		         .count_offset = static_cast<uint16_t>( sequence_access::count_offset<S> ),
+		         .storage = storage };
 	}
 	else
 	{
@@ -355,27 +383,51 @@ template <typename S, int_encoding Encoding = int_encoding::VARINT>
 		static_assert( sequence_traits<S>::capacity <= max_offset );
 		constexpr auto capacity = static_cast<uint16_t>( sequence_traits<S>::capacity );
 
-		if constexpr ( is_repeated<S> || is_bytes<S> )
+		if constexpr ( is_repeated<S> || is_bytes<S> || is_map<S> )
 		{
 			static_assert( sequence_access::items_offset<S> == 0 );
 			static_assert( sequence_access::count_offset<S> <= max_offset,
 			               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
-			constexpr auto storage =
-			  sequence_access::count_size<S> == 1 ? sequence_storage::REPEATED_8 : sequence_storage::REPEATED_16;
-			return { item,
-			         nullptr,
-			         item_size,
-			         capacity,
-			         static_cast<uint16_t>( sequence_access::count_offset<S> ),
-			         storage };
+			if constexpr ( is_map<S> )
+			{
+				constexpr auto storage =
+				  sequence_access::count_size<S> == 1 ? sequence_storage::MAP_8 : sequence_storage::MAP_16;
+				return { .element = item,
+				         .map_decode = decode_map_entry<S>,
+				         .element_size = item_size,
+				         .capacity = capacity,
+				         .count_offset = static_cast<uint16_t>( sequence_access::count_offset<S> ),
+				         .storage = storage };
+			}
+			else
+			{
+				constexpr auto storage =
+				  sequence_access::count_size<S> == 1 ? sequence_storage::REPEATED_8 : sequence_storage::REPEATED_16;
+				return { .element = item,
+				         .span = nullptr,
+				         .element_size = item_size,
+				         .capacity = capacity,
+				         .count_offset = static_cast<uint16_t>( sequence_access::count_offset<S> ),
+				         .storage = storage };
+			}
 		}
 		else if constexpr ( is_std_array<S> )
 		{
-			return { item, nullptr, item_size, capacity, 0, sequence_storage::ARRAY };
+			return { .element = item,
+			         .span = nullptr,
+			         .element_size = item_size,
+			         .capacity = capacity,
+			         .count_offset = 0,
+			         .storage = sequence_storage::ARRAY };
 		}
 		else
 		{
-			return { item, &span_descriptor<S>, item_size, 0, 0, sequence_storage::ACCESSOR };
+			return { .element = item,
+			         .span = &span_descriptor<S>,
+			         .element_size = item_size,
+			         .capacity = 0,
+			         .count_offset = 0,
+			         .storage = sequence_storage::ACCESSOR };
 		}
 	}
 }
@@ -748,10 +800,12 @@ template <typename T, int_encoding Encoding>
 		const void* table = nullptr;
 		if constexpr ( field_table<list>::layout.words_n > 0 )
 			table = &field_table<list>::value;
+		constexpr uint16_t words =
+		  static_cast<uint16_t>( field_table<list>::layout.words_n ) | ( is_kv_pair<T> ? message_always_emit : uint16_t{ 0 } );
 		return {
 			.kind = kind,
 			.scalar = static_cast<uint8_t>( field_table<list>::layout.subs_n ),
-			.words = static_cast<uint16_t>( field_table<list>::layout.words_n ),
+			.words = words,
 			.table = table,
 		};
 	}
@@ -863,15 +917,30 @@ constexpr value_desc value_descriptor<T, Encoding>::value = describe_value<T, En
 	return wire_type::LENGTH_DELIMITED;
 }
 
+[[nodiscard]] inline size_t message_word_count( const value_desc& message )
+{
+	return static_cast<size_t>( message.words & ~message_always_emit );
+}
+
+[[nodiscard]] inline bool is_map_storage( sequence_storage storage )
+{
+	return storage == sequence_storage::MAP_8 || storage == sequence_storage::MAP_16;
+}
+
 [[nodiscard]] inline bool is_repeated_storage( sequence_storage storage )
 {
-	return storage == sequence_storage::REPEATED_8 || storage == sequence_storage::REPEATED_16;
+	return storage == sequence_storage::REPEATED_8 || storage == sequence_storage::REPEATED_16 || is_map_storage( storage );
+}
+
+[[nodiscard]] inline const span_desc* sequence_span( const sequence_desc& sequence )
+{
+	return sequence.storage == sequence_storage::ACCESSOR ? sequence.span : nullptr;
 }
 
 [[nodiscard]] inline size_t load_count( const sequence_desc& sequence, const void* object )
 {
 	const void* ptr = member_at( object, sequence.count_offset );
-	if ( sequence.storage == sequence_storage::REPEATED_8 )
+	if ( sequence.storage == sequence_storage::REPEATED_8 || sequence.storage == sequence_storage::MAP_8 )
 		return *static_cast<const uint8_t*>( ptr );
 	uint16_t count;
 	std::memcpy( &count, ptr, sizeof count );
@@ -881,7 +950,7 @@ constexpr value_desc value_descriptor<T, Encoding>::value = describe_value<T, En
 inline void store_count( const sequence_desc& sequence, void* object, size_t count )
 {
 	void* ptr = member_at( object, sequence.count_offset );
-	if ( sequence.storage == sequence_storage::REPEATED_8 )
+	if ( sequence.storage == sequence_storage::REPEATED_8 || sequence.storage == sequence_storage::MAP_8 )
 	{
 		*static_cast<uint8_t*>( ptr ) = static_cast<uint8_t>( count );
 		return;
@@ -1171,8 +1240,10 @@ inline void emit_message( writer& sink, const value_desc& message, const void* o
 {
 	const value_desc* const* subs = message_subs( message );
 	const uint16_t* words = message_words( message );
+	const size_t total_words = message_word_count( message );
+	const bool always = ( message.words & message_always_emit ) != 0;
 	uint32_t prev = 0;
-	for ( size_t pos = 0; pos < message.words; )
+	for ( size_t pos = 0; pos < total_words; )
 	{
 #ifdef MICROPB_FAST
 		const uint16_t w0 = words[pos];
@@ -1184,7 +1255,7 @@ inline void emit_message( writer& sink, const value_desc& message, const void* o
 				prev += ( ( w0 >> 12 ) & 7u ) + 1u;
 				++pos;
 				const uint64_t bits = load_scalar( member_at( object, ( w0 >> 5 ) & 0x7Fu ), op );
-				if ( bits != 0 )
+				if ( always || bits != 0 )
 				{
 					sink.write_key( prev, wire_of_scalar( op ) );
 					emit_scalar( sink, op, bits );
@@ -1200,7 +1271,7 @@ inline void emit_message( writer& sink, const value_desc& message, const void* o
 		const void* member = member_at( object, field.offset );
 		if ( field.alternative == 0 )
 		{
-			emit_value( sink, field.number, type, member, false );
+			emit_value( sink, field.number, type, member, always );
 			continue;
 		}
 
@@ -1299,8 +1370,8 @@ inline void reset_value( const value_desc& type, void* value )
 			}
 			[[fallthrough]];
 		case field_kind::REPEATED:
-			if ( type.sequence->span != nullptr && type.sequence->span->bind != nullptr )
-				type.sequence->span->bind( value, nullptr, 0 );
+			if ( const span_desc* span = sequence_span( *type.sequence ); span != nullptr && span->bind != nullptr )
+				span->bind( value, nullptr, 0 );
 			else if ( is_repeated_storage( type.sequence->storage ) )
 				store_count( *type.sequence, value, 0 );
 			break;
@@ -1315,7 +1386,8 @@ inline void reset_message( const value_desc& message, void* object )
 {
 	const value_desc* const* subs = message_subs( message );
 	const uint16_t* words = message_words( message );
-	for ( size_t pos = 0; pos < message.words; )
+	const size_t total_words = message_word_count( message );
+	for ( size_t pos = 0; pos < total_words; )
 	{
 #ifdef MICROPB_FAST
 		const uint16_t w0 = words[pos];
@@ -1348,7 +1420,6 @@ inline void reset_message( const value_desc& message, void* object )
 }
 
 inline void decode_message( reader& in, const value_desc& message, void* object, arena* memory );
-inline void decode_value( reader& in, wire_type wire, const value_desc& type, void* value, arena* memory );
 
 /// Capacity of the arena block at `data`: a `size_t` just before the first
 /// item. 0 for a span without a block.
@@ -1364,7 +1435,7 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 /// the capacity of its arena block.
 [[nodiscard]] inline size_t decode_capacity( const sequence_desc& sequence, const sequence_view& items )
 {
-	if ( sequence.span != nullptr && sequence.span->bind != nullptr )
+	if ( const span_desc* span = sequence_span( sequence ); span != nullptr && span->bind != nullptr )
 		return block_capacity( items.data );
 	return sequence.capacity;
 }
@@ -1461,7 +1532,8 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 
 [[nodiscard]] inline bool is_bound_span( const sequence_desc& sequence )
 {
-	return sequence.span != nullptr && sequence.span->bind != nullptr;
+	const span_desc* span = sequence_span( sequence );
+	return span != nullptr && span->bind != nullptr;
 }
 
 [[nodiscard]] inline error capacity_error( const sequence_desc& sequence )
@@ -1484,13 +1556,16 @@ inline void commit_count( const sequence_desc& sequence, void* value, void* data
 /// its initial state: records of a repeated field do not merge.
 inline void decode_element( reader& in, wire_type wire, const sequence_desc& sequence, void* value, arena* memory )
 {
+	if ( is_map_storage( sequence.storage ) )
+		return sequence.map_decode( in, wire, sequence, value, memory );
+
 	const sequence_view items = view_of( sequence, value );
 	if ( items.count >= decode_capacity( sequence, items ) )
 		return in.fail( capacity_error( sequence ) );
 
 	void* item = member_at( items.data, items.count * sequence.element_size );
-	if ( sequence.span != nullptr && sequence.span->construct != nullptr )
-		sequence.span->construct( item );
+	if ( const span_desc* span = sequence_span( sequence ); span != nullptr && span->construct != nullptr )
+		span->construct( item );
 	reset_value( *sequence.element, item );
 	decode_value( in, wire, *sequence.element, item, memory );
 	if ( in.failed() )
@@ -1574,8 +1649,8 @@ inline void decode_packed_scalars( reader& in, const sequence_desc& sequence, vo
 /// record or a single value, also mixed in one message.
 inline void decode_repeated( reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory )
 {
-	if ( sequence.span != nullptr && sequence.span->reserve != nullptr &&
-	     !sequence.span->reserve( in, key, sequence, value, memory ) )
+	if ( const span_desc* span = sequence_span( sequence );
+	     span != nullptr && span->reserve != nullptr && !span->reserve( in, key, sequence, value, memory ) )
 		return in.fail( error::ARENA_FULL );
 
 	const value_desc& element = *sequence.element;
@@ -1757,6 +1832,7 @@ inline void decode_message( reader& in, const value_desc& message, void* object,
 {
 	const value_desc* const* subs = message_subs( message );
 	const uint16_t* words = message_words( message );
+	const size_t total_words = message_word_count( message );
 #ifdef MICROPB_FAST
 	// Fields usually arrive in ascending order, and a repeated field arrives
 	// many times. The search starts at the entry of the last match.
@@ -1771,9 +1847,9 @@ inline void decode_message( reader& in, const value_desc& message, void* object,
 
 		field_entry field{};
 #ifdef MICROPB_FAST
-		if ( !find_field( words, message.words, key.number, cursor, cursor_prev, field ) )
+		if ( !find_field( words, total_words, key.number, cursor, cursor_prev, field ) )
 #else
-		if ( !find_field( words, message.words, key.number, field ) )
+		if ( !find_field( words, total_words, key.number, field ) )
 #endif
 		{
 			in.skip( key.type );

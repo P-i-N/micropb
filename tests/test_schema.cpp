@@ -33,7 +33,10 @@ consteval bool test_kinds()
 	       kind_of<std::span<const float>>() == field_kind::REPEATED &&
 	       kind_of<std::span<const pose>>() == field_kind::REPEATED &&
 	       kind_of<pb::oneof<int>>() == field_kind::ONEOF &&
-	       kind_of<pb::oneof<std::string_view, std::string_view>>() == field_kind::ONEOF;
+	       kind_of<pb::oneof<std::string_view, std::string_view>>() == field_kind::ONEOF &&
+	       kind_of<pb::kv_pair<std::string_view, int32_t>>() == field_kind::MESSAGE &&
+	       kind_of<pb::map<pb::string<8>, int32_t, 4>>() == field_kind::REPEATED &&
+	       kind_of<std::span<const pb::kv_pair<uint32_t, pose>>>() == field_kind::REPEATED;
 }
 
 consteval bool test_wire_types()

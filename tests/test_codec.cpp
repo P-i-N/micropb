@@ -704,11 +704,126 @@ bool test_encoded_compounds()
 	return true;
 }
 
+struct map_sub
+{
+	int32_t x = 0;
+
+	[[nodiscard]] constexpr bool operator==( const map_sub& ) const = default;
+};
+
+struct map_holder
+{
+	pb::map<pb::string<8>, int32_t, 2> s2i = {};
+	pb::map<int32_t, uint32_t, 4, pb::int_encoding::ZIGZAG, pb::int_encoding::FIXED> zz = {};
+	pb::map<uint32_t, map_sub, 4> subs = {};
+};
+
+struct map_span_holder
+{
+	std::span<const pb::kv_pair<std::string_view, int32_t>> s2i = {};
+};
+
+} // namespace
+
+template <>
+struct pb::fields_of<map_sub> : pb::field_list<map_sub, pb::field_at<decltype( map_sub::x ), 1, offsetof( map_sub, x )>>
+{};
+
+template <>
+struct pb::fields_of<map_holder>
+  : pb::field_list<map_holder,
+                   pb::field_at<decltype( map_holder::s2i ), 1, offsetof( map_holder, s2i )>,
+                   pb::field_at<decltype( map_holder::zz ), 2, offsetof( map_holder, zz )>,
+                   pb::field_at<decltype( map_holder::subs ), 3, offsetof( map_holder, subs )>>
+{};
+
+template <>
+struct pb::fields_of<map_span_holder>
+  : pb::field_list<map_span_holder, pb::field_at<decltype( map_span_holder::s2i ), 1, offsetof( map_span_holder, s2i )>>
+{};
+
+namespace {
+
+/// `pb::map` and `std::span<const pb::kv_pair<...>>` wire bytes match `protoc --encode`.
+bool test_maps()
+{
+	// `protoc --encode` bytes for:
+	//   s2i { key: "a" value: 1 } s2i { key: "" value: 0 }
+	//   zz { key: -1 value: 42 }
+	//   subs { key: 7 value { x: 9 } } subs { key: 8 value {} }
+	constexpr auto expected = std::to_array<uint8_t>( {
+	  0x0a, 0x05, 0x0a, 0x01, 0x61, 0x10, 0x01, // s2i["a"] = 1
+	  0x0a, 0x04, 0x0a, 0x00, 0x10, 0x00,       // s2i[""] = 0
+	  0x12, 0x07, 0x08, 0x01, 0x15, 0x2a, 0x00, 0x00, 0x00, // zz[-1] = 42
+	  0x1a, 0x06, 0x08, 0x07, 0x12, 0x02, 0x08, 0x09,       // subs[7] = {9}
+	  0x1a, 0x04, 0x08, 0x08, 0x12, 0x00,                   // subs[8] = {}
+	} );
+
+	map_holder tx{
+		.s2i = { { { "a", 1 }, { "", 0 } } },
+		.zz = { { { -1, 42u } } },
+		.subs = { { { 7u, map_sub{ 9 } }, { 8u, map_sub{ 0 } } } },
+	};
+	std::array<uint8_t, 64> out{};
+	const auto n = pb::encode( tx, out );
+	if ( !n || *n != expected.size() || !std::equal( expected.begin(), expected.end(), out.begin() ) )
+		return false;
+
+	map_holder rx{};
+	if ( !pb::decode( expected, rx ) )
+		return false;
+	if ( !( rx.s2i == tx.s2i ) || !( rx.zz == tx.zz ) || !( rx.subs == tx.subs ) )
+		return false;
+
+	// Duplicate keys on the wire overwrite in-place, even when capacity (2) is full.
+	constexpr auto dup_wire = std::to_array<uint8_t>( {
+	  0x0a, 0x05, 0x0a, 0x01, 0x61, 0x10, 0x01, // "a" -> 1
+	  0x0a, 0x05, 0x0a, 0x01, 0x62, 0x10, 0x02, // "b" -> 2
+	  0x0a, 0x05, 0x0a, 0x01, 0x61, 0x10, 0x09, // "a" -> 9 (overwrites)
+	} );
+	if ( !pb::decode( dup_wire, rx ) )
+		return false;
+	if ( rx.s2i.size() != 2 || !rx.zz.empty() || !rx.subs.empty() )
+		return false;
+	const int32_t* va = rx.s2i.find( "a" );
+	const int32_t* vb = rx.s2i.find( "b" );
+	if ( va == nullptr || *va != 9 || vb == nullptr || *vb != 2 )
+		return false;
+
+	// A third distinct key exceeds capacity 2.
+	constexpr auto over_wire = std::to_array<uint8_t>( {
+	  0x0a, 0x05, 0x0a, 0x01, 0x61, 0x10, 0x01,
+	  0x0a, 0x05, 0x0a, 0x01, 0x62, 0x10, 0x02,
+	  0x0a, 0x05, 0x0a, 0x01, 0x63, 0x10, 0x03,
+	} );
+	const auto over = pb::decode( over_wire, rx );
+	if ( over.has_value() || over.error() != pb::error::CAPACITY_EXCEEDED )
+		return false;
+
+	// Unbounded `std::span<const pb::kv_pair<...>>` round-trips via scratch memory.
+	constexpr std::array<pb::kv_pair<std::string_view, int32_t>, 2> pairs{
+		pb::kv_pair<std::string_view, int32_t>{ "a", 1 },
+		pb::kv_pair<std::string_view, int32_t>{ "", 0 },
+	};
+	const map_span_holder span_tx{ .s2i = pairs };
+	const auto sn = pb::encode( span_tx, out );
+	if ( !sn || *sn != 13 || !std::equal( expected.begin(), expected.begin() + 13, out.begin() ) )
+		return false;
+
+	uint8_t scratch[128]{};
+	map_span_holder span_rx{};
+	if ( !pb::decode( std::span( out ).first( *sn ), span_rx, scratch ) )
+		return false;
+	return span_rx.s2i.size() == 2 && span_rx.s2i[0].key == "a" && span_rx.s2i[0].value == 1 &&
+	       span_rx.s2i[1].key.empty() && span_rx.s2i[1].value == 0;
+}
+
 } // namespace
 
 int main()
 {
 	const bool ok = test_optional_accessor() && test_variant_accessor() && test_sequence_accessor() &&
-	                test_block_bound() && test_all_kinds() && test_wide_entries() && test_encoded_compounds();
+	                test_block_bound() && test_all_kinds() && test_wide_entries() && test_encoded_compounds() &&
+	                test_maps();
 	return ok ? 0 : 1;
 }
