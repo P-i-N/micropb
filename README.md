@@ -106,7 +106,7 @@ bool round_trip()
 
   | Configuration (Cortex-M4 / M33) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Extra 8-field type |
   | --- | ---: | ---: | ---: | ---: |
-  | **MicroPB** | **3,614 B** | **4,902 B** | **6,222 B** | **82 B** |
+  | **MicroPB** | **4,098 B** | **5,386 B** | **6,706 B** | **82 B** |
   | NanoPB 0.4.9.3 — fixed-size (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,150 B | 6,414 B | 7,774 B | 85 B |
   | NanoPB 0.4.9.3 — `pb_callback_t` (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,210 B | 6,606 B | 8,078 B | 92 B |
   | NanoPB 0.4.9.3 — fixed-size (default flags) | 6,616 B | 7,880 B | 9,240 B | 85 B |
