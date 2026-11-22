@@ -112,6 +112,16 @@ bool round_trip()
   | NanoPB 0.4.9.3 — fixed-size (default flags) | 6,616 B | 7,880 B | 9,240 B | 85 B |
   | NanoPB 0.4.9.3 — `pb_callback_t` (default flags) | 6,676 B | 8,072 B | 9,544 B | 92 B |
 
+* **Faster encode and decode than NanoPB:** measured on Linux x86-64 (`GCC 16.2.1 -O2`, median ns/op, byte-identical wire output) against NanoPB 0.4.9.3 with `PB_BUFFER_ONLY + PB_NO_ERRMSG` (`-Os` and default-flag tables in [DETAILS.md](DETAILS.md#encode-and-decode-speed-comparison)):
+
+  | Workload | Wire | MicroPB enc | NanoPB enc | MicroPB dec | NanoPB dec |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | 12 mixed scalars | 76 B | **57 ns** (2.8x) | 163 ns | **77 ns** (2.9x) | 226 ns |
+  | Sensor `Reading` (above) | 73 B | **47 ns** (2.6x) | 122 ns | **82 ns** (2.2x) | 180 ns |
+  | 32 packed `int32` (fixed) | 143 B | **178 ns** (2.1x) | 369 ns | **128 ns** (1.6x) | 208 ns |
+  | 32 packed `float` (fixed) | 131 B | **11 ns** (4.8x) | 52 ns | **30 ns** (3.7x) | 111 ns |
+  | `oneof` envelope (16 submsgs) | 44 B | **92 ns** (3.2x) | 296 ns | **74 ns** (3.1x) | 230 ns |
+
 * **No heap, no exceptions, no RTTI, no startup code:** compiles with `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`. Tables live in `.rodata` with zero static constructors before `main()`.
 * **Compile-time schema validation:** invalid tags, unmapped types, recursive messages, and missing scratch buffers fail at compile time with named `static_assert` diagnostics (`pb: <rule>:`).
 * **Wire-identical to `protoc` & zero external dependencies:** verified byte-for-byte against `protoc`, using 5 standard-library-only C++23 headers and a single-file Python 3 plugin (stdlib only).
