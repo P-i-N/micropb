@@ -1,12 +1,11 @@
 #include <stddef.h>
 #include <stdint.h>
-#include <variant>
 
 #include <micropb/codec.hpp>
 
 struct msg
 {
-	std::variant<std::monostate, pb::repeated<int32_t, 4>> v;
+	pb::oneof<pb::repeated<int32_t, 4>> v;
 };
 
 template <>

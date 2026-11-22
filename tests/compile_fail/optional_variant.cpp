@@ -1,13 +1,12 @@
 #include <optional>
 #include <stddef.h>
 #include <stdint.h>
-#include <variant>
 
 #include <micropb/codec.hpp>
 
 struct msg
 {
-	std::optional<std::variant<std::monostate, int32_t>> v;
+	std::optional<pb::oneof<int32_t>> v;
 };
 
 template <>

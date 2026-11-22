@@ -9,7 +9,6 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
-#include <variant>
 
 #include <micropb/types.hpp>
 #include <micropb/wire.hpp>
@@ -46,9 +45,9 @@ template <typename T>
 inline constexpr bool is_optional<std::optional<T>> = true;
 
 template <typename T>
-inline constexpr bool is_variant = false;
+inline constexpr bool is_oneof = false;
 template <typename... A>
-inline constexpr bool is_variant<std::variant<A...>> = true;
+inline constexpr bool is_oneof<oneof<A...>> = true;
 
 template <typename T>
 inline constexpr bool is_std_array = false;
@@ -169,7 +168,7 @@ template <typename T>
 	{
 		return field_kind::OPTIONAL;
 	}
-	else if constexpr ( detail::is_variant<T> )
+	else if constexpr ( detail::is_oneof<T> )
 	{
 		return field_kind::ONEOF;
 	}
@@ -261,13 +260,13 @@ consteval void check_field_numbers()
 }
 
 /// `true` when the entry of a field list agrees with the member type `M`: a
-/// `std::variant` member has one entry for each alternative after
-/// `std::monostate`, each other member has the alternative 0.
+/// `pb::oneof` member has one entry for each alternative (`1..K`), each other
+/// member has the alternative 0.
 template <typename M>
 [[nodiscard]] consteval bool is_alternative_valid( size_t alternative )
 {
-	if constexpr ( is_variant<M> )
-		return alternative >= 1 && alternative < std::variant_size_v<M>;
+	if constexpr ( is_oneof<M> )
+		return alternative >= 1 && alternative <= M::alternative_count;
 	else
 		return alternative == 0;
 }
@@ -317,7 +316,7 @@ struct entry_shape
 	return false;
 }
 
-/// `true` when each `std::variant` member has one entry for each alternative after `std::monostate`.
+/// `true` when each `pb::oneof` member has one entry for each alternative.
 [[nodiscard]] consteval bool alternatives_complete( std::span<const entry_shape> entries )
 {
 	for ( const entry_shape& entry : entries )
@@ -329,7 +328,7 @@ struct entry_shape
 			return other.offset == entry.offset && other.alternative != 0;
 		};
 		const auto count = static_cast<size_t>( std::count_if( entries.begin(), entries.end(), same_member ) );
-		if ( count != entry.alternatives - 1 )
+		if ( count != entry.alternatives )
 			return false;
 	}
 	return true;
@@ -338,39 +337,26 @@ struct entry_shape
 template <typename M>
 inline constexpr size_t alternative_count = 0;
 template <typename... A>
-inline constexpr size_t alternative_count<std::variant<A...>> = sizeof...( A );
+inline constexpr size_t alternative_count<oneof<A...>> = sizeof...( A );
 
-/// The alternatives of a `std::variant` type.
+/// The alternatives of a `pb::oneof` type.
 template <typename V>
-struct variant_traits;
+struct oneof_traits;
 
-template <typename First, typename... More>
-struct variant_traits<std::variant<First, More...>>
+template <typename... A>
+struct oneof_traits<oneof<A...>>
 {
-	static constexpr bool monostate_first = std::is_same_v<First, std::monostate>;
-	static constexpr bool monostate_later = ( std::is_same_v<More, std::monostate> || ... );
-
-	[[nodiscard]] static consteval bool has_kind( field_kind kind )
-	{
-		return kind_of<First>() == kind || ( ( kind_of<More>() == kind ) || ... );
-	}
+	[[nodiscard]] static consteval bool has_kind( field_kind kind ) { return ( ( kind_of<A>() == kind ) || ... ); }
 
 	template <typename Target, typename... Visited>
 	[[nodiscard]] static consteval bool reaches()
 	{
-		return detail::reaches<Target, First, Visited...>() || ( detail::reaches<Target, More, Visited...>() || ... );
+		return ( detail::reaches<Target, A, Visited...>() || ... );
 	}
 
-	[[nodiscard]] static consteval bool needs_arena()
-	{
-		return detail::needs_arena<First>() || ( detail::needs_arena<More>() || ... );
-	}
+	[[nodiscard]] static consteval bool needs_arena() { return ( detail::needs_arena<A>() || ... ); }
 
-	static consteval void check_decodable()
-	{
-		detail::check_decodable<First>();
-		( detail::check_decodable<More>(), ... );
-	}
+	static consteval void check_decodable() { ( detail::check_decodable<A>(), ... ); }
 };
 
 /// Unwraps one `std::optional` or repeated sequence to reach its scalar leaf type.
@@ -414,7 +400,7 @@ consteval void check_field_encoding()
 	if constexpr ( Encoding != int_encoding::VARINT && is_alternative_valid<U>( Alternative ) )
 	{
 		if constexpr ( Alternative != 0 )
-			check_leaf_encoding<std::remove_const_t<std::variant_alternative_t<Alternative, U>>, Encoding>();
+			check_leaf_encoding<std::remove_const_t<typename U::template alternative_t<Alternative>>, Encoding>();
 		else
 			check_leaf_encoding<typename encoding_leaf<U>::type, Encoding>();
 	}
@@ -501,10 +487,6 @@ template <typename Target, typename T, typename... Visited>
 	{
 		return true;
 	}
-	else if constexpr ( std::is_same_v<T, std::monostate> )
-	{
-		return false;
-	}
 	else
 	{
 		constexpr field_kind kind = kind_of<T>();
@@ -513,7 +495,7 @@ template <typename Target, typename T, typename... Visited>
 		else if constexpr ( kind == field_kind::REPEATED )
 			return reaches<Target, element_t<T>, Visited...>();
 		else if constexpr ( kind == field_kind::ONEOF )
-			return variant_traits<T>::template reaches<Target, Visited...>();
+			return oneof_traits<T>::template reaches<Target, Visited...>();
 		else if constexpr ( kind == field_kind::MESSAGE && !is_one_of<T, Visited...> )
 			return list_traits<field_list_of<T>>::template reaches<Target, T, Visited...>();
 		else
@@ -537,31 +519,17 @@ template <typename T>
 template <typename T>
 [[nodiscard]] consteval bool needs_arena()
 {
-	if constexpr ( std::is_same_v<T, std::monostate> )
-	{
-		return false;
-	}
+	constexpr field_kind kind = kind_of<T>();
+	if constexpr ( kind == field_kind::REPEATED )
+		return ( is_std_span<T> && !is_fixed_span<T> ) || needs_arena<element_t<T>>();
+	else if constexpr ( kind == field_kind::OPTIONAL )
+		return needs_arena<typename T::value_type>();
+	else if constexpr ( kind == field_kind::ONEOF )
+		return oneof_traits<T>::needs_arena();
+	else if constexpr ( kind == field_kind::MESSAGE )
+		return !is_recursive<T>() && list_traits<field_list_of<T>>::needs_arena();
 	else
-	{
-		constexpr field_kind kind = kind_of<T>();
-		if constexpr ( kind == field_kind::REPEATED )
-			return ( is_std_span<T> && !is_fixed_span<T> ) || needs_arena<element_t<T>>();
-		else if constexpr ( kind == field_kind::OPTIONAL )
-			return needs_arena<typename T::value_type>();
-		else if constexpr ( kind == field_kind::ONEOF )
-			return variant_traits<T>::needs_arena();
-		else if constexpr ( kind == field_kind::MESSAGE )
-			return !is_recursive<T>() && list_traits<field_list_of<T>>::needs_arena();
-		else
-			return false;
-	}
-}
-
-template <typename T>
-consteval void check_not_monostate()
-{
-	static_assert( !std::is_same_v<T, std::monostate>,
-	               "pb: monostate_member: std::monostate is allowed only as the first alternative of a std::variant" );
+		return false;
 }
 
 /// Rejects member types that have a mapping but that proto3 or `decode` cannot use.
@@ -569,44 +537,37 @@ template <typename M>
 consteval void check_member_type()
 {
 	constexpr field_kind kind = kind_of<M>();
-	check_not_monostate<M>();
 
 	if constexpr ( kind == field_kind::OPTIONAL )
 	{
 		using value = typename M::value_type;
 		constexpr field_kind value_kind = kind_of<value>();
-		check_not_monostate<value>();
 		static_assert( value_kind != field_kind::REPEATED,
 		               "pb: optional_repeated: a repeated field cannot have explicit presence" );
 		static_assert( value_kind != field_kind::OPTIONAL,
 		               "pb: optional_optional: the value of a std::optional cannot be a std::optional" );
 		static_assert( value_kind != field_kind::ONEOF,
-		               "pb: optional_variant: the value of a std::optional cannot be a std::variant" );
+		               "pb: optional_variant: the value of a std::optional cannot be a pb::oneof" );
 	}
 	else if constexpr ( kind == field_kind::ONEOF )
 	{
-		static_assert( variant_traits<M>::monostate_first,
-		               "pb: variant_no_monostate: the first alternative of a std::variant must be std::monostate" );
-		static_assert( !variant_traits<M>::monostate_later,
-		               "pb: monostate_member: std::monostate is allowed only as the first alternative of a std::variant" );
-		static_assert( !variant_traits<M>::has_kind( field_kind::REPEATED ),
+		static_assert( !oneof_traits<M>::has_kind( field_kind::REPEATED ),
 		               "pb: variant_repeated_alternative: a repeated field cannot be a oneof alternative" );
-		static_assert( !variant_traits<M>::has_kind( field_kind::OPTIONAL ),
+		static_assert( !oneof_traits<M>::has_kind( field_kind::OPTIONAL ),
 		               "pb: variant_optional_alternative: a std::optional cannot be a oneof alternative" );
-		static_assert( !variant_traits<M>::has_kind( field_kind::ONEOF ),
-		               "pb: variant_variant_alternative: a std::variant cannot be a oneof alternative" );
+		static_assert( !oneof_traits<M>::has_kind( field_kind::ONEOF ),
+		               "pb: variant_variant_alternative: a pb::oneof cannot be a oneof alternative" );
 	}
 	else if constexpr ( kind == field_kind::REPEATED )
 	{
 		using element = element_t<M>;
 		constexpr field_kind element_kind = kind_of<element>();
-		check_not_monostate<element>();
 		static_assert( element_kind != field_kind::REPEATED,
 		               "pb: repeated_repeated: the element of a repeated field cannot be a repeated field" );
 		static_assert( element_kind != field_kind::OPTIONAL,
 		               "pb: repeated_optional: the element of a repeated field cannot be a std::optional" );
 		static_assert( element_kind != field_kind::ONEOF,
-		               "pb: repeated_variant: the element of a repeated field cannot be a std::variant" );
+		               "pb: repeated_variant: the element of a repeated field cannot be a pb::oneof" );
 		// The arena never calls a destructor, and a new block gets the old items with `memcpy`.
 		if constexpr ( is_std_span<M> && !is_fixed_span<M> )
 			static_assert( std::is_trivially_copyable_v<element> && std::is_trivially_destructible_v<element>,
@@ -623,7 +584,7 @@ template <typename T>
 consteval void check_decodable()
 {
 	static_assert( !std::is_const_v<T>, "pb: decode_const_member: decode cannot write to a const member" );
-	if constexpr ( !std::is_const_v<T> && !std::is_same_v<T, std::monostate> )
+	if constexpr ( !std::is_const_v<T> )
 	{
 		constexpr field_kind kind = kind_of<T>();
 
@@ -658,7 +619,7 @@ consteval void check_decodable()
 		}
 		else if constexpr ( kind == field_kind::ONEOF )
 		{
-			variant_traits<T>::check_decodable();
+			oneof_traits<T>::check_decodable();
 		}
 		else if constexpr ( kind == field_kind::MESSAGE )
 		{

@@ -13,7 +13,6 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
-#include <variant>
 
 #include <micropb/schema.hpp>
 #include <micropb/types.hpp>
@@ -65,7 +64,6 @@ template <typename T, int_encoding Encoding = int_encoding::VARINT>
 
 struct sequence_desc;
 struct optional_desc;
-struct variant_desc;
 
 /// How to read and write a value of one type. All members, elements, optional
 /// values and alternatives of the same type share one descriptor.
@@ -73,8 +71,10 @@ struct value_desc
 {
 	field_kind kind;
 	/// SCALAR: the scalar code. MESSAGE: the number of distinct compound types in `table`.
+	/// ONEOF: size of `_index` in bytes (1 or 2).
 	uint8_t scalar;
 	/// MESSAGE: the number of `uint32_t` words in `table`.
+	/// ONEOF: byte offset of `_index` inside `pb::oneof`.
 	uint16_t words;
 	union
 	{
@@ -86,8 +86,8 @@ struct value_desc
 		const sequence_desc* sequence;
 		/// OPTIONAL.
 		const optional_desc* optional;
-		/// ONEOF.
-		const variant_desc* variant;
+		/// ONEOF: array of `const value_desc*` for alternatives `1..K` (at index `alt - 1`).
+		const value_desc* const* oneof;
 	};
 };
 
@@ -197,19 +197,6 @@ struct optional_desc
 	optional_accessor access;
 };
 
-/// Gives the address of alternative `index` when it is active. If it is not
-/// active and `select` is `true`, makes it active with a value-initialized
-/// value first. Else gives null. Index 0 is `std::monostate`, so
-/// `access(variant, 0, true)` resets the variant.
-using variant_accessor = void* ( * )( void* variant, size_t index, bool select );
-
-struct variant_desc
-{
-	/// One entry for each alternative. The entry of `std::monostate` is null.
-	const value_desc* const* alternatives;
-	variant_accessor access;
-};
-
 static_assert( sizeof( value_desc ) <= 2 * sizeof( void* ) );
 
 template <typename T, int_encoding Encoding = int_encoding::VARINT>
@@ -230,6 +217,18 @@ struct sequence_access
 	static constexpr size_t count_offset = offsetof( S, _count );
 	template <typename S>
 	static constexpr size_t count_size = sizeof( typename S::count_type );
+};
+
+/// The storage and index members of `pb::oneof` are private. The codec reads
+/// and writes them through this friend of the type.
+struct oneof_access
+{
+	template <typename O>
+	static constexpr size_t storage_offset = offsetof( O, _storage );
+	template <typename O>
+	static constexpr size_t index_offset = offsetof( O, _index );
+	template <typename O>
+	static constexpr size_t index_size = sizeof( typename O::index_type );
 };
 
 /// Accessor of `std::span<const T>`. The span keeps its items in a different
@@ -267,49 +266,18 @@ template <typename O>
 	O& value = *static_cast<O*>( optional );
 	if ( op == optional_op::RESET )
 	{
-		value.reset();
+		if constexpr ( std::is_trivially_destructible_v<O> )
+			::new ( optional ) O();
+		else
+			value.reset();
+		return nullptr;
 	}
-	else if ( op == optional_op::ENGAGE && !value )
+	if ( op == optional_op::ENGAGE && !value )
 	{
 		if constexpr ( requires { value.emplace(); } )
 			value.emplace();
 	}
 	return value ? &*value : nullptr;
-}
-
-/// Makes alternative `I` of `value` active and gives its address. An
-/// alternative that is `const` or has a `const` member is encode-only: null.
-template <size_t I, typename V>
-[[nodiscard]] void* emplace_alternative( V& value )
-{
-	if constexpr ( !std::is_const_v<std::variant_alternative_t<I, V>> && requires { value.template emplace<I>(); } )
-		return &value.template emplace<I>();
-	return nullptr;
-}
-
-template <typename V, size_t... I>
-[[nodiscard]] void* access_alternative( V& value, size_t index, bool select, std::index_sequence<I...> )
-{
-	void* result = nullptr;
-	if ( value.index() == index )
-	{
-		static_cast<void>(
-		  ( ( ( result = const_cast<void*>( static_cast<const void*>( std::get_if<I>( &value ) ) ) ) != nullptr ) ||
-		    ... ) );
-		return result;
-	}
-	if ( !select )
-		return nullptr;
-
-	static_cast<void>( ( ( index == I && ( result = emplace_alternative<I>( value ), true ) ) || ... ) );
-	return result;
-}
-
-template <typename V>
-[[nodiscard]] void* access_variant( void* variant, size_t index, bool select )
-{
-	return access_alternative(
-	  *static_cast<V*>( variant ), index, select, std::make_index_sequence<std::variant_size_v<V>>{} );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -399,44 +367,40 @@ template <typename O, int_encoding Encoding = int_encoding::VARINT>
 inline constexpr optional_desc optional_descriptor{ &value_descriptor<typename O::value_type, Encoding>::value,
                                                     access_optional<O> };
 
-/// The descriptor of the alternative `A` of a `std::variant`. Null for `std::monostate`.
-template <typename A, int_encoding Encoding = int_encoding::VARINT>
-[[nodiscard]] consteval const value_desc* describe_alternative()
+template <typename V, int_encoding... AltEncodings>
+struct oneof_alternatives;
+
+template <typename... A, int_encoding... AltEncodings>
+struct oneof_alternatives<oneof<A...>, AltEncodings...>
 {
-	if constexpr ( std::is_same_v<A, std::monostate> )
-		return nullptr;
-	else
-		return &value_descriptor<A, Encoding>::value;
+	static constexpr const value_desc* value[sizeof...( A )] = { &value_descriptor<A, AltEncodings>::value... };
+};
+
+template <typename V, int_encoding... AltEncodings>
+[[nodiscard]] consteval value_desc describe_oneof()
+{
+	static_assert( oneof_access::storage_offset<V> == 0 );
+	static_assert( oneof_access::index_offset<V> <= max_offset,
+	               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
+	return {
+		.kind = field_kind::ONEOF,
+		.scalar = static_cast<uint8_t>( oneof_access::index_size<V> ),
+		.words = static_cast<uint16_t>( oneof_access::index_offset<V> ),
+		.oneof = oneof_alternatives<V, AltEncodings...>::value,
+	};
 }
 
 template <typename V, int_encoding... AltEncodings>
-struct variant_alternatives;
-
-template <typename... A, int_encoding... AltEncodings>
-struct variant_alternatives<std::variant<A...>, AltEncodings...>
-{
-	static constexpr const value_desc* value[sizeof...( A )] = { describe_alternative<A, AltEncodings>()... };
-};
-
-template <typename V, int_encoding... AltEncodings>
-inline constexpr variant_desc variant_descriptor{ variant_alternatives<V, AltEncodings...>::value, access_variant<V> };
+inline constexpr value_desc oneof_value_desc = describe_oneof<V, AltEncodings...>();
 
 template <typename V>
-struct default_variant_descriptor;
+struct default_oneof_value_desc;
 
 template <typename... A>
-struct default_variant_descriptor<std::variant<A...>>
+struct default_oneof_value_desc<oneof<A...>>
 {
-	static constexpr const variant_desc* value =
-	  &variant_descriptor<std::variant<A...>, ( static_cast<void>( sizeof( A ) ), int_encoding::VARINT )...>;
-};
-
-template <typename V, int_encoding... AltEncodings>
-inline constexpr value_desc variant_value_desc{
-	.kind = field_kind::ONEOF,
-	.scalar = 0,
-	.words = 0,
-	.variant = &variant_descriptor<V, AltEncodings...>,
+	static constexpr value_desc value =
+	  describe_oneof<oneof<A...>, ( static_cast<void>( sizeof( A ) ), int_encoding::VARINT )...>();
 };
 
 /// Compound descriptor of the member type `M`, or null when `M` encodes inline
@@ -538,24 +502,24 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 			const size_t alts[]{ Alternative... };
 			const int_encoding encs[]{ Encoding... };
 			for ( size_t i = 0; i < entry_count; ++i )
-				if ( offsets[i] == VarOffset && alts[i] == AltIdx )
+				if ( offsets[i] == VarOffset && alts[i] == AltIdx + 1 )
 					result = encs[i];
 		}
 		return result;
 	}
 
 	template <typename V, size_t VarOffset, size_t... Is>
-	[[nodiscard]] static consteval const value_desc* variant_sub_of( std::index_sequence<Is...> )
+	[[nodiscard]] static consteval const value_desc* oneof_sub_of( std::index_sequence<Is...> )
 	{
 		constexpr bool all_varint = ( ( alt_encoding_at<VarOffset, Is>() == int_encoding::VARINT ) && ... );
 		if constexpr ( all_varint )
 			return &value_descriptor<V>::value;
 		else
-			return &variant_value_desc<V, alt_encoding_at<VarOffset, Is>()...>;
+			return &oneof_value_desc<V, alt_encoding_at<VarOffset, Is>()...>;
 	}
 
 	template <typename V, size_t VarOffset, size_t... Is>
-	[[nodiscard]] static consteval size_t variant_key_of( std::index_sequence<Is...> )
+	[[nodiscard]] static consteval size_t oneof_key_of( std::index_sequence<Is...> )
 	{
 		constexpr bool all_varint = ( ( alt_encoding_at<VarOffset, Is>() == int_encoding::VARINT ) && ... );
 		if constexpr ( all_varint )
@@ -568,8 +532,8 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 	[[nodiscard]] static consteval const value_desc* row_sub_of()
 	{
 		using U = std::remove_const_t<FieldM>;
-		if constexpr ( FieldAlt != 0 && is_variant<U> )
-			return variant_sub_of<U, FieldOffset>( std::make_index_sequence<std::variant_size_v<U>>{} );
+		if constexpr ( FieldAlt != 0 && is_oneof<U> )
+			return oneof_sub_of<U, FieldOffset>( std::make_index_sequence<U::alternative_count>{} );
 		else
 			return sub_desc_of<FieldM, FieldEnc>();
 	}
@@ -578,8 +542,8 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 	[[nodiscard]] static consteval size_t row_key_of()
 	{
 		using U = std::remove_const_t<FieldM>;
-		if constexpr ( FieldAlt != 0 && is_variant<U> )
-			return variant_key_of<U, FieldOffset>( std::make_index_sequence<std::variant_size_v<U>>{} );
+		if constexpr ( FieldAlt != 0 && is_oneof<U> )
+			return oneof_key_of<U, FieldOffset>( std::make_index_sequence<U::alternative_count>{} );
 		else
 			return type_id_of<U, FieldEnc>();
 	}
@@ -734,7 +698,7 @@ template <typename T, int_encoding Encoding>
 	else if constexpr ( kind == field_kind::OPTIONAL )
 		return { .kind = kind, .scalar = 0, .words = 0, .optional = &optional_descriptor<T, Encoding> };
 	else
-		return { .kind = kind, .scalar = 0, .words = 0, .variant = default_variant_descriptor<T>::value };
+		return default_oneof_value_desc<T>::value;
 }
 
 template <typename T, int_encoding Encoding>
@@ -848,6 +812,28 @@ inline void store_count( const sequence_desc& sequence, void* object, size_t cou
 		return;
 	}
 	const auto narrow = static_cast<uint16_t>( count );
+	std::memcpy( ptr, &narrow, sizeof narrow );
+}
+
+[[nodiscard]] inline size_t oneof_index( const value_desc& type, const void* object )
+{
+	const void* ptr = member_at( object, type.words );
+	if ( type.scalar == 1 )
+		return *static_cast<const uint8_t*>( ptr );
+	uint16_t index;
+	std::memcpy( &index, ptr, sizeof index );
+	return index;
+}
+
+inline void set_oneof_index( const value_desc& type, void* object, size_t index )
+{
+	void* ptr = member_at( object, type.words );
+	if ( type.scalar == 1 )
+	{
+		*static_cast<uint8_t*>( ptr ) = static_cast<uint8_t>( index );
+		return;
+	}
+	const auto narrow = static_cast<uint16_t>( index );
 	std::memcpy( ptr, &narrow, sizeof narrow );
 }
 
@@ -1124,9 +1110,8 @@ inline void emit_message( writer& sink, const value_desc& message, const void* o
 			continue;
 		}
 
-		const variant_desc& variant = *type.variant;
-		if ( const void* active = variant.access( const_cast<void*>( member ), field.alternative, false ) )
-			emit_value( sink, field.number, *variant.alternatives[field.alternative], active, true );
+		if ( oneof_index( type, member ) == field.alternative )
+			emit_value( sink, field.number, *type.oneof[field.alternative - 1], member, true );
 	}
 }
 
@@ -1227,7 +1212,7 @@ inline void reset_value( const value_desc& type, void* value )
 			break;
 		case field_kind::MESSAGE: reset_message( type, value ); break;
 		case field_kind::OPTIONAL: static_cast<void>( type.optional->access( value, optional_op::RESET ) ); break;
-		case field_kind::ONEOF: static_cast<void>( type.variant->access( value, 0, true ) ); break;
+		case field_kind::ONEOF: set_oneof_index( type, value, 0 ); break;
 	}
 }
 
@@ -1671,21 +1656,19 @@ inline void decode_message( reader& in, const value_desc& message, void* object,
 		// state, as each member of `msg` has. The same alternative stays, so a
 		// message merges. The codec skips a field with a wrong wire type and
 		// keeps the variant.
-		const variant_desc& variant = *type.variant;
-		const value_desc& alternative = *variant.alternatives[field.alternative];
+		const value_desc& alternative = *type.oneof[field.alternative - 1];
 		if ( key.type != wire_of( alternative ) )
 		{
 			in.skip( key.type );
 			continue;
 		}
 
-		void* active = variant.access( member, field.alternative, false );
-		if ( active == nullptr )
+		if ( oneof_index( type, member ) != field.alternative )
 		{
-			active = variant.access( member, field.alternative, true );
-			reset_value( alternative, active );
+			set_oneof_index( type, member, field.alternative );
+			reset_value( alternative, member );
 		}
-		decode_value( in, key.type, alternative, active, memory );
+		decode_value( in, key.type, alternative, member, memory );
 	}
 }
 

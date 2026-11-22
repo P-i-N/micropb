@@ -223,7 +223,6 @@ INCLUDES = [
     ("<stddef.h>", r"\b(offsetof\(|size_t\b)"),
     ("<stdint.h>", r"\bu?int\d+_t\b"),
     ("<string_view>", r"std::string_view\b"),
-    ("<variant>", r"std::variant<"),
 ]
 
 KEYWORDS = set("""
@@ -566,7 +565,7 @@ class Header:
                 for position, other in enumerate(group, 1):
                     const_name = ident(f"{name}_{other.name}")
                     lines.append(f"    static constexpr size_t {const_name} = {position};")
-                lines.append(f"    std::variant<std::monostate, {', '.join(types)}> {ident(name)} = {{}};")
+                lines.append(f"    pb::oneof<{', '.join(types)}> {ident(name)} = {{}};")
                 entries += [(ident(name), other.number, position, ENCODINGS.get(other.type))
                             for position, other in enumerate(group, 1)]
 

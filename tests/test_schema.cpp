@@ -3,7 +3,6 @@
 #include <span>
 #include <stdint.h>
 #include <string_view>
-#include <variant>
 
 #include <micropb/schema.hpp>
 
@@ -33,8 +32,8 @@ consteval bool test_kinds()
 	       kind_of<repeated<string<8>, 4>>() == field_kind::REPEATED &&
 	       kind_of<std::span<const float>>() == field_kind::REPEATED &&
 	       kind_of<std::span<const pose>>() == field_kind::REPEATED &&
-	       kind_of<std::variant<std::monostate, int>>() == field_kind::ONEOF &&
-	       kind_of<std::variant<std::monostate, std::string_view, std::string_view>>() == field_kind::ONEOF;
+	       kind_of<pb::oneof<int>>() == field_kind::ONEOF &&
+	       kind_of<pb::oneof<std::string_view, std::string_view>>() == field_kind::ONEOF;
 }
 
 consteval bool test_wire_types()

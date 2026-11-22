@@ -7,7 +7,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string_view>
-#include <variant>
 
 #include <micropb/types.hpp>
 
@@ -52,7 +51,7 @@ struct Device {
     static constexpr size_t event_code = 1;
     static constexpr size_t event_text = 2;
     static constexpr size_t event_moved = 3;
-    std::variant<std::monostate, uint32_t, std::string_view, Device_Slot> event = {};
+    pb::oneof<uint32_t, std::string_view, Device_Slot> event = {};
     bool ready = false;
 };
 
@@ -78,7 +77,7 @@ struct Batch {
 struct Report {
     static constexpr size_t body_code = 1;
     static constexpr size_t body_batch = 2;
-    std::variant<std::monostate, uint32_t, Batch> body = {};
+    pb::oneof<uint32_t, Batch> body = {};
 };
 
 struct Log {
@@ -86,7 +85,7 @@ struct Log {
     static constexpr size_t msg_err = 1;
     static constexpr size_t msg_info = 2;
     static constexpr size_t msg_html = 3;
-    std::variant<std::monostate, std::string_view, std::string_view, std::string_view> msg = {};
+    pb::oneof<std::string_view, std::string_view, std::string_view> msg = {};
 };
 
 } // namespace features

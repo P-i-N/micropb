@@ -10,7 +10,6 @@
 #include <stdint.h>
 #include <string_view>
 #include <type_traits>
-#include <variant>
 
 #include <micropb/micropb.hpp>
 
@@ -26,7 +25,7 @@ static_assert( std::is_same_v<decltype( gen::scalars::u16 ), uint16_t> );
 static_assert( std::is_same_v<decltype( gen::text::mac ), std::array<uint8_t, 6>> );
 static_assert( std::is_same_v<decltype( gen::lists::names ), pb::repeated<std::string_view, 8>> );
 static_assert(
-  std::is_same_v<decltype( gen::envelope::payload ), std::variant<std::monostate, gen::pose, gen::ping, gen::text>> );
+  std::is_same_v<decltype( gen::envelope::payload ), pb::oneof<gen::pose, gen::ping, gen::text>> );
 
 static_assert( std::is_same_v<decltype( features::Device::limits ), features::limits> );
 static_assert( std::is_same_v<decltype( features::Device_Slot::key ), pb::bytes<16>> );
@@ -85,7 +84,7 @@ bool test_reference_values()
 	if ( !pb::decode( std::span<const uint8_t>( vectors::envelope_pose ), message ) )
 		return false;
 
-	const auto* pose = std::get_if<gen::pose>( &message.payload );
+	const auto* pose = pb::get_if<gen::pose>( &message.payload );
 	gen::scalars values{};
 	return message.id == 2 && pose && pose->pos.size() == 3 && pose->pos[2] == 3 && pose->rot.size() == 4 &&
 	       pose->rot[3] == 1 && pb::decode( std::span<const uint8_t>( vectors::scalars_enum_neg ), values ) &&
@@ -141,7 +140,7 @@ bool test_views_decode()
 	features::Report report{};
 
 	const auto decoded = pb::decode( std::span<const uint8_t>( wire ), report, memory );
-	const auto* batch = std::get_if<features::Batch>( &report.body );
+	const auto* batch = pb::get_if<features::Batch>( &report.body );
 	if ( !decoded || *decoded != wire.size() || !batch || batch->slots.size() != 2 || batch->deltas.size() != 2 ||
 	     batch->blob.size() != 3 )
 		return false;
@@ -200,7 +199,7 @@ bool test_frame_decode()
 		return false;
 
 	const features::Device& device = frame.device;
-	const auto* moved = std::get_if<features::Device_Slot>( &device.event );
+	const auto* moved = pb::get_if<features::Device_Slot>( &device.event );
 	return device.class_ == -2 && device.state == features::Device_State::BUSY && device.limits.high == 2 &&
 	       device.serial == 7 && device.offset == -300 && device.token && device.token->empty() && device.spare &&
 	       device.spare->index == 3 && device.slots.size() == 2 && device.slots[0].key.size() == 2 &&
@@ -222,7 +221,7 @@ bool test_default_initialization()
 	       t.mac == std::array<uint8_t, 6>{} && cal.gains == std::array<float, 4>{} &&
 	       cal.id == std::array<uint8_t, 6>{} && f.device.class_ == 0 &&
 	       f.device.state == features::Device_State::IDLE && !f.device.token.has_value() && !f.device.spare.has_value() &&
-	       f.device.slots.empty() && std::holds_alternative<std::monostate>( f.device.event ) && !f.device.ready &&
+	       f.device.slots.empty() && !f.device.event.has_value() && !f.device.ready &&
 	       f.unit == shared::types::Unit::NONE && f.mode == features::RxMode::FIXED;
 }
 
@@ -252,7 +251,7 @@ bool test_duplicate_oneof()
 	features::Log rx{};
 	if ( !pb::decode( std::span<const uint8_t>( html_wire ), rx ) )
 		return false;
-	const auto* html_text = std::get_if<features::Log::msg_html>( &rx.msg );
+	const auto* html_text = pb::get_if<features::Log::msg_html>( &rx.msg );
 
 	return encodes_to( err, err_wire ) && encodes_to( info, info_wire ) && encodes_to( html, html_wire ) &&
 	       round_trips<features::Log>( err_wire ) && round_trips<features::Log>( info_wire ) && rx.id == 7 &&

@@ -2,7 +2,6 @@
 #include <optional>
 #include <stddef.h>
 #include <stdint.h>
-#include <variant>
 
 #include <micropb/micropb.hpp>
 
