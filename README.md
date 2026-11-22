@@ -102,25 +102,26 @@ bool round_trip()
 ## Why MicroPB
 
 * **Plain C++23 types, no callbacks:** structs use `int32_t`/`uint32_t`, `enum class`, `std::optional`, `pb::oneof`, `pb::string<N>`, `pb::bytes<N>`, `pb::repeated<T, N>`, `std::string_view`, `std::span`, and `std::array`, default-initialized to their proto3 defaults. No `has_x` booleans, manual union tags, integer wrapper structs, or stream callbacks.
-* **Smaller Flash footprint than NanoPB on Arm Cortex-M:** one non-template interpreter handles all messages from compact `constexpr` halfword tables in ROM. Measured on Arm Cortex-M4 / Cortex-M33 (`arm-none-eabi-gcc 16.2.0 -Os -mthumb --gc-sections`; x86-64 tables in [DETAILS.md](DETAILS.md#binary-size-comparison)):
+* **Smaller Flash footprint than NanoPB on Arm Cortex-M:** one non-template interpreter handles all messages from compact `constexpr` halfword tables in ROM. By default, MicroPB optimizes for minimum ROM size; define `MICROPB_FAST` to enable speed-oriented fast paths. Measured on Arm Cortex-M4 / Cortex-M33 (`arm-none-eabi-gcc 16.2.0 -Os -mthumb --gc-sections`; x86-64 tables in [DETAILS.md](DETAILS.md#binary-size-comparison)):
 
   | Configuration (Cortex-M4 / M33) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Extra 8-field type |
   | --- | ---: | ---: | ---: | ---: |
-  | **MicroPB** | **4,008 B** | **4,696 B** | **5,376 B** | **42 B** |
+  | **MicroPB (default)** | **3,520 B** | **4,208 B** | **4,888 B** | **42 B** |
+  | **MicroPB (`MICROPB_FAST`)** | **4,136 B** | **4,824 B** | **5,504 B** | **42 B** |
   | NanoPB 0.4.9.3 — fixed-size (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,150 B | 6,414 B | 7,774 B | 85 B |
   | NanoPB 0.4.9.3 — `pb_callback_t` (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,210 B | 6,606 B | 8,078 B | 92 B |
   | NanoPB 0.4.9.3 — fixed-size (default flags) | 6,616 B | 7,880 B | 9,240 B | 85 B |
   | NanoPB 0.4.9.3 — `pb_callback_t` (default flags) | 6,676 B | 8,072 B | 9,544 B | 92 B |
 
-* **Faster encode and decode than NanoPB:** measured on Linux x86-64 (`GCC 16.2.1 -O2`, median ns/op, byte-identical wire output) against NanoPB 0.4.9.3 with `PB_BUFFER_ONLY + PB_NO_ERRMSG` (`-Os` and default-flag tables in [DETAILS.md](DETAILS.md#encode-and-decode-speed-comparison)):
+* **Faster encode and decode than NanoPB:** measured on Linux x86-64 (`GCC 16.2.1 -O2`, median ns/op, byte-identical wire output) with `MICROPB_FAST` against NanoPB 0.4.9.3 (`PB_BUFFER_ONLY + PB_NO_ERRMSG`; default-mode, `-Os`, and NanoPB default-flag tables in [DETAILS.md](DETAILS.md#encode-and-decode-speed-comparison)):
 
-  | Workload | Wire | MicroPB enc | NanoPB enc | MicroPB dec | NanoPB dec |
+  | Workload | Wire | MicroPB (`MICROPB_FAST`) enc | NanoPB enc | MicroPB (`MICROPB_FAST`) dec | NanoPB dec |
   | --- | ---: | ---: | ---: | ---: | ---: |
-  | 12 mixed scalars | 76 B | **54 ns** (3.1x) | 165 ns | **106 ns** (2.1x) | 226 ns |
-  | Sensor `Reading` (above) | 73 B | **44 ns** (2.8x) | 124 ns | **94 ns** (1.8x) | 169 ns |
-  | 32 packed `int32` (fixed) | 143 B | **176 ns** (2.1x) | 362 ns | **130 ns** (1.6x) | 203 ns |
-  | 32 packed `float` (fixed) | 131 B | **11 ns** (4.9x) | 53 ns | **45 ns** (2.6x) | 120 ns |
-  | `oneof` envelope (16 submsgs) | 44 B | **75 ns** (3.8x) | 282 ns | **95 ns** (2.4x) | 226 ns |
+  | 12 mixed scalars | 76 B | **49 ns** (3.4x) | 165 ns | **87 ns** (2.6x) | 222 ns |
+  | Sensor `Reading` (above) | 73 B | **43 ns** (2.9x) | 124 ns | **79 ns** (2.2x) | 175 ns |
+  | 32 packed `int32` (fixed) | 143 B | **183 ns** (2.0x) | 370 ns | **112 ns** (2.1x) | 230 ns |
+  | 32 packed `float` (fixed) | 131 B | **12 ns** (4.5x) | 53 ns | **36 ns** (3.2x) | 115 ns |
+  | `oneof` envelope (16 submsgs) | 44 B | **77 ns** (3.8x) | 287 ns | **80 ns** (2.8x) | 223 ns |
 
 * **No heap, no exceptions, no RTTI, no startup code:** compiles with `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`. Tables live in `.rodata` with zero static constructors before `main()`.
 * **Compile-time schema validation:** invalid tags, unmapped types, recursive messages, and missing scratch buffers fail at compile time with named `static_assert` diagnostics (`pb: <rule>:`).
