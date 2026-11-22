@@ -414,7 +414,22 @@ struct defaulted_choice
 	std::variant<std::monostate, defaulted, uint32_t> c;
 };
 
+struct wide_buffers
+{
+	pb::bytes<300> raw;
+	pb::string<300> text;
+	pb::repeated<uint16_t, 300> items;
+};
+
 } // namespace
+
+template <>
+struct pb::fields_of<wide_buffers>
+  : pb::field_list<wide_buffers,
+                   pb::field_at<decltype( wide_buffers::raw ), 1, offsetof( wide_buffers, raw )>,
+                   pb::field_at<decltype( wide_buffers::text ), 2, offsetof( wide_buffers, text )>,
+                   pb::field_at<decltype( wide_buffers::items ), 3, offsetof( wide_buffers, items )>>
+{};
 
 template <>
 struct pb::fields_of<defaulted>
@@ -1385,6 +1400,28 @@ bool test_same_type_oneof()
 	return true;
 }
 
+/// Bounded containers with capacity > 255 use a `uint16_t` count (`REPEATED_16`).
+bool test_wide_count_buffers()
+{
+	wide_buffers tx{};
+	for ( size_t i = 0; i < 270; ++i )
+	{
+		if ( !tx.raw.push_back( static_cast<uint8_t>( i & 0xFFu ) ) || !tx.text.push_back( 'a' ) ||
+		     !tx.items.push_back( static_cast<uint16_t>( i * 3 ) ) )
+			return false;
+	}
+
+	std::array<uint8_t, 2048> wire{};
+	const auto written = encode( tx, wire );
+	if ( !written )
+		return false;
+
+	wide_buffers rx{};
+	if ( !decode( std::span<const uint8_t>( wire.data(), *written ), rx ) )
+		return false;
+	return rx.raw == tx.raw && rx.text == tx.text && rx.text.c_str()[270] == '\0' && rx.items == tx.items;
+}
+
 } // namespace
 
 int main()
@@ -1402,6 +1439,6 @@ int main()
 	  test_decode_lists_full() && test_decode_envelope_long() && test_reuse_repeated_message() && test_reuse_oneof() &&
 	  test_decode_empty_message() && test_error_order() && test_reuse_resets_each_kind() && test_partial_result() &&
 	  test_fixed_bytes_last_wins() && test_arena( 0x00 ) && test_arena( 0xA5 ) && test_scratch_overloads() &&
-	  test_owned_buffers() && test_no_arena_needed() && test_same_type_oneof();
+	  test_owned_buffers() && test_no_arena_needed() && test_same_type_oneof() && test_wide_count_buffers();
 	return ok ? 0 : 1;
 }

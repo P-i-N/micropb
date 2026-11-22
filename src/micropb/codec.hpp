@@ -144,8 +144,10 @@ using sequence_reserver =
 
 enum class sequence_storage : uint8_t
 {
-	/// `pb::repeated`: the items are at offset 0, the count is at `count_offset`.
-	REPEATED,
+	/// `pb::repeated`, `pb::bytes`, `pb::string` with a `uint8_t` count (`max_size <= 255`).
+	REPEATED_8,
+	/// `pb::repeated`, `pb::bytes`, `pb::string` with a `uint16_t` count (`max_size <= 65535`).
+	REPEATED_16,
 	/// `std::array`: the items are at offset 0, the count is `capacity`.
 	ARRAY,
 	/// `std::span<const T>`: `span->access` gives the items.
@@ -171,8 +173,8 @@ struct sequence_desc
 	const value_desc* element;
 	/// Non-null only for `sequence_storage::ACCESSOR`.
 	const span_desc* span;
-	uint32_t element_size;
-	uint32_t capacity;
+	uint16_t element_size;
+	uint16_t capacity;
 	uint16_t count_offset;
 	sequence_storage storage;
 };
@@ -226,6 +228,8 @@ struct sequence_access
 	static constexpr size_t items_offset = offsetof( S, _items );
 	template <typename S>
 	static constexpr size_t count_offset = offsetof( S, _count );
+	template <typename S>
+	static constexpr size_t count_size = sizeof( typename S::count_type );
 };
 
 /// Accessor of `std::span<const T>`. The span keeps its items in a different
@@ -290,7 +294,7 @@ template <typename V, size_t... I>
 	if ( value.index() == index )
 	{
 		static_cast<void>(
-		  ( ( index == I && ( result = const_cast<void*>( static_cast<const void*>( std::get_if<I>( &value ) ) ), true ) ) ||
+		  ( ( ( result = const_cast<void*>( static_cast<const void*>( std::get_if<I>( &value ) ) ) ) != nullptr ) ||
 		    ... ) );
 		return result;
 	}
@@ -344,31 +348,38 @@ template <typename S, int_encoding Encoding = int_encoding::VARINT>
 		static_assert( sequence_access::items_offset<S> == 0 );
 		static_assert( sequence_access::count_offset<S> <= max_offset,
 		               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
+		static_assert( S::max_size <= max_offset );
+		constexpr auto storage =
+		  sequence_access::count_size<S> == 1 ? sequence_storage::REPEATED_8 : sequence_storage::REPEATED_16;
 		return { nullptr,
 		         nullptr,
 		         1,
-		         static_cast<uint32_t>( S::max_size ),
+		         static_cast<uint16_t>( S::max_size ),
 		         static_cast<uint16_t>( sequence_access::count_offset<S> ),
-		         sequence_storage::REPEATED };
+		         storage };
 	}
 	else
 	{
 		using element = element_t<S>;
 		constexpr const value_desc* item = &value_descriptor<element, Encoding>::value;
-		constexpr uint32_t item_size = sizeof( element );
-		constexpr auto capacity = static_cast<uint32_t>( sequence_traits<S>::capacity );
+		static_assert( sizeof( element ) <= max_offset );
+		constexpr auto item_size = static_cast<uint16_t>( sizeof( element ) );
+		static_assert( sequence_traits<S>::capacity <= max_offset );
+		constexpr auto capacity = static_cast<uint16_t>( sequence_traits<S>::capacity );
 
 		if constexpr ( is_repeated<S> || is_bytes<S> )
 		{
 			static_assert( sequence_access::items_offset<S> == 0 );
 			static_assert( sequence_access::count_offset<S> <= max_offset,
 			               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
+			constexpr auto storage =
+			  sequence_access::count_size<S> == 1 ? sequence_storage::REPEATED_8 : sequence_storage::REPEATED_16;
 			return { item,
 			         nullptr,
 			         item_size,
 			         capacity,
 			         static_cast<uint16_t>( sequence_access::count_offset<S> ),
-			         sequence_storage::REPEATED };
+			         storage };
 		}
 		else if constexpr ( is_std_array<S> )
 		{
@@ -813,21 +824,41 @@ constexpr value_desc value_descriptor<T, Encoding>::value = describe_value<T, En
 	return wire_type::LENGTH_DELIMITED;
 }
 
-[[nodiscard]] inline size_t* repeated_count( const sequence_desc& sequence, void* object )
+[[nodiscard]] inline bool is_repeated_storage( sequence_storage storage )
 {
-	return static_cast<size_t*>( member_at( object, sequence.count_offset ) );
+	return storage == sequence_storage::REPEATED_8 || storage == sequence_storage::REPEATED_16;
+}
+
+[[nodiscard]] inline size_t load_count( const sequence_desc& sequence, const void* object )
+{
+	const void* ptr = member_at( object, sequence.count_offset );
+	if ( sequence.storage == sequence_storage::REPEATED_8 )
+		return *static_cast<const uint8_t*>( ptr );
+	uint16_t count;
+	std::memcpy( &count, ptr, sizeof count );
+	return count;
+}
+
+inline void store_count( const sequence_desc& sequence, void* object, size_t count )
+{
+	void* ptr = member_at( object, sequence.count_offset );
+	if ( sequence.storage == sequence_storage::REPEATED_8 )
+	{
+		*static_cast<uint8_t*>( ptr ) = static_cast<uint8_t>( count );
+		return;
+	}
+	const auto narrow = static_cast<uint16_t>( count );
+	std::memcpy( ptr, &narrow, sizeof narrow );
 }
 
 /// The items of the sequence at `object`. The interpreter writes through the
 /// result only when it decodes.
 [[nodiscard]] inline sequence_view view_of( const sequence_desc& sequence, void* object )
 {
-	switch ( sequence.storage )
-	{
-		case sequence_storage::REPEATED: return { object, *repeated_count( sequence, object ) };
-		case sequence_storage::ARRAY: return { object, sequence.capacity };
-		case sequence_storage::ACCESSOR: break;
-	}
+	if ( is_repeated_storage( sequence.storage ) )
+		return { object, load_count( sequence, object ) };
+	if ( sequence.storage == sequence_storage::ARRAY )
+		return { object, sequence.capacity };
 	return sequence.span->access( object );
 }
 
@@ -1177,7 +1208,7 @@ inline void reset_value( const value_desc& type, void* value )
 			else
 			{
 				*static_cast<char*>( value ) = '\0';
-				*repeated_count( *type.sequence, value ) = 0;
+				store_count( *type.sequence, value, 0 );
 			}
 			break;
 		case field_kind::BYTES:
@@ -1191,8 +1222,8 @@ inline void reset_value( const value_desc& type, void* value )
 		case field_kind::REPEATED:
 			if ( type.sequence->span != nullptr && type.sequence->span->bind != nullptr )
 				type.sequence->span->bind( value, nullptr, 0 );
-			else if ( type.sequence->storage == sequence_storage::REPEATED )
-				*repeated_count( *type.sequence, value ) = 0;
+			else if ( is_repeated_storage( type.sequence->storage ) )
+				store_count( *type.sequence, value, 0 );
 			break;
 		case field_kind::MESSAGE: reset_message( type, value ); break;
 		case field_kind::OPTIONAL: static_cast<void>( type.optional->access( value, optional_op::RESET ) ); break;
@@ -1370,7 +1401,7 @@ inline void decode_element( reader& in, wire_type wire, const sequence_desc& seq
 	if ( is_span )
 		sequence.span->bind( value, items.data, items.count + 1 );
 	else
-		*repeated_count( sequence, value ) = items.count + 1;
+		store_count( sequence, value, items.count + 1 );
 }
 
 /// Reads a packed scalar record into `value`. Scalar elements are trivially
@@ -1444,7 +1475,7 @@ inline void decode_packed_scalars( reader& in, const sequence_desc& sequence, vo
 		if ( is_span )
 			sequence.span->bind( value, items.data, count );
 		else
-			*repeated_count( sequence, value ) = count;
+			store_count( sequence, value, count );
 	}
 }
 
@@ -1527,7 +1558,7 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 				std::memcpy( value, bytes.data(), bytes.size() );
 			if ( type.kind == field_kind::STRING )
 				static_cast<char*>( value )[bytes.size()] = '\0';
-			*repeated_count( *type.sequence, value ) = bytes.size();
+			store_count( *type.sequence, value, bytes.size() );
 			break;
 		}
 		case field_kind::FIXED_BYTES:

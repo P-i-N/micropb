@@ -6,13 +6,14 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string_view>
+#include <type_traits>
 
 namespace pb {
 
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Error codes of the codec. Functions return them as `std::expected` values.
-enum class error
+enum class error : uint8_t
 {
 	/// encode: the output span is too short.
 	BUFFER_TOO_SMALL,
@@ -80,6 +81,10 @@ struct fields_of;
 namespace detail {
 /// Gives the codec the `_items` and `_count` members of `repeated`, `bytes` and `string`.
 struct sequence_access;
+
+/// Smallest unsigned integer type that holds counts `0..N`.
+template <size_t N>
+using count_type_t = std::conditional_t<N <= 255, uint8_t, std::conditional_t<N <= 65535, uint16_t, size_t>>;
 } // namespace detail
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -94,7 +99,7 @@ struct repeated
 
 	template <size_t M>
 		requires( M <= N )
-	constexpr repeated( const T ( &items )[M] ) : _count( M )
+	constexpr repeated( const T ( &items )[M] ) : _count( static_cast<count_type>( M ) )
 	{
 		std::copy_n( items, M, _items.data() );
 	}
@@ -139,8 +144,10 @@ struct repeated
 private:
 	friend struct detail::sequence_access;
 
+	using count_type = detail::count_type_t<N>;
+
 	std::array<T, N> _items;
-	size_t _count = 0;
+	count_type _count = 0;
 };
 
 /// Byte sequence that keeps up to `N` bytes in the object. Does not allocate.
@@ -153,14 +160,14 @@ struct bytes
 
 	template <size_t M>
 		requires( M <= N )
-	constexpr bytes( const uint8_t ( &data )[M] ) noexcept : _count( M )
+	constexpr bytes( const uint8_t ( &data )[M] ) noexcept : _count( static_cast<count_type>( M ) )
 	{
 		std::copy_n( data, M, _items.data() );
 	}
 
 	template <size_t M>
 		requires( M <= N )
-	constexpr bytes( const std::array<uint8_t, M>& data ) noexcept : _count( M )
+	constexpr bytes( const std::array<uint8_t, M>& data ) noexcept : _count( static_cast<count_type>( M ) )
 	{
 		std::copy_n( data.data(), M, _items.data() );
 	}
@@ -202,7 +209,7 @@ struct bytes
 			return false;
 
 		std::copy_n( data.data(), data.size(), _items.data() );
-		_count = data.size();
+		_count = static_cast<count_type>( data.size() );
 		return true;
 	}
 
@@ -222,8 +229,10 @@ struct bytes
 private:
 	friend struct detail::sequence_access;
 
+	using count_type = detail::count_type_t<N>;
+
 	std::array<uint8_t, N> _items;
-	size_t _count = 0;
+	count_type _count = 0;
 };
 
 /// Null-terminated text that keeps up to `N` bytes (plus a trailing `'\0'`) in the object. Does not allocate.
@@ -254,7 +263,7 @@ struct string
 			_items.fill( '\0' );
 		}
 		const char* stop = std::find( text, text + ( M - 1 ), '\0' );
-		_count = static_cast<size_t>( stop - text );
+		_count = static_cast<count_type>( stop - text );
 		std::copy_n( text, _count, _items.data() );
 		_items[_count] = '\0';
 	}
@@ -298,7 +307,7 @@ struct string
 			return false;
 
 		std::copy_n( text.data(), text.size(), _items.data() );
-		_count = text.size();
+		_count = static_cast<count_type>( text.size() );
 		_items[_count] = '\0';
 		return true;
 	}
@@ -323,8 +332,10 @@ struct string
 private:
 	friend struct detail::sequence_access;
 
+	using count_type = detail::count_type_t<N>;
+
 	std::array<char, N + 1> _items;
-	size_t _count = 0;
+	count_type _count = 0;
 };
 
 /// Memory for the items of repeated fields that `decode` makes. The caller owns
