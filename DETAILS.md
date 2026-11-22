@@ -213,8 +213,8 @@ Invalid schemas fail compilation with `static_assert` diagnostics prefixed by `p
 
 | Configuration | Arm Cortex-M4 / M33 (`-mthumb`, B) | x86-64 without `.eh_frame` (B) | x86-64 with `.eh_frame` (B) |
 | --- | ---: | ---: | ---: |
-| 16 message types | **4,824** | 7,461 | 9,005 |
-| 32 message types | **5,504** | 8,501 | 10,045 |
+| 16 message types | **4,696** | 7,270 | 8,814 |
+| 32 message types | **5,376** | 8,310 | 9,854 |
 | Each additional 8-field type | **42** | 65 | 65 |
 
 For side-by-side measurements against NanoPB, see [Binary size comparison](#binary-size-comparison).
@@ -452,28 +452,28 @@ Measured on the `size_report` schema (an envelope `oneof` holding 1, 16, or 32 d
 
 | Configuration (`-mcpu=cortex-m4 -mthumb`) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Each extra 8-field type |
 | --- | ---: | ---: | ---: | ---: |
-| **MicroPB** | **4,136 B** | **4,824 B** | **5,504 B** | **42 B** |
+| **MicroPB** | **4,008 B** | **4,696 B** | **5,376 B** | **42 B** |
 | **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,150 B | 6,414 B | 7,774 B | 85 B |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,210 B | 6,606 B | 8,078 B | 92 B |
 | **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, default flags) | 6,616 B | 7,880 B | 9,240 B | 85 B |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (default flags) | 6,676 B | 8,072 B | 9,544 B | 92 B |
 
-*(With `-mcpu=cortex-m33 -mthumb`, MicroPB is `2 B` smaller at `4,134 / 4,822 / 5,502 B` (`42 B/type`); NanoPB with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG` is `2 B` smaller at `5,148 / 6,412 / 7,772 B` fixed and `5,208 / 6,604 / 8,076 B` callback; NanoPB default flags are identical.)*
+*(With `-mcpu=cortex-m33 -mthumb`, MicroPB is `2 B` smaller at `4,006 / 4,694 / 5,374 B` (`42 B/type`); NanoPB with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG` is `2 B` smaller at `5,148 / 6,412 / 7,772 B` fixed and `5,208 / 6,604 / 8,076 B` callback; NanoPB default flags are identical.)*
 
-* **32-bit Arm scaling:** on 32-bit Arm, 4-byte pointers, 16-bit compact field entries, and `pb::oneof` direct tag access make MicroPB smaller than every NanoPB configuration on both base runtime (`1.0–2.5 KB` smaller at 1 type, `2.3–4.0 KB` smaller at 32 types) and per-message growth (`42 B` vs `85–92 B` per 8-field message type).
+* **32-bit Arm scaling:** on 32-bit Arm, 4-byte pointers, 16-bit compact field entries, and `pb::oneof` direct tag access make MicroPB smaller than every NanoPB configuration on both base runtime (`1.1–2.7 KB` smaller at 1 type, `2.4–4.2 KB` smaller at 32 types) and per-message growth (`42 B` vs `85–92 B` per 8-field message type).
 * **External symbols:** `arm-none-eabi-nm -u` shows that MicroPB references only `memcpy`, `memmove`, and `memset` (no 64-bit division helpers or C++ runtime symbols).
 
 #### Linux x86-64 (`GCC 16.2.1 -Os`)
 
 | Configuration (no `.eh_frame`) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Each extra 8-field type |
 | --- | ---: | ---: | ---: | ---: |
-| **MicroPB** | **6,397 B** | **7,461 B** | **8,501 B** | **65 B** |
+| **MicroPB** | **6,206 B** | **7,270 B** | **8,310 B** | **65 B** |
 | **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,405 B | 10,029 B | 11,773 B | 109 B |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,489 B | 10,366 B | 12,318 B | 122 B |
 | **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, default flags) | 10,413 B | 12,037 B | 13,781 B | 109 B |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (default flags) | 10,497 B | 12,374 B | 14,326 B | 122 B |
 
-*(With Linux default `.eh_frame` unwind tables included, x86-64 totals at 1 / 16 / 32 types are `7,941 / 9,005 / 10,045 B` for MicroPB, `12,469 / 14,093 / 15,837 B` for NanoPB fixed default, and `10,189 / 11,813 / 13,557 B` for NanoPB fixed with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`.)*
+*(With Linux default `.eh_frame` unwind tables included, x86-64 totals at 1 / 16 / 32 types are `7,750 / 8,814 / 9,854 B` for MicroPB, `12,469 / 14,093 / 15,837 B` for NanoPB fixed default, and `10,189 / 11,813 / 13,557 B` for NanoPB fixed with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`.)*
 
 ### Encode and decode speed comparison
 
@@ -483,35 +483,35 @@ Measured on Linux x86-64 (`GCC 16.2.1`, AMD Custom CPU 1772, no LTO; not measure
 
 | Workload | Wire | MicroPB enc | NanoPB enc | Enc speedup | MicroPB dec | NanoPB dec | Dec speedup |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 12 mixed scalars | 76 B | **85.8 ns** | 170.6 ns | **1.99x** | **92.5 ns** | 224.4 ns | **2.42x** |
-| Sensor `Reading` (mixed) | 73 B | **43.9 ns** | 123.9 ns | **2.82x** | **79.7 ns** | 170.7 ns | **2.14x** |
-| 32 packed `int32` (fixed) | 143 B | **179.5 ns** | 360.2 ns | **2.01x** | **101.4 ns** | 202.7 ns | **2.00x** |
-| 32 packed `int32` (`span` / `pb_callback_t`) | 143 B | **172.6 ns** | 289.7 ns | **1.68x** | 147.4 ns | **129.2 ns** | 0.88x |
-| 32 packed `float` (fixed) | 131 B | **13.6 ns** | 55.8 ns | **4.10x** | **31.6 ns** | 111.6 ns | **3.54x** |
-| 32 packed `float` (`span` vs fixed) | 131 B | **10.2 ns** | 52.1 ns | **5.11x** | **31.8 ns** | 111.7 ns | **3.52x** |
-| 2 strings + 2 bytes (copied) | 184 B | **27.4 ns** | 83.6 ns | **3.05x** | **49.4 ns** | 90.1 ns | **1.82x** |
-| 2 strings + 2 bytes (zero-copy view vs copied) | 184 B | **27.6 ns** | 93.2 ns | **3.37x** | **38.2 ns** | 92.1 ns | **2.41x** |
-| `oneof` envelope (16 submessages) | 44 B | **76.5 ns** | 285.4 ns | **3.73x** | **80.6 ns** | 225.9 ns | **2.80x** |
-| Sparse 16 scalars (2 non-zero) | 7 B | **30.9 ns** | 146.6 ns | **4.74x** | **40.7 ns** | 164.9 ns | **4.05x** |
+| 12 mixed scalars | 76 B | **53.6 ns** | 165.4 ns | **3.09x** | **105.5 ns** | 226.1 ns | **2.14x** |
+| Sensor `Reading` (mixed) | 73 B | **43.7 ns** | 123.7 ns | **2.83x** | **94.2 ns** | 169.4 ns | **1.80x** |
+| 32 packed `int32` (fixed) | 143 B | **176.2 ns** | 362.3 ns | **2.06x** | **129.6 ns** | 203.4 ns | **1.57x** |
+| 32 packed `int32` (`span` / `pb_callback_t`) | 143 B | **175.3 ns** | 290.4 ns | **1.66x** | 164.9 ns | **132.7 ns** | 0.81x |
+| 32 packed `float` (fixed) | 131 B | **10.8 ns** | 52.8 ns | **4.88x** | **45.4 ns** | 119.5 ns | **2.63x** |
+| 32 packed `float` (`span` vs fixed) | 131 B | **10.5 ns** | 52.0 ns | **4.94x** | **52.4 ns** | 118.7 ns | **2.27x** |
+| 2 strings + 2 bytes (copied) | 184 B | **26.8 ns** | 87.8 ns | **3.27x** | **49.9 ns** | 82.3 ns | **1.65x** |
+| 2 strings + 2 bytes (zero-copy view vs copied) | 184 B | **25.1 ns** | 81.9 ns | **3.27x** | **37.1 ns** | 85.8 ns | **2.31x** |
+| `oneof` envelope (16 submessages) | 44 B | **75.0 ns** | 281.8 ns | **3.75x** | **94.8 ns** | 225.9 ns | **2.38x** |
+| Sparse 16 scalars (2 non-zero) | 7 B | **30.9 ns** | 146.7 ns | **4.75x** | **39.8 ns** | 163.8 ns | **4.12x** |
 
-*(Against NanoPB with default flags at `-O2`, MicroPB is faster on all 10 workloads: `1.93x–14.44x` on encode and `1.23x–4.46x` on decode.)*
+*(Against NanoPB with default flags at `-O2`, MicroPB is faster on all 10 workloads: `1.86x–13.07x` on encode and `1.12x–4.14x` on decode.)*
 
 #### `-Os` vs. NanoPB 0.4.9.3 (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`)
 
 | Workload | Wire | MicroPB enc | NanoPB enc | Enc speedup | MicroPB dec | NanoPB dec | Dec speedup |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 12 mixed scalars | 76 B | **134.3 ns** | 242.0 ns | **1.80x** | **231.0 ns** | 322.4 ns | **1.40x** |
-| Sensor `Reading` (mixed) | 73 B | **122.0 ns** | 210.0 ns | **1.72x** | 244.1 ns | **239.3 ns** | 0.98x |
-| 32 packed `int32` (fixed) | 143 B | **380.9 ns** | 417.8 ns | **1.10x** | **207.6 ns** | 265.7 ns | **1.28x** |
-| 32 packed `int32` (`span` / `pb_callback_t`) | 143 B | 382.7 ns | **341.9 ns** | 0.89x | 297.0 ns | **156.8 ns** | 0.53x |
-| 32 packed `float` (fixed) | 131 B | **23.3 ns** | 134.0 ns | **5.76x** | **56.4 ns** | 209.1 ns | **3.71x** |
-| 32 packed `float` (`span` vs fixed) | 131 B | **20.4 ns** | 133.5 ns | **6.55x** | **57.8 ns** | 210.7 ns | **3.64x** |
-| 2 strings + 2 bytes (copied) | 184 B | **71.2 ns** | 120.8 ns | **1.70x** | 145.4 ns | **117.1 ns** | 0.81x |
-| 2 strings + 2 bytes (zero-copy view vs copied) | 184 B | **66.8 ns** | 120.7 ns | **1.81x** | 121.5 ns | **115.7 ns** | 0.95x |
-| `oneof` envelope (16 submessages) | 44 B | **307.8 ns** | 385.6 ns | **1.25x** | **199.8 ns** | 289.8 ns | **1.45x** |
-| Sparse 16 scalars (2 non-zero) | 7 B | **48.0 ns** | 190.8 ns | **3.98x** | **76.6 ns** | 212.5 ns | **2.78x** |
+| 12 mixed scalars | 76 B | **125.6 ns** | 255.5 ns | **2.03x** | **240.1 ns** | 323.7 ns | **1.35x** |
+| Sensor `Reading` (mixed) | 73 B | **114.3 ns** | 197.7 ns | **1.73x** | 274.7 ns | **233.6 ns** | 0.85x |
+| 32 packed `int32` (fixed) | 143 B | **334.4 ns** | 419.5 ns | **1.25x** | **253.6 ns** | 298.1 ns | **1.18x** |
+| 32 packed `int32` (`span` / `pb_callback_t`) | 143 B | **326.9 ns** | 341.4 ns | **1.04x** | 334.9 ns | **191.4 ns** | 0.57x |
+| 32 packed `float` (fixed) | 131 B | **23.9 ns** | 133.9 ns | **5.60x** | 293.2 ns | **211.5 ns** | 0.72x |
+| 32 packed `float` (`span` vs fixed) | 131 B | **19.3 ns** | 133.6 ns | **6.94x** | 283.5 ns | **210.9 ns** | 0.74x |
+| 2 strings + 2 bytes (copied) | 184 B | **72.8 ns** | 121.6 ns | **1.67x** | 143.9 ns | **116.1 ns** | 0.81x |
+| 2 strings + 2 bytes (zero-copy view vs copied) | 184 B | **66.8 ns** | 121.2 ns | **1.81x** | 119.7 ns | **114.2 ns** | 0.95x |
+| `oneof` envelope (16 submessages) | 44 B | **317.1 ns** | 390.6 ns | **1.23x** | **200.3 ns** | 290.8 ns | **1.45x** |
+| Sparse 16 scalars (2 non-zero) | 7 B | **46.4 ns** | 187.1 ns | **4.03x** | **78.3 ns** | 216.4 ns | **2.76x** |
 
-*(Against NanoPB with default flags at `-Os`, MicroPB is faster on all 10 workloads: `1.12x–7.66x` on encode and `1.08x–4.44x` on decode. Decoding `std::span<const int32_t>` is slower than a single-pass NanoPB `pb_callback_t` because MicroPB scans the input first to count elements and allocate one contiguous block in scratch memory.)*
+*(Against NanoPB with default flags at `-Os`, MicroPB is `1.15x–6.61x` on encode and `0.79x–3.51x` on decode. Decoding `std::span<const int32_t>` is slower than a single-pass NanoPB `pb_callback_t` because MicroPB scans the input first to count elements and allocate one contiguous block in scratch memory.)*
 
 ## Build, sanitizers, and cross-compilation
 
