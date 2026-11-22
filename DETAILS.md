@@ -213,9 +213,9 @@ Invalid schemas fail compilation with `static_assert` diagnostics prefixed by `p
 
 | Configuration | Arm Cortex-M4 / M33 (`-mthumb`, B) | x86-64 without `.eh_frame` (B) | x86-64 with `.eh_frame` (B) |
 | --- | ---: | ---: | ---: |
-| 16 message types | **5,386** | 8,219 | 9,763 |
-| 32 message types | **6,706** | 10,140 | 11,684 |
-| Each additional 8-field type | **82** | 120 | 120 |
+| 16 message types | **5,340** | 8,101 | 9,645 |
+| 32 message types | **6,580** | 9,765 | 11,309 |
+| Each additional 8-field type | **77** | 104 | 104 |
 
 For side-by-side measurements against NanoPB, see [Binary size comparison](#binary-size-comparison).
 
@@ -452,28 +452,28 @@ Measured on the `size_report` schema (an envelope `oneof` holding 1, 16, or 32 d
 
 | Configuration (`-mcpu=cortex-m4 -mthumb`) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Each extra 8-field type |
 | --- | ---: | ---: | ---: | ---: |
-| **MicroPB** | **4,098 B** | **5,386 B** | **6,706 B** | **82 B** |
+| **MicroPB** | **4,146 B** | **5,340 B** | **6,580 B** | **77 B** |
 | **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,150 B | 6,414 B | 7,774 B | 85 B |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,210 B | 6,606 B | 8,078 B | 92 B |
 | **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, default flags) | 6,616 B | 7,880 B | 9,240 B | 85 B |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (default flags) | 6,676 B | 8,072 B | 9,544 B | 92 B |
 
-*(With `-mcpu=cortex-m33 -mthumb`, MicroPB is identical at `4,098 / 5,386 / 6,706 B` (`82 B/type`); NanoPB with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG` is `2 B` smaller at `5,148 / 6,412 / 7,772 B` fixed and `5,208 / 6,604 / 8,076 B` callback; NanoPB default flags are identical.)*
+*(With `-mcpu=cortex-m33 -mthumb`, MicroPB is identical at `4,146 / 5,340 / 6,580 B` (`77 B/type`); NanoPB with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG` is `2 B` smaller at `5,148 / 6,412 / 7,772 B` fixed and `5,208 / 6,604 / 8,076 B` callback; NanoPB default flags are identical.)*
 
-* **32-bit Arm scaling:** on 32-bit Arm, 4-byte pointers halve MicroPB's subdescriptor and variant tables and Thumb-2 shrinks `std::variant` accessors, so MicroPB is smaller than every NanoPB configuration on both base runtime (`1.1–2.5 KB` smaller at 1 type, `1.1–2.8 KB` smaller at 32 types) and per-message growth (`82 B` vs `85–92 B` per 8-field message type).
+* **32-bit Arm scaling:** on 32-bit Arm, 4-byte pointers halve MicroPB's subdescriptor and variant tables and Thumb-2 shrinks `std::variant` accessors, so MicroPB is smaller than every NanoPB configuration on both base runtime (`1.0–2.5 KB` smaller at 1 type, `1.2–2.9 KB` smaller at 32 types) and per-message growth (`77 B` vs `85–92 B` per 8-field message type).
 * **External symbols:** `arm-none-eabi-nm -u` shows that MicroPB references only `memcpy`, `memmove`, and `memset` (no 64-bit division helpers or C++ runtime symbols).
 
 #### Linux x86-64 (`GCC 16.2.1 -Os`)
 
 | Configuration (no `.eh_frame`) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Each extra 8-field type |
 | --- | ---: | ---: | ---: | ---: |
-| **MicroPB** | **6,408 B** | **8,219 B** | **10,140 B** | 120 B |
-| **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,405 B | 10,029 B | 11,773 B | **109 B** |
+| **MicroPB** | **6,446 B** | **8,101 B** | **9,765 B** | **104 B** |
+| **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,405 B | 10,029 B | 11,773 B | 109 B |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,489 B | 10,366 B | 12,318 B | 122 B |
-| **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, default flags) | 10,413 B | 12,037 B | 13,781 B | **109 B** |
+| **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, default flags) | 10,413 B | 12,037 B | 13,781 B | 109 B |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (default flags) | 10,497 B | 12,374 B | 14,326 B | 122 B |
 
-*(With Linux default `.eh_frame` unwind tables included, x86-64 totals at 1 / 16 / 32 types are `7,952 / 9,763 / 11,684 B` for MicroPB, `12,469 / 14,093 / 15,837 B` for NanoPB fixed default, and `10,189 / 11,813 / 13,557 B` for NanoPB fixed with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`.)*
+*(With Linux default `.eh_frame` unwind tables included, x86-64 totals at 1 / 16 / 32 types are `7,990 / 9,645 / 11,309 B` for MicroPB, `12,469 / 14,093 / 15,837 B` for NanoPB fixed default, and `10,189 / 11,813 / 13,557 B` for NanoPB fixed with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`.)*
 
 ### Encode and decode speed comparison
 
