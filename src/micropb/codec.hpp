@@ -1500,53 +1500,23 @@ inline void decode_packed_scalars( reader& in, const sequence_desc& sequence, vo
 	size_t count = items.count;
 	auto* dst = static_cast<unsigned char*>( member_at( items.data, count * elem_size ) );
 
-	if ( code & scalar_fixed )
+	reader packed( bytes );
+	while ( !packed.empty() )
 	{
-		const unsigned shift = code & scalar_size_mask;
-		const size_t full = bytes.size() >> shift;
-		const size_t avail = capacity - count;
-		const size_t copy_count = std::min( full, avail );
-
-		if ( copy_count != 0 )
+		if ( count >= capacity )
 		{
-			if constexpr ( std::endian::native == std::endian::little )
-			{
-				std::memcpy( dst, bytes.data(), copy_count << shift );
-			}
-			else
-			{
-				reader packed( bytes.first( copy_count << shift ) );
-				for ( size_t i = 0; i < copy_count; ++i, dst += elem_size )
-					store_scalar( dst, code, read_scalar( packed, code ) );
-			}
-			count += copy_count;
-		}
-
-		if ( full > avail )
 			in.fail( full_err );
-		else if ( ( bytes.size() & ( elem_size - 1 ) ) != 0 )
-			in.fail( count >= capacity ? full_err : error::TRUNCATED );
-	}
-	else
-	{
-		reader packed( bytes );
-		while ( !packed.empty() )
-		{
-			if ( count >= capacity )
-			{
-				in.fail( full_err );
-				break;
-			}
-			const uint64_t bits = packed.read_varint();
-			if ( packed.failed() )
-			{
-				in.absorb( packed );
-				break;
-			}
-			store_scalar( dst, code, bits );
-			dst += elem_size;
-			++count;
+			break;
 		}
+		const uint64_t bits = read_scalar( packed, code );
+		if ( packed.failed() )
+		{
+			in.absorb( packed );
+			break;
+		}
+		store_scalar( dst, code, bits );
+		dst += elem_size;
+		++count;
 	}
 
 	if ( count != items.count )
@@ -1731,21 +1701,8 @@ inline void decode_message( reader& in, const value_desc& message, void* object,
 			continue;
 		}
 
-		void* member = member_at( object, field.offset );
-		if ( field.base_op < op_string )
-		{
-			if ( key.type != wire_of_scalar( field.base_op ) )
-				in.skip( key.type );
-			else
-			{
-				const uint64_t bits = read_scalar( in, field.base_op );
-				if ( !in.failed() )
-					store_scalar( member, field.base_op, bits );
-			}
-			continue;
-		}
-
 		const value_desc type = resolve_type( subs, field );
+		void* member = member_at( object, field.offset );
 		if ( type.kind == field_kind::REPEATED )
 		{
 			decode_repeated( in, key, *type.sequence, member, memory );
