@@ -119,7 +119,7 @@ static_assert( type_at<holder_table>( 1 ).kind == K::MESSAGE && type_at<holder_t
 static_assert( type_at<holder_table>( 2 ).kind == K::OPTIONAL &&
                type_at<holder_table>( 2 ).optional->value == &d::value_descriptor<float>::value );
 static_assert( type_at<holder_table>( 3 ).kind == K::REPEATED &&
-               type_at<holder_table>( 3 ).sequence->storage == d::sequence_storage::REPEATED &&
+               type_at<holder_table>( 3 ).sequence->storage == d::sequence_storage::REPEATED_8 &&
                type_at<holder_table>( 3 ).sequence->capacity == 4 &&
                type_at<holder_table>( 3 ).sequence->element_size == 4 &&
                type_at<holder_table>( 3 ).sequence->element == &d::value_descriptor<float>::value );

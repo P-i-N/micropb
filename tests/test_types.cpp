@@ -155,6 +155,12 @@ static_assert( std::is_trivially_copyable_v<bytes<8>> && std::is_trivially_destr
 static_assert( std::is_trivially_copyable_v<string<8>> && std::is_trivially_destructible_v<string<8>> );
 static_assert( !std::is_constructible_v<string<4>, const char ( & )[6]> );
 static_assert( !std::is_constructible_v<bytes<4>, const uint8_t ( & )[5]> );
+static_assert( sizeof( error ) == 1 );
+static_assert( sizeof( bytes<16> ) == 17 );
+static_assert( sizeof( bytes<300> ) == 302 );
+static_assert( sizeof( string<15> ) == 17 );
+static_assert( sizeof( string<300> ) == 304 );
+static_assert( sizeof( repeated<uint8_t, 8> ) == 9 );
 
 } // namespace
 
