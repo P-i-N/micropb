@@ -1378,6 +1378,24 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 	return grow( sequence, value, items, items.count + count_elements( in, key, sequence ), memory );
 }
 
+[[nodiscard]] inline bool is_bound_span( const sequence_desc& sequence )
+{
+	return sequence.span != nullptr && sequence.span->bind != nullptr;
+}
+
+[[nodiscard]] inline error capacity_error( const sequence_desc& sequence )
+{
+	return is_bound_span( sequence ) ? error::TRUNCATED : error::CAPACITY_EXCEEDED;
+}
+
+inline void commit_count( const sequence_desc& sequence, void* value, void* data, size_t count )
+{
+	if ( is_bound_span( sequence ) )
+		sequence.span->bind( value, data, count );
+	else
+		store_count( sequence, value, count );
+}
+
 /// Reads one element from `in` into the next free item of the sequence at
 /// `value`. A full sequence is an error: the function examines the capacity
 /// before it reads the element. A full span block means that the count of the
@@ -1386,9 +1404,8 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 inline void decode_element( reader& in, wire_type wire, const sequence_desc& sequence, void* value, arena* memory )
 {
 	const sequence_view items = view_of( sequence, value );
-	const bool is_span = sequence.span != nullptr && sequence.span->bind != nullptr;
 	if ( items.count >= decode_capacity( sequence, items ) )
-		return in.fail( is_span ? error::TRUNCATED : error::CAPACITY_EXCEEDED );
+		return in.fail( capacity_error( sequence ) );
 
 	void* item = member_at( items.data, items.count * sequence.element_size );
 	if ( sequence.span != nullptr && sequence.span->construct != nullptr )
@@ -1398,10 +1415,7 @@ inline void decode_element( reader& in, wire_type wire, const sequence_desc& seq
 	if ( in.failed() )
 		return;
 
-	if ( is_span )
-		sequence.span->bind( value, items.data, items.count + 1 );
-	else
-		store_count( sequence, value, items.count + 1 );
+	commit_count( sequence, value, items.data, items.count + 1 );
 }
 
 /// Reads a packed scalar record into `value`. Scalar elements are trivially
@@ -1413,8 +1427,7 @@ inline void decode_packed_scalars( reader& in, const sequence_desc& sequence, vo
 		return;
 
 	const sequence_view items = view_of( sequence, value );
-	const bool is_span = sequence.span != nullptr && sequence.span->bind != nullptr;
-	const error full_err = is_span ? error::TRUNCATED : error::CAPACITY_EXCEEDED;
+	const error full_err = capacity_error( sequence );
 	const size_t capacity = decode_capacity( sequence, items );
 	const uint8_t code = sequence.element->scalar;
 	const size_t elem_size = sequence.element_size;
@@ -1471,12 +1484,7 @@ inline void decode_packed_scalars( reader& in, const sequence_desc& sequence, vo
 	}
 
 	if ( count != items.count )
-	{
-		if ( is_span )
-			sequence.span->bind( value, items.data, count );
-		else
-			store_count( sequence, value, count );
-	}
+		commit_count( sequence, value, items.data, count );
 }
 
 /// Reads one record of a repeated field. A scalar element can be a packed
