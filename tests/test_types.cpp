@@ -89,27 +89,27 @@ constexpr bool test_string()
 constexpr bool test_oneof()
 {
 	oneof<uint32_t, string<8>> v;
-	if ( v.has_value() || v.index() != 0 || v.get_if<uint32_t>() != nullptr )
+	if ( v.has_value() || v.index() != decltype( v )::npos || v.get_if<uint32_t>() != nullptr )
 		return false;
 
 	v = uint32_t{ 42 };
-	if ( !v.has_value() || v.index() != 1 || !v.holds<uint32_t>() || *v.get_if<uint32_t>() != 42 )
+	if ( !v.has_value() || v.index() != 0 || !v.holds<uint32_t>() || *v.get_if<uint32_t>() != 42 )
 		return false;
 
 	v.emplace<string<8>>( "hi" );
-	if ( v.index() != 2 || !holds_alternative<string<8>>( v ) || *get_if<2>( &v ) != "hi" )
+	if ( v.index() != 1 || !holds_alternative<string<8>>( v ) || *get_if<1>( &v ) != "hi" )
 		return false;
 
-	const oneof<uint32_t, string<8>> same( std::in_place_index<2>, "hi" );
+	const oneof<uint32_t, string<8>> same( std::in_place_index<1>, "hi" );
 	if ( !( v == same ) )
 		return false;
 
-	oneof<int32_t, int32_t> dup( std::in_place_index<2>, -7 );
-	if ( dup.index() != 2 || *dup.get_if<2>() != -7 || dup.get_if<1>() != nullptr )
+	oneof<int32_t, int32_t> dup( std::in_place_index<1>, -7 );
+	if ( dup.index() != 1 || *dup.get_if<1>() != -7 || dup.get_if<0>() != nullptr )
 		return false;
 
 	v.reset();
-	return !v.has_value() && v.index() == 0 && !( v == same );
+	return !v.has_value() && v.index() == decltype( v )::npos && !( v == same );
 }
 
 constexpr bool test_arena_empty()
