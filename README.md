@@ -106,7 +106,7 @@ bool round_trip()
 
   | Configuration (Cortex-M4 / M33) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Extra 8-field type |
   | --- | ---: | ---: | ---: | ---: |
-  | **MicroPB** | **4,136 B** | **4,824 B** | **5,504 B** | **42 B** |
+  | **MicroPB** | **4,008 B** | **4,696 B** | **5,376 B** | **42 B** |
   | NanoPB 0.4.9.3 — fixed-size (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,150 B | 6,414 B | 7,774 B | 85 B |
   | NanoPB 0.4.9.3 — `pb_callback_t` (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,210 B | 6,606 B | 8,078 B | 92 B |
   | NanoPB 0.4.9.3 — fixed-size (default flags) | 6,616 B | 7,880 B | 9,240 B | 85 B |
@@ -116,11 +116,11 @@ bool round_trip()
 
   | Workload | Wire | MicroPB enc | NanoPB enc | MicroPB dec | NanoPB dec |
   | --- | ---: | ---: | ---: | ---: | ---: |
-  | 12 mixed scalars | 76 B | **86 ns** (2.0x) | 171 ns | **93 ns** (2.4x) | 224 ns |
-  | Sensor `Reading` (above) | 73 B | **44 ns** (2.8x) | 124 ns | **80 ns** (2.1x) | 171 ns |
-  | 32 packed `int32` (fixed) | 143 B | **180 ns** (2.0x) | 360 ns | **101 ns** (2.0x) | 203 ns |
-  | 32 packed `float` (fixed) | 131 B | **14 ns** (4.1x) | 56 ns | **32 ns** (3.5x) | 112 ns |
-  | `oneof` envelope (16 submsgs) | 44 B | **77 ns** (3.7x) | 285 ns | **81 ns** (2.8x) | 226 ns |
+  | 12 mixed scalars | 76 B | **54 ns** (3.1x) | 165 ns | **106 ns** (2.1x) | 226 ns |
+  | Sensor `Reading` (above) | 73 B | **44 ns** (2.8x) | 124 ns | **94 ns** (1.8x) | 169 ns |
+  | 32 packed `int32` (fixed) | 143 B | **176 ns** (2.1x) | 362 ns | **130 ns** (1.6x) | 203 ns |
+  | 32 packed `float` (fixed) | 131 B | **11 ns** (4.9x) | 53 ns | **45 ns** (2.6x) | 120 ns |
+  | `oneof` envelope (16 submsgs) | 44 B | **75 ns** (3.8x) | 282 ns | **95 ns** (2.4x) | 226 ns |
 
 * **No heap, no exceptions, no RTTI, no startup code:** compiles with `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`. Tables live in `.rodata` with zero static constructors before `main()`.
 * **Compile-time schema validation:** invalid tags, unmapped types, recursive messages, and missing scratch buffers fail at compile time with named `static_assert` diagnostics (`pb: <rule>:`).
