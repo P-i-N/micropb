@@ -400,7 +400,7 @@ consteval void check_field_encoding()
 	if constexpr ( Encoding != int_encoding::VARINT && is_alternative_valid<U>( Alternative ) )
 	{
 		if constexpr ( Alternative != 0 )
-			check_leaf_encoding<std::remove_const_t<typename U::template alternative_t<Alternative>>, Encoding>();
+			check_leaf_encoding<std::remove_const_t<typename U::template alternative_t<Alternative - 1>>, Encoding>();
 		else
 			check_leaf_encoding<typename encoding_leaf<U>::type, Encoding>();
 	}

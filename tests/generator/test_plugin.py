@@ -430,8 +430,8 @@ class StructureTest(unittest.TestCase):
             """)
         self.assertEqual(members(text, "m"), [
             "uint32_t id = 0;",
-            "static constexpr size_t payload_first = 1;",
-            "static constexpr size_t payload_second = 2;",
+            "static constexpr size_t payload_first = 0;",
+            "static constexpr size_t payload_second = 1;",
             "pb::oneof<a, b> payload = {};",
             "bool last = false;"])
         self.assertEqual(field_list(text, "m"), ["id = 1", "payload = 2/1", "payload = 3/2", "last = 4"])
@@ -443,8 +443,8 @@ class StructureTest(unittest.TestCase):
             """)
         self.assertEqual(members(text, "m"), [
             "uint32_t id = 0;",
-            "static constexpr size_t payload_first = 1;",
-            "static constexpr size_t payload_second = 2;",
+            "static constexpr size_t payload_first = 0;",
+            "static constexpr size_t payload_second = 1;",
             "pb::oneof<int32_t, std::string_view> payload = {};",
             "bool last = false;"])
         self.assertEqual(field_list(text, "m"), ["id = 1", "payload = 5/1", "payload = 7/2", "last = 8"])
@@ -453,8 +453,8 @@ class StructureTest(unittest.TestCase):
         text = header("message m { optional bool a = 1; oneof v { int32 b = 2; bool c = 3; } optional bool d = 4; }")
         self.assertEqual(members(text, "m"), [
             "std::optional<bool> a = {};",
-            "static constexpr size_t v_b = 1;",
-            "static constexpr size_t v_c = 2;",
+            "static constexpr size_t v_b = 0;",
+            "static constexpr size_t v_c = 1;",
             "pb::oneof<int32_t, bool> v = {};",
             "std::optional<bool> d = {};"])
         self.assertEqual(field_list(text, "m"), ["a = 1", "v = 2/1", "v = 3/2", "d = 4"])
@@ -469,13 +469,13 @@ class StructureTest(unittest.TestCase):
             """)
         self.assertEqual(members(text, "m"), [
             "uint32_t id = 0;",
-            "static constexpr size_t msg_err = 1;",
-            "static constexpr size_t msg_info = 2;",
-            "static constexpr size_t msg_html = 3;",
+            "static constexpr size_t msg_err = 0;",
+            "static constexpr size_t msg_info = 1;",
+            "static constexpr size_t msg_html = 2;",
             "pb::oneof<std::string_view, std::string_view, std::string_view> msg = {};",
-            "static constexpr size_t delta_raw = 1;",
-            "static constexpr size_t delta_zz = 2;",
-            "static constexpr size_t delta_fx = 3;",
+            "static constexpr size_t delta_raw = 0;",
+            "static constexpr size_t delta_zz = 1;",
+            "static constexpr size_t delta_fx = 2;",
             "pb::oneof<int32_t, int32_t, int32_t> delta = {};"])
         self.assertEqual(field_list(text, "m"), [
             "id = 1", "msg = 2/1", "msg = 3/2", "msg = 4/3",
@@ -637,30 +637,30 @@ class NameTest(unittest.TestCase):
     def test_oneof_name_equal_to_a_type_name(self):
         text = header("message payload { int32 x = 1; } message m { oneof payload { payload p = 1; int32 q = 2; } }")
         self.assertEqual(members(text, "m"), [
-            "static constexpr size_t payload_p = 1;",
-            "static constexpr size_t payload_q = 2;",
+            "static constexpr size_t payload_p = 0;",
+            "static constexpr size_t payload_q = 1;",
             "pb::oneof<::payload, int32_t> payload = {};"])
 
     def test_oneof_member_type_equal_to_a_field_name(self):
         text = header("enum mode { MODE_A = 0; } message m { mode mode = 1; oneof v { mode x = 4; int32 y = 5; } }")
         self.assertEqual(members(text, "m"), [
             "::mode mode = ::mode::A;",
-            "static constexpr size_t v_x = 1;",
-            "static constexpr size_t v_y = 2;",
+            "static constexpr size_t v_x = 0;",
+            "static constexpr size_t v_y = 1;",
             "pb::oneof<::mode, int32_t> v = {};"])
 
     def test_oneof_index_name_equal_to_a_type_name(self):
         text = header("message msg_err { int32 x = 1; } message m { msg_err first = 1; oneof msg { string err = 2; } }")
         self.assertEqual(members(text, "m"), [
             "::msg_err first = {};",
-            "static constexpr size_t msg_err = 1;",
+            "static constexpr size_t msg_err = 0;",
             "pb::oneof<std::string_view> msg = {};"])
 
     def test_oneof_with_a_keyword_name(self):
         text = header("message m { oneof union { int32 a = 1; bool b = 2; } }")
         self.assertEqual(members(text, "m"), [
-            "static constexpr size_t union_a = 1;",
-            "static constexpr size_t union_b = 2;",
+            "static constexpr size_t union_a = 0;",
+            "static constexpr size_t union_b = 1;",
             "pb::oneof<int32_t, bool> union_ = {};"])
         self.assertEqual(field_list(text, "m"), ["union_ = 1/1", "union_ = 2/2"])
 
@@ -686,8 +686,8 @@ class NumberTest(unittest.TestCase):
     def test_oneof_with_descending_numbers(self):
         text = header("message m { oneof w { bool d = 9; float e = 4; } int32 last = 1; }")
         self.assertEqual(members(text, "m"), [
-            "static constexpr size_t w_d = 1;",
-            "static constexpr size_t w_e = 2;",
+            "static constexpr size_t w_d = 0;",
+            "static constexpr size_t w_e = 1;",
             "pb::oneof<bool, float> w = {};",
             "int32_t last = 0;"])
         self.assertEqual(field_list(text, "m"), ["w = 9/1", "w = 4/2", "last = 1"])
