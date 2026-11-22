@@ -261,6 +261,158 @@ private:
 	count_type _count = 0;
 };
 
+/// Key-value pair of a proto3 `map<K, V>` field.
+template <typename K,
+          typename V,
+          int_encoding KeyEnc = int_encoding::VARINT,
+          int_encoding ValEnc = int_encoding::VARINT>
+struct kv_pair
+{
+	using key_type = K;
+	using mapped_type = V;
+	static constexpr int_encoding key_encoding = KeyEnc;
+	static constexpr int_encoding value_encoding = ValEnc;
+
+	K key = {};
+	V value = {};
+
+	[[nodiscard]] constexpr bool operator==( const kv_pair& ) const = default;
+};
+
+namespace detail {
+
+template <typename Pair>
+using kv_pair_field_list = field_list<Pair,
+                                      field_at<typename Pair::key_type, 1, offsetof( Pair, key ), 0, Pair::key_encoding>,
+                                      field_at<typename Pair::mapped_type, 2, offsetof( Pair, value ), 0, Pair::value_encoding>>;
+
+} // namespace detail
+
+template <typename K, typename V, int_encoding KeyEnc, int_encoding ValEnc>
+struct fields_of<kv_pair<K, V, KeyEnc, ValEnc>> : detail::kv_pair_field_list<kv_pair<K, V, KeyEnc, ValEnc>>
+{};
+
+/// Fixed-capacity proto3 `map<K, V>` that keeps up to `N` entries in the object.
+/// Does not allocate. Lookup is linear in `size()`.
+template <typename K,
+          typename V,
+          size_t N,
+          int_encoding KeyEnc = int_encoding::VARINT,
+          int_encoding ValEnc = int_encoding::VARINT>
+struct map
+{
+	using key_type = K;
+	using mapped_type = V;
+	using value_type = kv_pair<K, V, KeyEnc, ValEnc>;
+	static constexpr size_t max_size = N;
+
+	constexpr map() = default;
+
+	template <size_t M>
+		requires( M <= N )
+	constexpr map( const value_type ( &items )[M] )
+	{
+		for ( size_t i = 0; i < M; ++i )
+			static_cast<void>( insert_or_assign( items[i].key, items[i].value ) );
+	}
+
+	[[nodiscard]] constexpr size_t size() const noexcept { return _count; }
+	[[nodiscard]] constexpr size_t capacity() const noexcept { return N; }
+	[[nodiscard]] constexpr bool empty() const noexcept { return _count == 0; }
+	[[nodiscard]] constexpr bool full() const noexcept { return _count == N; }
+
+	[[nodiscard]] constexpr value_type* data() noexcept { return _items.data(); }
+	[[nodiscard]] constexpr const value_type* data() const noexcept { return _items.data(); }
+
+	[[nodiscard]] constexpr value_type* begin() noexcept { return _items.data(); }
+	[[nodiscard]] constexpr value_type* end() noexcept { return _items.data() + _count; }
+	[[nodiscard]] constexpr const value_type* begin() const noexcept { return _items.data(); }
+	[[nodiscard]] constexpr const value_type* end() const noexcept { return _items.data() + _count; }
+
+	[[nodiscard]] constexpr std::span<value_type> span() noexcept { return { _items.data(), _count }; }
+	[[nodiscard]] constexpr std::span<const value_type> span() const noexcept { return { _items.data(), _count }; }
+
+	/// Returns a pointer to the value for `key`, or null if absent.
+	template <typename Key = K>
+	[[nodiscard]] constexpr V* find( const Key& key ) noexcept
+	{
+		for ( size_t i = 0; i < _count; ++i )
+			if ( _items[i].key == key )
+				return &_items[i].value;
+		return nullptr;
+	}
+
+	template <typename Key = K>
+	[[nodiscard]] constexpr const V* find( const Key& key ) const noexcept
+	{
+		for ( size_t i = 0; i < _count; ++i )
+			if ( _items[i].key == key )
+				return &_items[i].value;
+		return nullptr;
+	}
+
+	template <typename Key = K>
+	[[nodiscard]] constexpr bool contains( const Key& key ) const noexcept
+	{
+		return find( key ) != nullptr;
+	}
+
+	/// Updates the entry for `key`, or appends a new one. Returns `false` when full.
+	[[nodiscard]] constexpr bool insert_or_assign( const K& key, const V& value )
+	{
+		if ( V* existing = find( key ) )
+		{
+			*existing = value;
+			return true;
+		}
+		if ( _count == N )
+			return false;
+		_items[_count++] = value_type{ key, value };
+		return true;
+	}
+
+	/// Removes the entry for `key`. Returns `true` if an entry was removed.
+	template <typename Key = K>
+	[[nodiscard]] constexpr bool erase( const Key& key )
+	{
+		for ( size_t i = 0; i < _count; ++i )
+		{
+			if ( _items[i].key == key )
+			{
+				for ( size_t j = i + 1; j < _count; ++j )
+					_items[j - 1] = _items[j];
+				--_count;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	constexpr void clear() noexcept { _count = 0; }
+
+	template <size_t M>
+	[[nodiscard]] constexpr bool operator==( const map<K, V, M, KeyEnc, ValEnc>& other ) const
+	{
+		if ( _count != other.size() )
+			return false;
+		for ( size_t i = 0; i < _count; ++i )
+		{
+			const V* found = other.find( _items[i].key );
+			if ( found == nullptr || !( *found == _items[i].value ) )
+				return false;
+		}
+		return true;
+	}
+
+private:
+	friend struct detail::sequence_access;
+
+	using count_type = detail::count_type_t<N>;
+
+	std::array<value_type, N> _items;
+	count_type _count = 0;
+};
+
 /// Byte sequence that keeps up to `N` bytes in the object. Does not allocate.
 template <size_t N>
 struct bytes

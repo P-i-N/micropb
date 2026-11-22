@@ -169,16 +169,52 @@ bool test_arena_overflow()
 	return a.allocate( SIZE_MAX - 2, 8 ) == nullptr && a.used() == 1;
 }
 
+constexpr bool test_map()
+{
+	map<string<8>, int32_t, 2> m;
+	if ( !m.empty() || m.full() || m.size() != 0 || m.capacity() != 2 )
+		return false;
+	if ( !m.insert_or_assign( "a", 1 ) || !m.insert_or_assign( "b", 2 ) )
+		return false;
+	if ( !m.full() || m.size() != 2 || !m.contains( "a" ) || m.contains( "c" ) )
+		return false;
+	if ( m.insert_or_assign( "c", 3 ) )
+		return false;
+	// Updating an existing key works even when full.
+	if ( !m.insert_or_assign( "a", 10 ) )
+		return false;
+	const int32_t* va = m.find( "a" );
+	if ( va == nullptr || *va != 10 )
+		return false;
+	if ( !m.erase( "a" ) || m.erase( "a" ) || m.size() != 1 || m.contains( "a" ) )
+		return false;
+	if ( !m.insert_or_assign( "c", 30 ) )
+		return false;
+
+	// Order-independent equality and array construction with duplicate keys.
+	const map<string<8>, int32_t, 4> same{ { { "c", 30 }, { "b", 1 }, { "b", 2 } } };
+	if ( !( m == same ) )
+		return false;
+
+	m.clear();
+	return m.empty() && m.size() == 0;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static_assert( test_repeated() );
 static_assert( test_bytes() );
 static_assert( test_string() );
 static_assert( test_oneof() );
+static_assert( test_map() );
 static_assert( test_arena_empty() );
 static_assert( std::is_trivially_copyable_v<oneof<int32_t, string<8>>> &&
                std::is_trivially_destructible_v<oneof<int32_t, string<8>>> );
 static_assert( std::is_trivially_copyable_v<repeated<int, 4>> && std::is_trivially_destructible_v<repeated<int, 4>> );
+static_assert( std::is_trivially_copyable_v<kv_pair<int32_t, int32_t>> &&
+               std::is_trivially_destructible_v<kv_pair<int32_t, int32_t>> );
+static_assert( std::is_trivially_copyable_v<map<int32_t, int32_t, 4>> &&
+               std::is_trivially_destructible_v<map<int32_t, int32_t, 4>> );
 static_assert( std::is_trivially_copyable_v<bytes<8>> && std::is_trivially_destructible_v<bytes<8>> );
 static_assert( std::is_trivially_copyable_v<string<8>> && std::is_trivially_destructible_v<string<8>> );
 static_assert( !std::is_constructible_v<string<4>, const char ( & )[6]> );
