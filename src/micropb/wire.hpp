@@ -124,8 +124,12 @@ private:
 	{
 		if ( _pos < _out.size() )
 		{
+#ifdef MICROPB_FAST
 			_out[_pos++] = byte;
 			return;
+#else
+			_out[_pos] = byte;
+#endif
 		}
 		advance( 1 );
 	}
@@ -167,6 +171,7 @@ struct reader
 
 	[[nodiscard]] constexpr uint64_t read_varint()
 	{
+#ifdef MICROPB_FAST
 		if ( _pos >= _in.size() )
 		{
 			fail( error::TRUNCATED );
@@ -181,6 +186,10 @@ struct reader
 
 		uint64_t value = first & 0x7Fu;
 		for ( size_t i = 1; i < 10; ++i )
+#else
+		uint64_t value = 0;
+		for ( size_t i = 0; i < 10; ++i )
+#endif
 		{
 			if ( _pos + i >= _in.size() )
 			{
