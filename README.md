@@ -54,7 +54,7 @@ struct Reading
 	std::array<uint8_t, 6> mac = {};
 	static constexpr size_t detail_uptime_s = 1;
 	static constexpr size_t detail_fault = 2;
-	std::variant<std::monostate, uint32_t, std::string_view> detail = {};
+	pb::oneof<uint32_t, std::string_view> detail = {};
 };
 
 } // namespace sensor
@@ -94,19 +94,19 @@ bool round_trip()
 	if ( !pb::decode( std::span( wire ).first( *written ), rx ) )
 		return false;
 
-	const auto* uptime = std::get_if<uint32_t>( &rx.detail );
+	const auto* uptime = pb::get_if<uint32_t>( &rx.detail );
 	return rx.id == 1 && rx.temperature_mc == -250 && rx.label == "ambient" && uptime && *uptime == 3600;
 }
 ```
 
 ## Why MicroPB
 
-* **Plain C++23 types, no callbacks:** structs use `int32_t`/`uint32_t`, `enum class`, `std::optional`, `std::variant`, `pb::string<N>`, `pb::bytes<N>`, `pb::repeated<T, N>`, `std::string_view`, `std::span`, and `std::array`, default-initialized to their proto3 defaults. No `has_x` booleans, manual union tags, integer wrapper structs, or stream callbacks.
-* **Smaller Flash footprint than NanoPB on Arm Cortex-M:** one non-template interpreter handles all messages from compact `constexpr` word tables in ROM. Measured on Arm Cortex-M4 / Cortex-M33 (`arm-none-eabi-gcc 16.2.0 -Os -mthumb --gc-sections`; x86-64 tables in [DETAILS.md](DETAILS.md#binary-size-comparison)):
+* **Plain C++23 types, no callbacks:** structs use `int32_t`/`uint32_t`, `enum class`, `std::optional`, `pb::oneof`, `pb::string<N>`, `pb::bytes<N>`, `pb::repeated<T, N>`, `std::string_view`, `std::span`, and `std::array`, default-initialized to their proto3 defaults. No `has_x` booleans, manual union tags, integer wrapper structs, or stream callbacks.
+* **Smaller Flash footprint than NanoPB on Arm Cortex-M:** one non-template interpreter handles all messages from compact `constexpr` halfword tables in ROM. Measured on Arm Cortex-M4 / Cortex-M33 (`arm-none-eabi-gcc 16.2.0 -Os -mthumb --gc-sections`; x86-64 tables in [DETAILS.md](DETAILS.md#binary-size-comparison)):
 
   | Configuration (Cortex-M4 / M33) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Extra 8-field type |
   | --- | ---: | ---: | ---: | ---: |
-  | **MicroPB** | **4,146 B** | **5,340 B** | **6,580 B** | **77 B** |
+  | **MicroPB** | **4,136 B** | **4,824 B** | **5,504 B** | **42 B** |
   | NanoPB 0.4.9.3 — fixed-size (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,150 B | 6,414 B | 7,774 B | 85 B |
   | NanoPB 0.4.9.3 — `pb_callback_t` (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,210 B | 6,606 B | 8,078 B | 92 B |
   | NanoPB 0.4.9.3 — fixed-size (default flags) | 6,616 B | 7,880 B | 9,240 B | 85 B |
@@ -116,11 +116,11 @@ bool round_trip()
 
   | Workload | Wire | MicroPB enc | NanoPB enc | MicroPB dec | NanoPB dec |
   | --- | ---: | ---: | ---: | ---: | ---: |
-  | 12 mixed scalars | 76 B | **57 ns** (2.8x) | 163 ns | **77 ns** (2.9x) | 226 ns |
-  | Sensor `Reading` (above) | 73 B | **47 ns** (2.6x) | 122 ns | **82 ns** (2.2x) | 180 ns |
-  | 32 packed `int32` (fixed) | 143 B | **178 ns** (2.1x) | 369 ns | **128 ns** (1.6x) | 208 ns |
-  | 32 packed `float` (fixed) | 131 B | **11 ns** (4.8x) | 52 ns | **30 ns** (3.7x) | 111 ns |
-  | `oneof` envelope (16 submsgs) | 44 B | **92 ns** (3.2x) | 296 ns | **74 ns** (3.1x) | 230 ns |
+  | 12 mixed scalars | 76 B | **86 ns** (2.0x) | 171 ns | **93 ns** (2.4x) | 224 ns |
+  | Sensor `Reading` (above) | 73 B | **44 ns** (2.8x) | 124 ns | **80 ns** (2.1x) | 171 ns |
+  | 32 packed `int32` (fixed) | 143 B | **180 ns** (2.0x) | 360 ns | **101 ns** (2.0x) | 203 ns |
+  | 32 packed `float` (fixed) | 131 B | **14 ns** (4.1x) | 56 ns | **32 ns** (3.5x) | 112 ns |
+  | `oneof` envelope (16 submsgs) | 44 B | **77 ns** (3.7x) | 285 ns | **81 ns** (2.8x) | 226 ns |
 
 * **No heap, no exceptions, no RTTI, no startup code:** compiles with `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`. Tables live in `.rodata` with zero static constructors before `main()`.
 * **Compile-time schema validation:** invalid tags, unmapped types, recursive messages, and missing scratch buffers fail at compile time with named `static_assert` diagnostics (`pb: <rule>:`).
@@ -167,7 +167,7 @@ void on_packet( std::span<const uint8_t> packet )
 | `string` | *(none)* / `max_length:N` (`max_size:N+1`) | `std::string_view` / `pb::string<N>` (null-terminated) |
 | `bytes` | *(none)* / `max_size:N` / `max_size:N fixed_length:true` | `std::span<const uint8_t>` / `pb::bytes<N>` / `std::array<uint8_t, N>` |
 | `repeated T` | *(none)* / `max_count:N` / `max_count:N fixed_count:true` | `std::span<const T>` / `pb::repeated<T, N>` / `std::array<T, N>` |
-| `optional T` / `oneof` | — | `std::optional<T>` / `std::variant<std::monostate, ...>` |
+| `optional T` / `oneof` | — | `std::optional<T>` / `pb::oneof<...>` |
 
 ## API
 
