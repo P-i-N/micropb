@@ -222,7 +222,6 @@ ctest --test-dir .build --output-on-failure
 * **Compact table limits vs. `MICROPB_WIDE_TABLES`:** default compact tables support field numbers up to `4095`, member offsets up to `4095` bytes, up to `73` distinct compound types per message, and one `pb::oneof` of up to `32` alternatives per message. Define `MICROPB_WIDE_TABLES` to support field numbers up to `2^29 - 1`, offsets up to `65535` bytes, `255` compound types, multiple `pb::oneof` members, and `255` alternatives per `oneof`, at the cost of larger ROM tables.
 * **ROM size vs. speed (`MICROPB_FAST`):** the default build minimizes Flash/ROM (`3,520 B` base on Cortex-M4) with linear field lookup and element-by-element packed loops. Define `MICROPB_FAST` (`+616 B` on Cortex-M4) to enable inline scalar dispatch, cursor field lookup, 1-byte varint fast path, and bulk packed scalar encode/decode.
 * **Two-pass `std::span<const T>` decode:** decoding a dynamic `repeated` span scans the input first to count elements and allocate one contiguous block in scratch memory, which is slower than a single-pass callback.
-* **Arm verification:** compile-tested with Arm GNU Toolchain 13.3, 14.2, and 16.2 (`-mcpu=cortex-m4 -mthumb`); not yet executed on Cortex-M hardware.
 
 ## Further reading
 
