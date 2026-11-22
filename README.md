@@ -124,7 +124,7 @@ bool round_trip()
   | `oneof` envelope (16 submsgs) | 44 B | **77 ns** (3.8x) | 287 ns | **80 ns** (2.8x) | 223 ns |
 
 * **No heap, no exceptions, no RTTI, no startup code:** compiles with `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`. Tables live in `.rodata` with zero static constructors before `main()`.
-* **Compile-time schema validation:** invalid tags, unmapped types, recursive messages, and missing scratch buffers fail at compile time with named `static_assert` diagnostics (`pb: <rule>:`).
+* **Compile-time safety checks:** recursive messages, encode-only `std::array` decodes, missing scratch buffers, and table/offset limits fail at compile time with named `static_assert` diagnostics (`pb: <rule>:`).
 * **Wire-identical to `protoc` & zero external dependencies:** verified byte-for-byte against `protoc`, using 5 standard-library-only C++23 headers and a single-file Python 3 plugin (stdlib only).
 
 > [!NOTE]
