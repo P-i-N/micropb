@@ -205,6 +205,7 @@ template <typename T>
          --micropb_out=gen --micropb_opt=options_dir=proto \
          -I proto proto/sensor.proto
   ```
+  Pass `--micropb_opt=namespace_prefix=foo::bar` to prepend a C++ namespace prefix to generated headers.
 
 ## Build & test
 

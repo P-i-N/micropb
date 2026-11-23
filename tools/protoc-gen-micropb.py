@@ -20,7 +20,8 @@ fields come from app.options, a file in the NanoPB format:
 
 The plugin looks for app.options with the path that protoc has for app.proto: first from the
 current folder, then from each folder of the parameter --micropb_opt=options_dir=<folder>. With
-`-I proto proto/app.proto`, give `--micropb_opt=options_dir=proto`.
+`-I proto proto/app.proto`, give `--micropb_opt=options_dir=proto`. Give
+`--micropb_opt=namespace_prefix=foo::bar` to prepend `foo::bar` to the C++ namespace of each file.
 
 It needs only Python 3.
 """
@@ -246,9 +247,19 @@ def ident(name):
     return name + "_" if name in RESERVED else name
 
 
-def namespace_of(package):
-    """`a.b` gives `a::b`."""
-    return "::".join(ident(part) for part in package.split(".") if part)
+def parse_namespace_prefix(text):
+    """Checks that `text` is one or more C++ identifiers separated by `::`."""
+    parts = text.split("::")
+    if not all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part) for part in parts):
+        raise Error(f"invalid namespace_prefix '{text}': expected C++ identifiers separated by '::'")
+    return text
+
+
+def namespace_of(package, prefix=""):
+    """`a.b` with prefix `p::q` gives `p::q::a::b`."""
+    parts = [ident(part) for part in prefix.split("::") if part]
+    parts += [ident(part) for part in package.split(".") if part]
+    return "::".join(parts)
 
 
 def stem(proto_name):
@@ -439,10 +450,11 @@ def enum_text(enum, options):
 class Header:
     """The header for one .proto file. `types` has each type of the request by its full name."""
 
-    def __init__(self, file, types, options):
+    def __init__(self, file, types, options, namespace_prefix=""):
         self.file = file
         self.types = types
         self.options = options
+        self.namespace_prefix = namespace_prefix
         self.imports = set()
         self.field_lists = []
 
@@ -456,7 +468,7 @@ class Header:
             self.imports.add(target.file.name)
         if target.file.package == self.file.package and target.name not in member_names:
             return target.name
-        return "::" + "::".join(filter(None, [namespace_of(target.file.package), target.name]))
+        return "::" + "::".join(filter(None, [namespace_of(target.file.package, self.namespace_prefix), target.name]))
 
     def field_type(self, message, field, member_names):
         """The C++ type for `field`, without `std::optional`."""
@@ -601,7 +613,7 @@ class Header:
     def field_list_text(self, message, entries):
         """The `pb::fields_of` specialization of `message`: the type, field number, offset and encoding."""
         # The full name with `::` at the start: this text is in the scope of `pb`, which has names of its own.
-        name = "::" + "::".join(filter(None, [namespace_of(self.file.package), message.name]))
+        name = "::" + "::".join(filter(None, [namespace_of(self.file.package, self.namespace_prefix), message.name]))
         lines = [f"template <>\nstruct pb::fields_of<{name}> : pb::field_list<{name}"]
         for member, number, alternative, encoding in entries:
             tail = f", {alternative}, {encoding}" if encoding else (f", {alternative}" if alternative else "")
@@ -675,7 +687,7 @@ class Header:
         if self.imports:
             out += [f'#include "{stem(name)}.pb.hpp"' for name in sorted(self.imports)] + [""]
 
-        namespace = namespace_of(self.file.package)
+        namespace = namespace_of(self.file.package, self.namespace_prefix)
         if namespace:
             out += [f"namespace {namespace} {{", "", body, "", f"}} // namespace {namespace}"]
         else:
@@ -693,18 +705,22 @@ def generate(request):
     headers, warnings = [], []
     try:
         folders = []
+        namespace_prefix = ""
         for parameter in filter(None, request.parameter.split(",")):
-            key, _, value = parameter.partition("=")
-            if key != "options_dir" or not value:
+            key, sep, value = parameter.partition("=")
+            if key == "options_dir" and value:
+                folders.append(value)
+            elif key == "namespace_prefix" and sep:
+                namespace_prefix = parse_namespace_prefix(value)
+            else:
                 raise Error(f"unknown parameter '{parameter}'")
-            folders.append(value)
 
         files = {file.name: file for file in request.proto_file}
         types = {"." + each.proto_name: each for file in request.proto_file for each in types_of(file)}
         for name in request.file_to_generate:
             options = Options(find_options(name, folders))
             try:
-                text = Header(files[name], types, options).text()
+                text = Header(files[name], types, options, namespace_prefix).text()
             finally:
                 warnings += options.warnings
             headers.append((stem(name) + ".pb.hpp", text))

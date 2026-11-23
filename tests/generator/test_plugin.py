@@ -730,6 +730,47 @@ class PackageTest(unittest.TestCase):
                                      'message m { top x = 1; a.b.t y = 2; }')
         self.assertEqual(headers, ["<stddef.h>", "<micropb/types.hpp>", '"ab.pb.hpp"', '"top.pb.hpp"'])
 
+    def test_namespace_prefix_with_package(self):
+        text = header("package app.link; message inner { int32 x = 1; } message m { inner inner = 1; }",
+                      None, "--micropb_opt=namespace_prefix=foo::bar")
+        self.assertIn("namespace foo::bar::app::link {", text)
+        self.assertIn("} // namespace foo::bar::app::link\n", text)
+        self.assertEqual(members(text, "m"), ["::foo::bar::app::link::inner inner = {};"])
+        self.assertEqual(field_list(text, "foo::bar::app::link::m"), ["inner = 1"])
+
+    def test_namespace_prefix_without_package(self):
+        text = header("message m { int32 a = 1; }", None, "--micropb_opt=namespace_prefix=foo::bar")
+        self.assertIn("namespace foo::bar {", text)
+        self.assertIn("} // namespace foo::bar\n", text)
+        self.assertEqual(field_list(text, "foo::bar::m"), ["a = 1"])
+
+    def test_namespace_prefix_with_reserved_name(self):
+        text = header("package a; message m { int32 x = 1; }", None, "--micropb_opt=namespace_prefix=pb::default")
+        self.assertIn("namespace pb_::default_::a {", text)
+        self.assertIn("} // namespace pb_::default_::a\n", text)
+        self.assertEqual(field_list(text, "pb_::default_::a::m"), ["x = 1"])
+
+    def test_namespace_prefix_with_imports(self):
+        result = run(dict(self.FILES, **{
+            "same.proto": 'syntax = "proto3"; package a; message s { int32 x = 1; }',
+            "main.proto": 'syntax = "proto3"; package a; import "top.proto"; import "ab.proto"; import "same.proto"; '
+                          'message m { top x = 1; a.b.t y = 2; s z = 3; }',
+        }), "--micropb_opt=namespace_prefix=my::ns")
+        self.assertEqual(result.rc, 0, result.stderr)
+        text = result.headers["main.pb.hpp"]
+        self.assertIn("namespace my::ns::a {", text)
+        self.assertEqual(members(text, "m"), ["::my::ns::top x = {};", "::my::ns::a::b::t y = {};", "s z = {};"])
+        self.assertEqual(field_list(text, "my::ns::a::m"), ["x = 1", "y = 2", "z = 3"])
+
+    def test_namespace_prefix_with_options_dir(self):
+        result = run({"proto/a.proto": 'syntax = "proto3"; package p; message m { repeated int32 a = 1; }',
+                      "opts/a.options": "p.m.a max_count:4\n"},
+                     "-Iproto", "--micropb_opt=options_dir=opts,namespace_prefix=ext", protos=["proto/a.proto"])
+        self.assertEqual(result.rc, 0, result.stderr)
+        text = result.headers["a.pb.hpp"]
+        self.assertIn("namespace ext::p {", text)
+        self.assertEqual(members(text, "m"), ["pb::repeated<int32_t, 4> a = {};"])
+
 
 PROTO3 = 'syntax = "proto3";\n'
 
@@ -870,6 +911,14 @@ class ErrorTest(unittest.TestCase):
         result = run({"a.proto": PROTO3 + "message m {}"}, "--micropb_opt=speed=fast")
         self.assertNotEqual(result.rc, 0)
         self.assertIn("unknown parameter 'speed=fast'", result.stderr)
+
+    def test_invalid_namespace_prefix(self):
+        for bad in ("", "::foo", "foo::", "foo::::bar", "foo:bar", "foo.bar", "1foo"):
+            with self.subTest(bad=bad):
+                result = run({"a.proto": PROTO3 + "message m {}"}, f"--micropb_opt=namespace_prefix={bad}")
+                self.assertNotEqual(result.rc, 0)
+                self.assertEqual(result.headers, {})
+                self.assertIn(f"invalid namespace_prefix '{bad}'", result.stderr)
 
     def test_error_in_one_file_writes_no_header(self):
         result = run({"a.proto": PROTO3 + "message m {}", "b.proto": 'syntax = "proto2"; message n {}'})

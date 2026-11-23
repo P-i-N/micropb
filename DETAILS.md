@@ -159,7 +159,7 @@ void handle_log( std::span<uint8_t> wire )
 * Generated headers include `<stdint.h>` and `<stddef.h>` (only when needed) and emit unqualified `int8_t`..`int64_t` and `uint8_t`..`uint64_t` types.
 * `sint32`/`sint64` and `fixed32`/`fixed64`/`sfixed32`/`sfixed64` emit plain `int32_t`/`int64_t`/`uint32_t`/`uint64_t` members and record `pb::int_encoding::ZIGZAG` or `pb::int_encoding::FIXED` in `pb::field_at`.
 * Each `oneof` emits 0-based `static constexpr size_t <oneof>_<field> = 0..K - 1;` constants for its alternatives above the `pb::oneof` member.
-* `package a.b;` maps to `namespace a::b`.
+* `package a.b;` maps to `namespace a::b`. Pass `--micropb_opt=namespace_prefix=foo::bar` to prepend `foo::bar` to the C++ namespace of every generated file (`namespace foo::bar::a::b`, or `namespace foo::bar` when a file has no `package`).
 * Nested definitions flatten with underscores: `Outer.Inner` becomes `Outer_Inner`.
 * C++ keywords, `pb`, `std`, `<stdint.h>`/`<stddef.h>` typedefs (`uint32_t`, `size_t`, etc.), and common C macros (`NULL`, `EOF`, `errno`, `stdin`, `stdout`, `stderr`, `assert`, `offsetof`) receive a trailing `_`.
 * Enumerator prefixes matching `<ENUM_NAME>_` (case-insensitive) are stripped when every value in the enum has the prefix and the remainder starts with a letter (`MODE_IDLE` -> `Mode::IDLE`).
