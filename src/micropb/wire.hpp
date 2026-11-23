@@ -119,6 +119,18 @@ struct writer
 
 	[[nodiscard]] constexpr bool fits() const { return _pos <= _out.size(); }
 
+	/// Prefix of the buffer that the writer has used, clamped to the buffer size.
+	[[nodiscard]] constexpr std::span<uint8_t> used_span() const
+	{
+		return _out.first( _pos < _out.size() ? _pos : _out.size() );
+	}
+
+	/// Unused suffix of the buffer. Empty when full or when `fits()` is `false`.
+	[[nodiscard]] constexpr std::span<uint8_t> remaining_span() const
+	{
+		return _pos < _out.size() ? _out.subspan( _pos ) : std::span<uint8_t>{};
+	}
+
 private:
 	constexpr void put( uint8_t byte )
 	{
@@ -294,6 +306,12 @@ struct reader
 
 	/// `true` at the end of the input, and after a failure.
 	[[nodiscard]] constexpr bool empty() const { return _pos == _in.size(); }
+
+	/// Prefix of the input that the reader has consumed.
+	[[nodiscard]] constexpr std::span<const uint8_t> used_span() const { return _in.first( _pos ); }
+
+	/// Unread suffix of the input. Empty at the end of the input and after a failure.
+	[[nodiscard]] constexpr std::span<const uint8_t> remaining_span() const { return _in.subspan( _pos ); }
 
 private:
 	[[nodiscard]] constexpr size_t remaining() const { return _in.size() - _pos; }

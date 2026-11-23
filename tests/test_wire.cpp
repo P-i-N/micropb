@@ -364,6 +364,43 @@ constexpr bool test_reader_absorb()
 	return fails_with( r, error::TRUNCATED ) && r.read_varint() == 0;
 }
 
+constexpr bool test_writer_and_reader_spans()
+{
+	std::array<uint8_t, 5> buf{};
+	writer w( buf );
+	if ( !w.used_span().empty() || w.remaining_span().size() != 5 || w.remaining_span().data() != buf.data() )
+		return false;
+
+	w.write_varint( 150 ); // 2 bytes: 0x96 0x01
+	if ( w.used_span().size() != 2 || w.used_span().data() != buf.data() || w.remaining_span().size() != 3 ||
+	     w.remaining_span().data() != buf.data() + 2 )
+		return false;
+
+	w.write_fixed32( 0x04030201u ); // overflows buffer (pos == 6 > 5)
+	if ( w.fits() || w.used_span().size() != 5 || !w.remaining_span().empty() )
+		return false;
+
+	// Counting-only writer has empty spans.
+	writer counter;
+	counter.write_varint( 42 );
+	if ( !counter.used_span().empty() || !counter.remaining_span().empty() )
+		return false;
+
+	constexpr std::array<uint8_t, 4> in{ 0x96, 0x01, 0x05, 0x06 };
+	reader r( in );
+	if ( !r.used_span().empty() || r.remaining_span().size() != 4 || r.remaining_span().data() != in.data() )
+		return false;
+
+	if ( r.read_varint() != 150 )
+		return false;
+	if ( r.used_span().size() != 2 || r.used_span().data() != in.data() || r.remaining_span().size() != 2 ||
+	     r.remaining_span().data() != in.data() + 2 )
+		return false;
+
+	r.fail( error::TRUNCATED );
+	return r.used_span().size() == 4 && r.remaining_span().empty();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static_assert( test_varint_size() );
@@ -383,6 +420,7 @@ static_assert( test_read_length() );
 static_assert( test_skip() );
 static_assert( test_reader_sticky() );
 static_assert( test_reader_absorb() );
+static_assert( test_writer_and_reader_spans() );
 
 } // namespace
 
@@ -391,6 +429,7 @@ int main()
 	const bool ok = test_varint_size() && test_zigzag() && test_write_varint() && test_write_fixed() &&
 	                test_write_key() && test_writer_full() && test_writer_exact() && test_write_text() &&
 	                test_writer_counts() && test_writer_saturates() && test_read_varint() && test_read_fixed() &&
-	                test_read_key() && test_read_length() && test_skip() && test_reader_sticky() && test_reader_absorb();
+	                test_read_key() && test_read_length() && test_skip() && test_reader_sticky() &&
+	                test_reader_absorb() && test_writer_and_reader_spans();
 	return ok ? 0 : 1;
 }
