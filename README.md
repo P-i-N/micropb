@@ -106,12 +106,12 @@ bool round_trip()
 
   | Configuration (Cortex-M4 / M33) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Extra 8-field type |
   | --- | ---: | ---: | ---: | ---: |
-  | **MicroPB (default)** | **3,610 B** | **4,298 B** | **4,978 B** | **42 B** |
-  | **MicroPB (`MICROPB_FAST`)** | **4,256 B** | **4,944 B** | **5,624 B** | **42 B** |
-  | NanoPB 0.4.9.3 — fixed-size (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,150 B | 6,414 B | 7,774 B | 85 B |
-  | NanoPB 0.4.9.3 — `pb_callback_t` (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,210 B | 6,606 B | 8,078 B | 92 B |
-  | NanoPB 0.4.9.3 — fixed-size (default flags) | 6,616 B | 7,880 B | 9,240 B | 85 B |
-  | NanoPB 0.4.9.3 — `pb_callback_t` (default flags) | 6,676 B | 8,072 B | 9,544 B | 92 B |
+  | **MicroPB (default)** | **3,610&nbsp;B** | **4,298&nbsp;B** | **4,978&nbsp;B** | **42&nbsp;B** |
+  | **MicroPB (`MICROPB_FAST`)** | **4,256&nbsp;B** | **4,944&nbsp;B** | **5,624&nbsp;B** | **42&nbsp;B** |
+  | NanoPB 0.4.9.3 — fixed-size (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,150&nbsp;B | 6,414&nbsp;B | 7,774&nbsp;B | 85&nbsp;B |
+  | NanoPB 0.4.9.3 — `pb_callback_t` (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,210&nbsp;B | 6,606&nbsp;B | 8,078&nbsp;B | 92&nbsp;B |
+  | NanoPB 0.4.9.3 — fixed-size (default flags) | 6,616&nbsp;B | 7,880&nbsp;B | 9,240&nbsp;B | 85&nbsp;B |
+  | NanoPB 0.4.9.3 — `pb_callback_t` (default flags) | 6,676&nbsp;B | 8,072&nbsp;B | 9,544&nbsp;B | 92&nbsp;B |
 
 * **Faster encode and decode than NanoPB:** measured on Linux x86-64 (`GCC 16.2.1 -O2`, median ns/op, byte-identical wire output) with `MICROPB_FAST` against NanoPB 0.4.9.3 (`PB_BUFFER_ONLY + PB_NO_ERRMSG`; default-mode, `-Os`, and NanoPB default-flag tables in [DETAILS.md](DETAILS.md#encode-and-decode-speed-comparison)):
 
