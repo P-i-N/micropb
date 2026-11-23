@@ -116,22 +116,26 @@ constexpr bool test_arena_empty()
 {
 	std::array<uint8_t, 16> storage{};
 	arena a{ std::span<uint8_t>( storage ) };
-	if ( a.used() != 0 || a.capacity() != 16 )
+	if ( a.used() != 0 || a.capacity() != 16 || !a.used_span().empty() || a.remaining_span().size() != 16 ||
+	     a.remaining_span().data() != storage.data() )
 		return false;
 	a.clear();
-	return a.used() == 0;
+	return a.used() == 0 && a.used_span().empty() && a.remaining_span().size() == 16;
 }
 
 bool test_arena_allocate()
 {
 	alignas( 8 ) std::array<uint8_t, 64> storage{};
 	arena a{ std::span<uint8_t>( storage ) };
-	if ( a.allocate( 3, 1 ) == nullptr || a.used() != 3 )
+	if ( a.allocate( 3, 1 ) == nullptr || a.used() != 3 || a.used_span().size() != 3 ||
+	     a.used_span().data() != storage.data() || a.remaining_span().size() != 61 ||
+	     a.remaining_span().data() != storage.data() + 3 )
 		return false;
 	void* p = a.allocate( 8, 8 );
 	if ( p == nullptr || reinterpret_cast<uintptr_t>( p ) % 8 != 0 )
 		return false;
-	return a.used() >= 3 + 8 && a.used() <= 3 + 7 + 8;
+	return a.used() >= 3 + 8 && a.used() <= 3 + 7 + 8 && a.used_span().size() == a.used() &&
+	       a.remaining_span().size() == storage.size() - a.used();
 }
 
 bool test_arena_odd_start()
@@ -152,10 +156,10 @@ bool test_arena_full()
 	arena a{ std::span<uint8_t>( storage ) };
 	if ( a.allocate( 16, 1 ) == nullptr )
 		return false;
-	if ( a.allocate( 1, 1 ) != nullptr || a.used() != 16 )
+	if ( a.allocate( 1, 1 ) != nullptr || a.used() != 16 || a.used_span().size() != 16 || !a.remaining_span().empty() )
 		return false;
 	a.clear();
-	return a.allocate( 16, 1 ) != nullptr;
+	return a.used_span().empty() && a.remaining_span().size() == 16 && a.allocate( 16, 1 ) != nullptr;
 }
 
 bool test_arena_overflow()

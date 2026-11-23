@@ -767,6 +767,12 @@ struct arena
 	[[nodiscard]] constexpr size_t used() const { return _used; }
 	[[nodiscard]] constexpr size_t capacity() const { return _storage.size(); }
 
+	/// Prefix of the storage that the arena has allocated, including alignment padding.
+	[[nodiscard]] constexpr std::span<uint8_t> used_span() const { return _storage.first( _used ); }
+
+	/// Unallocated suffix of the storage.
+	[[nodiscard]] constexpr std::span<uint8_t> remaining_span() const { return _storage.subspan( _used ); }
+
 	/// Frees all blocks. Each message that `decode` wrote with this arena is then not valid.
 	constexpr void clear() { _used = 0; }
 
