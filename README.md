@@ -181,6 +181,9 @@ template <typename T>
 [[nodiscard]] std::expected<size_t, pb::error> pb::encode( const T& msg, std::span<uint8_t> out );
 
 template <typename T>
+[[nodiscard]] std::expected<size_t, pb::error> pb::encode( const T& msg, pb::writer& sink );
+
+template <typename T>
 [[nodiscard]] std::expected<size_t, pb::error> pb::decode( std::span<const uint8_t> in, T& msg );
 
 template <typename T>

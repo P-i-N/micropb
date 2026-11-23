@@ -1281,13 +1281,20 @@ inline void emit_message( writer& sink, const value_desc& message, const void* o
 }
 
 MICROPB_ENTRY inline std::expected<size_t, error> encode(
-  const value_desc& message, const void* object, std::span<uint8_t> out )
+  const value_desc& message, const void* object, writer& sink )
 {
-	writer sink( out );
+	const size_t start = sink.size();
 	emit_message( sink, message, object );
 	if ( !sink.fits() )
 		return std::unexpected( error::BUFFER_TOO_SMALL );
-	return sink.size();
+	return sink.size() - start;
+}
+
+MICROPB_ENTRY inline std::expected<size_t, error> encode(
+  const value_desc& message, const void* object, std::span<uint8_t> out )
+{
+	writer sink( out );
+	return encode( message, object, sink );
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1928,6 +1935,15 @@ template <typename T>
 [[nodiscard]] size_t encoded_size( const T& msg )
 {
 	return detail::encoded_size( detail::value_descriptor<T>::value, &msg );
+}
+
+/// Encodes `msg` into `sink` in proto3 wire format and returns the number of
+/// bytes that this call wrote. Does not write past the span of `sink`. When
+/// `sink` does not fit, returns `error::BUFFER_TOO_SMALL`.
+template <typename T>
+[[nodiscard]] std::expected<size_t, error> encode( const T& msg, writer& sink )
+{
+	return detail::encode( detail::value_descriptor<T>::value, &msg, sink );
 }
 
 /// Encodes `msg` into `out` in proto3 wire format and returns the number of

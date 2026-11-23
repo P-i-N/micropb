@@ -478,6 +478,38 @@ bool test_encode_same_type_oneof()
 	       matches( fx, std::array<uint8_t, 5>{ 0x3d, 0xfe, 0xff, 0xff, 0xff } );
 }
 
+/// `pb::encode( msg, pb::writer& )` appends to an existing writer and returns the bytes written by that call.
+bool test_encode_writer()
+{
+	const ping a{ 1 };
+	const ping b{ 2 };
+	const size_t size_a = pb::encoded_size( a );
+	const size_t size_b = pb::encoded_size( b );
+
+	std::array<uint8_t, 16> buf{};
+	pb::writer sink( buf );
+	sink.write_varint( size_a );
+	const auto n1 = pb::encode( a, sink );
+	sink.write_varint( size_b );
+	const auto n2 = pb::encode( b, sink );
+	if ( !n1 || *n1 != size_a || !n2 || *n2 != size_b || !sink.fits() )
+		return false;
+
+	// [len=2, 0x08, 0x01, len=2, 0x08, 0x02]
+	constexpr std::array<uint8_t, 6> expected{ 0x02, 0x08, 0x01, 0x02, 0x08, 0x02 };
+	if ( sink.size() != expected.size() || !std::equal( expected.begin(), expected.end(), buf.begin() ) )
+		return false;
+
+	// Overflow returns `BUFFER_TOO_SMALL` without writing past the span.
+	std::array<uint8_t, 3> small{};
+	pb::writer tight( small );
+	tight.write_varint( size_a );
+	if ( !pb::encode( a, tight ) )
+		return false;
+	const auto fail = pb::encode( b, tight );
+	return !fail && fail.error() == pb::error::BUFFER_TOO_SMALL && !tight.fits();
+}
+
 } // namespace
 
 int main()
@@ -490,6 +522,6 @@ int main()
 	                test_encode_spans() && test_encode_too_small() && test_encode_order() &&
 	                test_encode_unsigned_enum() && test_encode_empty_message() && test_encode_deep() &&
 	                test_encode_each_short_buffer() && test_encode_span_and_bytes() && test_encode_fixed_extent_span() &&
-	                test_encode_const_nested() && test_encode_same_type_oneof();
+	                test_encode_const_nested() && test_encode_same_type_oneof() && test_encode_writer();
 	return ok ? 0 : 1;
 }
