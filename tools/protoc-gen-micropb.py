@@ -598,7 +598,7 @@ class Header:
                 group = [other for other in desc.field if oneof_of(other) == index]
                 name = desc.oneof_decl[index].name
                 types = [self.field_type(message, other, member_names) for other in group]
-                for position, other in enumerate(group):
+                for position, other in enumerate(group, 1):
                     const_name = ident(f"{name}_{other.name}")
                     lines.append(f"    static constexpr size_t {const_name} = {position};")
                 lines.append(f"    pb::oneof<{', '.join(types)}> {ident(name)} = {{}};")

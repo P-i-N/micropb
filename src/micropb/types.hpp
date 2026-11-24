@@ -107,16 +107,14 @@ struct type_at<I, Head, Tail...> : type_at<I - 1, Tail...>
 template <typename T, typename... Ts>
 inline constexpr size_t type_count_v = ( static_cast<size_t>( std::is_same_v<T, Ts> ) + ... + 0 );
 
-inline constexpr size_t oneof_npos = size_t( -1 );
-
 template <typename T, typename... Ts>
 [[nodiscard]] consteval size_t find_type_index()
 {
 	constexpr bool match[]{ std::is_same_v<T, Ts>... };
 	for ( size_t i = 0; i < sizeof...( Ts ); ++i )
 		if ( match[i] )
-			return i;
-	return oneof_npos;
+			return i + 1;
+	return 0;
 }
 
 template <typename U, typename... Ts>
@@ -128,20 +126,20 @@ template <typename U, typename... Ts>
 	else if constexpr ( type_count_v<D, Ts...> == 0 )
 	{
 		constexpr bool conv[]{ ( !std::is_same_v<std::remove_cv_t<Ts>, bool> && std::is_convertible_v<U, Ts> )... };
-		size_t found = oneof_npos;
+		size_t found = 0;
 		for ( size_t i = 0; i < sizeof...( Ts ); ++i )
 		{
 			if ( conv[i] )
 			{
-				if ( found != oneof_npos )
-					return oneof_npos;
-				found = i;
+				if ( found != 0 )
+					return 0;
+				found = i + 1;
 			}
 		}
 		return found;
 	}
 	else
-		return oneof_npos;
+		return 0;
 }
 
 template <typename... Ts>
@@ -601,9 +599,9 @@ private:
 	count_type _count = 0;
 };
 
-/// Tagged union for proto3 `oneof` fields. Alternatives use 0-based indices
-/// `0..sizeof...(Ts) - 1` in declaration order; `index()` returns `npos` when
-/// unset. Does not allocate and requires no `std::monostate`.
+/// Tagged union for proto3 `oneof` fields. Alternatives use 1-based indices
+/// `1..sizeof...(Ts)` in declaration order; `index()` returns `0` when unset.
+/// Does not allocate and requires no `std::monostate`.
 template <typename... Ts>
 struct oneof
 {
@@ -612,40 +610,39 @@ struct oneof
 	               "pb::oneof alternatives must be trivially destructible" );
 
 	static constexpr size_t alternative_count = sizeof...( Ts );
-	static constexpr size_t npos = detail::oneof_npos;
 
 	template <size_t I>
-		requires( I < sizeof...( Ts ) )
-	using alternative_t = typename detail::type_at<I, Ts...>::type;
+		requires( I >= 1 && I <= sizeof...( Ts ) )
+	using alternative_t = typename detail::type_at<I - 1, Ts...>::type;
 
 	constexpr oneof() noexcept = default;
 
 	template <size_t I, typename... Args>
-		requires( I < sizeof...( Ts ) )
+		requires( I >= 1 && I <= sizeof...( Ts ) )
 	constexpr explicit oneof( std::in_place_index_t<I>, Args&&... args )
 	{
 		emplace<I>( std::forward<Args>( args )... );
 	}
 
 	template <typename U>
-		requires( !std::is_same_v<std::decay_t<U>, oneof> && detail::find_convertible_index<U, Ts...>() != npos )
+		requires( !std::is_same_v<std::decay_t<U>, oneof> && detail::find_convertible_index<U, Ts...>() != 0 )
 	constexpr oneof( U&& value )
 	{
 		emplace<detail::find_convertible_index<U, Ts...>()>( std::forward<U>( value ) );
 	}
 
-	[[nodiscard]] constexpr size_t index() const noexcept { return _index == 0 ? npos : size_t{ _index - 1u }; }
+	[[nodiscard]] constexpr size_t index() const noexcept { return _index; }
 	[[nodiscard]] constexpr bool has_value() const noexcept { return _index != 0; }
 	[[nodiscard]] constexpr explicit operator bool() const noexcept { return _index != 0; }
 
 	constexpr void reset() noexcept { _index = 0; }
 
 	template <size_t I, typename... Args>
-		requires( I < sizeof...( Ts ) )
+		requires( I >= 1 && I <= sizeof...( Ts ) )
 	constexpr alternative_t<I>& emplace( Args&&... args )
 	{
-		alternative_t<I>& slot = _storage.template emplace_at<I>( std::forward<Args>( args )... );
-		_index = static_cast<index_type>( I + 1 );
+		alternative_t<I>& slot = _storage.template emplace_at<I - 1>( std::forward<Args>( args )... );
+		_index = static_cast<index_type>( I );
 		return slot;
 	}
 
@@ -657,17 +654,17 @@ struct oneof
 	}
 
 	template <size_t I>
-		requires( I < sizeof...( Ts ) )
+		requires( I >= 1 && I <= sizeof...( Ts ) )
 	[[nodiscard]] constexpr alternative_t<I>* get_if() noexcept
 	{
-		return _index == I + 1 ? &_storage.template at<I>() : nullptr;
+		return _index == I ? &_storage.template at<I - 1>() : nullptr;
 	}
 
 	template <size_t I>
-		requires( I < sizeof...( Ts ) )
+		requires( I >= 1 && I <= sizeof...( Ts ) )
 	[[nodiscard]] constexpr const alternative_t<I>* get_if() const noexcept
 	{
-		return _index == I + 1 ? &_storage.template at<I>() : nullptr;
+		return _index == I ? &_storage.template at<I - 1>() : nullptr;
 	}
 
 	template <typename T>
@@ -685,10 +682,10 @@ struct oneof
 	}
 
 	template <size_t I>
-		requires( I < sizeof...( Ts ) )
+		requires( I >= 1 && I <= sizeof...( Ts ) )
 	[[nodiscard]] constexpr bool holds() const noexcept
 	{
-		return _index == I + 1;
+		return _index == I;
 	}
 
 	template <typename T>

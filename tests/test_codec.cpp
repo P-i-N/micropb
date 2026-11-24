@@ -192,7 +192,7 @@ bool test_variant_accessor()
 		return false;
 
 	d::set_oneof_index( desc, &value, 0 );
-	return !value.has_value() && value.index() == choice::npos;
+	return !value.has_value() && value.index() == 0;
 }
 
 bool test_sequence_accessor()
@@ -628,7 +628,7 @@ bool test_wide_entries()
 	static_assert( wt::entry_count == 38 && wt::layout.words_n == 32 * 2 + 1 + 5 * 5 + 1 );
 
 	wide_msg tx{};
-	tx.first.emplace<32>( alt_tag<32>{ 42 } );
+	tx.first.emplace<33>( alt_tag<32>{ 42 } );
 	tx.second = 3.5;
 	tx.far_scalar = 777;
 	tx.max_tag_scalar = 999;
@@ -639,12 +639,12 @@ bool test_wide_entries()
 		return false;
 
 	wide_msg rx{};
-	rx.first.emplace<0>( alt_tag<0>{ 9 } );
+	rx.first.emplace<1>( alt_tag<0>{ 9 } );
 	rx.second = int32_t{ 5 };
 	if ( !pb::decode( std::span<const uint8_t>( wire ).first( *n ), rx ) )
 		return false;
 
-	const auto* a33 = pb::get_if<32>( &rx.first );
+	const auto* a33 = pb::get_if<33>( &rx.first );
 	const auto* s2 = pb::get_if<double>( &rx.second );
 	return a33 != nullptr && a33->v == 42 && s2 != nullptr && *s2 == 3.5 && rx.far_scalar == 777 &&
 	       rx.max_tag_scalar == 999 && rx.pad.empty();

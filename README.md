@@ -52,8 +52,8 @@ struct Reading
 	pb::repeated<float, 4> channels = {};
 	pb::bytes<8> token = {};
 	std::array<uint8_t, 6> mac = {};
-	static constexpr size_t detail_uptime_s = 0;
-	static constexpr size_t detail_fault = 1;
+	static constexpr size_t detail_uptime_s = 1;
+	static constexpr size_t detail_fault = 2;
 	pb::oneof<uint32_t, std::string_view> detail = {};
 };
 

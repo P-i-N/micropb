@@ -1369,33 +1369,33 @@ bool test_same_type_oneof()
 	constexpr auto info_wire = std::to_array<uint8_t>( { 0x08, 0x07, 0x1a, 0x02, 'o', 'k' } );
 	constexpr auto err_then_html =
 	  std::to_array<uint8_t>( { 0x12, 0x03, 'b', 'a', 'd', 0x22, 0x03, '<', 'b', '>' } );
-	if ( !decode( bytes_of( info_wire ), rx ) || rx.id != 7 || rx.msg.index() != 1 ||
-	     *pb::get_if<1>( &rx.msg ) != "ok" )
+	if ( !decode( bytes_of( info_wire ), rx ) || rx.id != 7 || rx.msg.index() != 2 ||
+	     *pb::get_if<2>( &rx.msg ) != "ok" )
 		return false;
-	if ( !decode( bytes_of( err_then_html ), rx ) || rx.msg.index() != 2 || *pb::get_if<2>( &rx.msg ) != "<b>" )
+	if ( !decode( bytes_of( err_then_html ), rx ) || rx.msg.index() != 3 || *pb::get_if<3>( &rx.msg ) != "<b>" )
 		return false;
 
 	constexpr auto raw_wire =
 	  std::to_array<uint8_t>( { 0x28, 0xfe, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01 } );
 	constexpr auto zz_wire = std::to_array<uint8_t>( { 0x30, 0x03 } );
 	constexpr auto fx_wire = std::to_array<uint8_t>( { 0x3d, 0xfe, 0xff, 0xff, 0xff } );
-	if ( !decode( bytes_of( raw_wire ), rx ) || rx.delta.index() != 0 || *pb::get_if<0>( &rx.delta ) != -2 )
+	if ( !decode( bytes_of( raw_wire ), rx ) || rx.delta.index() != 1 || *pb::get_if<1>( &rx.delta ) != -2 )
 		return false;
-	if ( !decode( bytes_of( zz_wire ), rx ) || rx.delta.index() != 1 || *pb::get_if<1>( &rx.delta ) != -2 )
+	if ( !decode( bytes_of( zz_wire ), rx ) || rx.delta.index() != 2 || *pb::get_if<2>( &rx.delta ) != -2 )
 		return false;
-	if ( !decode( bytes_of( fx_wire ), rx ) || rx.delta.index() != 2 || *pb::get_if<2>( &rx.delta ) != -2 )
+	if ( !decode( bytes_of( fx_wire ), rx ) || rx.delta.index() != 3 || *pb::get_if<3>( &rx.delta ) != -2 )
 		return false;
 
-	// Two records of tag 8 merge into alternative 0; tag 8 followed by tag 9 switches to alternative 1 and resets x.
+	// Two records of tag 8 merge into alternative 1; tag 8 followed by tag 9 switches to alternative 2 and resets x.
 	constexpr auto same_tag_merge =
 	  std::to_array<uint8_t>( { 0x42, 0x02, 0x08, 0x05, 0x42, 0x04, 0x12, 0x02, 'h', 'i' } );
 	constexpr auto diff_tag_replace =
 	  std::to_array<uint8_t>( { 0x42, 0x02, 0x08, 0x05, 0x4a, 0x04, 0x12, 0x02, 'h', 'i' } );
-	if ( !decode( bytes_of( same_tag_merge ), rx ) || rx.sub.index() != 0 || pb::get_if<0>( &rx.sub )->x != 5 ||
-	     pb::get_if<0>( &rx.sub )->label != "hi" )
-		return false;
-	if ( !decode( bytes_of( diff_tag_replace ), rx ) || rx.sub.index() != 1 || pb::get_if<1>( &rx.sub )->x != 0 ||
+	if ( !decode( bytes_of( same_tag_merge ), rx ) || rx.sub.index() != 1 || pb::get_if<1>( &rx.sub )->x != 5 ||
 	     pb::get_if<1>( &rx.sub )->label != "hi" )
+		return false;
+	if ( !decode( bytes_of( diff_tag_replace ), rx ) || rx.sub.index() != 2 || pb::get_if<2>( &rx.sub )->x != 0 ||
+	     pb::get_if<2>( &rx.sub )->label != "hi" )
 		return false;
 	return true;
 }

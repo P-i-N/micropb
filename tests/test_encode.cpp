@@ -449,7 +449,7 @@ bool test_encode_const_nested()
 	constexpr std::array<uint8_t, 16> expected{ 0x0a, 0x06, 0x0a, 0x02, 0x08, 0x01, 0x10, 0x02,
 	                                                 0x12, 0x06, 0x0a, 0x02, 0x08, 0x03, 0x10, 0x04 };
 	constexpr std::array<uint8_t, 7> expected_elements{ 0x0a, 0x03, 1, 2, 3, 0x10, 0x05 };
-	const const_elements elements{ { 1, 2, 3 }, pb::oneof<const int32_t>( std::in_place_index<0>, 5 ) };
+	const const_elements elements{ { 1, 2, 3 }, pb::oneof<const int32_t>( std::in_place_index<1>, 5 ) };
 	return matches( const_holder{ const_middle{ { 1, {} }, 2 }, const_middle{ { 3, {} }, 4 } }, expected ) &&
 	       matches( elements, expected_elements );
 }
@@ -457,18 +457,18 @@ bool test_encode_const_nested()
 /// Alternatives of the same C++ type in one `pb::oneof` encode with their distinct field numbers and encodings.
 bool test_encode_same_type_oneof()
 {
-	const same_type_oneof err{ .id = 7, .msg{ std::in_place_index<0>, "bad" } };
+	const same_type_oneof err{ .id = 7, .msg{ std::in_place_index<1>, "bad" } };
 	same_type_oneof info{ .id = 7 };
-	info.msg.emplace<1>( "ok" );
+	info.msg.emplace<2>( "ok" );
 	same_type_oneof html{ .id = 7 };
-	html.msg.emplace<2>( "<b>" );
+	html.msg.emplace<3>( "<b>" );
 
 	same_type_oneof raw{};
-	raw.delta.emplace<0>( -2 );
+	raw.delta.emplace<1>( -2 );
 	same_type_oneof zz{};
-	zz.delta.emplace<1>( -2 );
+	zz.delta.emplace<2>( -2 );
 	same_type_oneof fx{};
-	fx.delta.emplace<2>( -2 );
+	fx.delta.emplace<3>( -2 );
 
 	return matches( err, std::array<uint8_t, 7>{ 0x08, 0x07, 0x12, 0x03, 0x62, 0x61, 0x64 } ) &&
 	       matches( info, std::array<uint8_t, 6>{ 0x08, 0x07, 0x1a, 0x02, 0x6f, 0x6b } ) &&
