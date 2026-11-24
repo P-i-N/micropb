@@ -42,6 +42,7 @@ template <typename T>
 
 * `encode` writes one proto3 message into `out` in ascending field-number order and returns the byte count written.
 * It never writes past `out`. If `out` is too short, it returns `pb::error::BUFFER_TOO_SMALL`, and the partial contents of `out` are not valid.
+* `encode(msg, sink)` appends one message into an existing `pb::writer` and returns the byte count that the call wrote. `sink.used_span()` and `sink.remaining_span()` return the written prefix (clamped to buffer size) and unused suffix of `sink`; `pb::reader` provides matching `used_span()` and `remaining_span()` accessors.
 * `encoded_size` computes the exact byte count using the same code path without writing bytes.
 
 ### Decode rules
@@ -147,7 +148,7 @@ void handle_log( std::span<uint8_t> wire )
 ### `pb::arena` and scratch buffer details
 
 * Before allocating, `decode` scans the remaining message bytes to count all elements of that `std::span<const T>` field, then allocates one aligned contiguous block.
-* Multiple `decode` calls can share one `pb::arena`. `memory.clear()` resets usage to 0 and invalidates previously decoded spans.
+* Multiple `decode` calls can share one `pb::arena`. `memory.used_span()` and `memory.remaining_span()` return the allocated prefix and unallocated suffix. `memory.clear()` resets usage to 0 and invalidates previously decoded spans.
 * If space is insufficient, `decode` returns `pb::error::ARENA_FULL` without writing out of bounds.
 * If a non-canonical sender splits one nested submessage across multiple wire records and appends repeated elements in both, `decode` allocates a larger block and copies prior elements; the earlier block stays used until `clear()`.
 * Element types in `std::span<const T>` must be trivially copyable and trivially destructible (`pb: span_element_trivial`). `pb::string<N>`, `pb::bytes<N>`, and `pb::repeated<T, N>` (for trivially copyable `T`) satisfy this requirement.
