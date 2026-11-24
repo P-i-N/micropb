@@ -2,7 +2,9 @@
 #include "vectors/messages.hpp"
 #include "vectors/vectors.hpp"
 
+#ifndef MICROPB_WIDE_TABLES
 #define MICROPB_WIDE_TABLES
+#endif
 #include <algorithm>
 #include <array>
 #include <bit>

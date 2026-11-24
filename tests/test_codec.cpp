@@ -1,4 +1,6 @@
+#ifndef MICROPB_WIDE_TABLES
 #define MICROPB_WIDE_TABLES
+#endif
 #include <array>
 #include <cstring>
 #include <optional>
