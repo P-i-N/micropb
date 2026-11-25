@@ -42,7 +42,7 @@ template <typename T>
 
 * `encode` writes one proto3 message into `out` in ascending field-number order and returns the byte count written.
 * It never writes past `out`. If `out` is too short, it returns `pb::error::BUFFER_TOO_SMALL`, and the partial contents of `out` are not valid.
-* `encode(msg, sink)` appends one message into an existing `pb::writer` and returns the byte count that the call wrote. `sink.used_span()` and `sink.remaining_span()` return the written prefix (clamped to buffer size) and unused suffix of `sink`; `pb::reader` provides matching `used_span()` and `remaining_span()` accessors.
+* `encode(msg, sink)` appends one message into an existing `pb::writer` and returns the byte count that the call wrote. `sink.used_span()` and `sink.remaining_span()` return the written prefix (clamped to buffer size) and unused suffix of `sink`; `pb::reader` provides matching `used_span()` and `remaining_span()` accessors, plus typed `read_varint(T&)`, `read_zigzag(T&)`, `read_fixed(T&)`, `read_bytes(std::span<const uint8_t>&)`, and `read_string(std::string_view&)` helpers that return `bool`, check integer bounds (setting `pb::error::OUT_OF_RANGE`), and leave `out` unchanged on failure.
 * `encoded_size` computes the exact byte count using the same code path without writing bytes.
 
 ### Decode rules
@@ -198,6 +198,7 @@ Inline `.proto` annotations such as `[(nanopb).max_size = 6]` are not read. Unkn
 | `INVALID_TAG` | `decode` | Field number is 0 or exceeds 2^29 - 1. |
 | `CAPACITY_EXCEEDED` | `decode` | Input has more elements or bytes than `pb::repeated`, `pb::bytes`, `pb::string`, or `std::array` holds. |
 | `ARENA_FULL` | `decode` | Scratch memory / `pb::arena` lacks space for a `std::span<const T>` repeated field. |
+| `OUT_OF_RANGE` | `pb::reader` | Typed `read_varint(T&)` or `read_zigzag(T&)` value is outside the range of `T` (`pb::decode` never returns this; it truncates narrow integers per proto3). |
 
 ## Compile-time checks
 

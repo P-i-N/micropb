@@ -31,6 +31,8 @@ enum class error : uint8_t
 	CAPACITY_EXCEEDED,
 	/// decode: the arena has no space for the items of a repeated field.
 	ARENA_FULL,
+	/// reader: a varint or zigzag value is outside the range of the target type.
+	OUT_OF_RANGE,
 };
 
 /// Wire types of proto3 that this library supports. It does not support the group types (3, 4).

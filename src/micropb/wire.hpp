@@ -4,9 +4,11 @@
 #include <bit>
 #include <cstring>
 #include <expected>
+#include <limits>
 #include <span>
 #include <stddef.h>
 #include <stdint.h>
+#include <string_view>
 #include <type_traits>
 
 #include <micropb/types.hpp>
@@ -18,6 +20,19 @@ namespace pb {
 namespace detail {
 /// Largest field number of proto3.
 inline constexpr uint32_t max_field_number = ( 1u << 29 ) - 1;
+
+template <typename T, typename... U>
+inline constexpr bool is_one_of = ( std::is_same_v<T, U> || ... );
+
+/// A standard integer type: any integer type by size and sign, but not `bool` and not the character types.
+/// `int32_t` is `int` on a PC and `long` on `arm-none-eabi`. The rule accepts both.
+template <typename T>
+[[nodiscard]] consteval bool is_standard_integer()
+{
+	return std::is_integral_v<T> && !std::is_volatile_v<T> &&
+	       ( sizeof( T ) == 1 || sizeof( T ) == 2 || sizeof( T ) == 4 || sizeof( T ) == 8 ) &&
+	       !is_one_of<std::remove_cv_t<T>, bool, char, wchar_t, char8_t, char16_t, char32_t>;
+}
 
 /// Number of bytes that `value` uses as a varint (1 to 10).
 [[nodiscard]] constexpr size_t varint_size( uint64_t value )
@@ -266,6 +281,131 @@ struct reader
 			return {};
 		}
 		return { static_cast<uint32_t>( number ), static_cast<wire_type>( type ) };
+	}
+
+	/// Reads a varint into `out` and checks that it fits in `T`.
+	/// Sets `error::OUT_OF_RANGE` when the value does not fit. Leaves `out` unchanged on failure.
+	template <typename T>
+		requires( !std::is_const_v<T> &&
+		          ( std::is_same_v<T, bool> || detail::is_standard_integer<T>() ||
+		            ( std::is_enum_v<T> && detail::is_standard_integer<std::underlying_type_t<T>>() ) ) )
+	[[nodiscard]] constexpr bool read_varint( T& out )
+	{
+		if constexpr ( std::is_enum_v<T> )
+		{
+			std::underlying_type_t<T> value{};
+			if ( !read_varint( value ) )
+				return false;
+			out = static_cast<T>( value );
+			return true;
+		}
+		else
+		{
+			const uint64_t raw = read_varint();
+			if ( _failed )
+				return false;
+
+			if constexpr ( std::is_same_v<T, bool> )
+			{
+				out = raw != 0;
+				return true;
+			}
+			else if constexpr ( std::is_unsigned_v<T> )
+			{
+				if constexpr ( sizeof( T ) < sizeof( uint64_t ) )
+				{
+					if ( raw > std::numeric_limits<T>::max() )
+					{
+						fail( error::OUT_OF_RANGE );
+						return false;
+					}
+				}
+				out = static_cast<T>( raw );
+				return true;
+			}
+			else
+			{
+				const int64_t value = static_cast<int64_t>( raw );
+				if constexpr ( sizeof( T ) < sizeof( int64_t ) )
+				{
+					if ( value < std::numeric_limits<T>::min() || value > std::numeric_limits<T>::max() )
+					{
+						fail( error::OUT_OF_RANGE );
+						return false;
+					}
+				}
+				out = static_cast<T>( value );
+				return true;
+			}
+		}
+	}
+
+	/// Reads a ZigZag-encoded varint into `out` and checks that it fits in `T`.
+	/// Sets `error::OUT_OF_RANGE` when the value does not fit. Leaves `out` unchanged on failure.
+	template <typename T>
+		requires( !std::is_const_v<T> && detail::is_standard_integer<T>() && std::is_signed_v<T> )
+	[[nodiscard]] constexpr bool read_zigzag( T& out )
+	{
+		const uint64_t raw = read_varint();
+		if ( _failed )
+			return false;
+
+		const int64_t value = detail::zigzag_decode( raw );
+		if constexpr ( sizeof( T ) < sizeof( int64_t ) )
+		{
+			if ( value < std::numeric_limits<T>::min() || value > std::numeric_limits<T>::max() )
+			{
+				fail( error::OUT_OF_RANGE );
+				return false;
+			}
+		}
+		out = static_cast<T>( value );
+		return true;
+	}
+
+	/// Reads a 4- or 8-byte little-endian fixed value into `out`. Leaves `out` unchanged on failure.
+	template <typename T>
+		requires( !std::is_const_v<T> &&
+		          ( detail::is_one_of<T, float, double> ||
+		            ( detail::is_standard_integer<T>() && ( sizeof( T ) == 4 || sizeof( T ) == 8 ) ) ) )
+	[[nodiscard]] constexpr bool read_fixed( T& out )
+	{
+		if constexpr ( sizeof( T ) == 4 )
+		{
+			const uint32_t raw = read_fixed32();
+			if ( _failed )
+				return false;
+			out = std::bit_cast<T>( raw );
+			return true;
+		}
+		else
+		{
+			const uint64_t raw = read_fixed64();
+			if ( _failed )
+				return false;
+			out = std::bit_cast<T>( raw );
+			return true;
+		}
+	}
+
+	/// Reads a length-delimited byte view into `out`. Leaves `out` unchanged on failure.
+	[[nodiscard]] constexpr bool read_bytes( std::span<const uint8_t>& out )
+	{
+		const auto bytes = read_length_delimited();
+		if ( _failed )
+			return false;
+		out = bytes;
+		return true;
+	}
+
+	/// Reads a length-delimited string view into `out`. Leaves `out` unchanged on failure.
+	[[nodiscard]] bool read_string( std::string_view& out )
+	{
+		const auto bytes = read_length_delimited();
+		if ( _failed )
+			return false;
+		out = { reinterpret_cast<const char*>( bytes.data() ), bytes.size() };
+		return true;
 	}
 
 	constexpr void skip( wire_type type )

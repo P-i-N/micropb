@@ -33,9 +33,6 @@ namespace detail {
 
 inline constexpr size_t max_offset = 65535;
 
-template <typename T, typename... U>
-inline constexpr bool is_one_of = ( std::is_same_v<T, U> || ... );
-
 template <typename T>
 inline constexpr bool is_optional = false;
 template <typename T>
@@ -138,16 +135,6 @@ struct sequence_traits<bytes<N>>
 /// Element type of a sequence type.
 template <typename T>
 using element_t = typename sequence_traits<T>::element;
-
-/// A standard integer type: any integer type by size and sign, but not `bool` and not the character types.
-/// `int32_t` is `int` on a PC and `long` on `arm-none-eabi`. The rule accepts both.
-template <typename T>
-[[nodiscard]] consteval bool is_standard_integer()
-{
-	return std::is_integral_v<T> && !std::is_volatile_v<T> &&
-	       ( sizeof( T ) == 1 || sizeof( T ) == 2 || sizeof( T ) == 4 || sizeof( T ) == 8 ) &&
-	       !is_one_of<std::remove_cv_t<T>, bool, char, wchar_t, char8_t, char16_t, char32_t>;
-}
 
 template <typename T>
 [[nodiscard]] consteval bool is_scalar()

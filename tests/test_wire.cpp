@@ -401,6 +401,218 @@ constexpr bool test_writer_and_reader_spans()
 	return r.used_span().size() == 4 && r.remaining_span().empty();
 }
 
+enum class signed_mode : int8_t
+{
+	NEG = -1,
+	ZERO = 0,
+	POS = 1,
+};
+
+enum class unsigned_mode : uint8_t
+{
+	ZERO = 0,
+	MAX = 255,
+};
+
+template <typename T>
+concept can_read_varint = requires( reader& r, T& out ) { r.read_varint( out ); };
+
+template <typename T>
+concept can_read_zigzag = requires( reader& r, T& out ) { r.read_zigzag( out ); };
+
+template <typename T>
+concept can_read_fixed = requires( reader& r, T& out ) { r.read_fixed( out ); };
+
+static_assert( can_read_varint<uint8_t> && can_read_varint<int32_t> && can_read_varint<bool> &&
+               can_read_varint<signed_mode> && can_read_varint<unsigned_mode> );
+static_assert( !can_read_varint<const uint32_t> && !can_read_varint<float> && !can_read_varint<char> );
+static_assert( can_read_zigzag<int8_t> && can_read_zigzag<int32_t> && can_read_zigzag<int64_t> );
+static_assert( !can_read_zigzag<uint32_t> && !can_read_zigzag<bool> && !can_read_zigzag<float> );
+static_assert( can_read_fixed<uint32_t> && can_read_fixed<int32_t> && can_read_fixed<uint64_t> &&
+               can_read_fixed<int64_t> && can_read_fixed<float> && can_read_fixed<double> );
+static_assert( !can_read_fixed<uint16_t> && !can_read_fixed<int8_t> && !can_read_fixed<bool> );
+
+template <typename T>
+constexpr bool varint_round_trip( uint64_t raw, T expected )
+{
+	std::array<uint8_t, 10> buf{};
+	writer w( buf );
+	w.write_varint( raw );
+	reader r( w.used_span() );
+	T out{};
+	return r.read_varint( out ) && out == expected && !r.failed() && r.empty();
+}
+
+template <typename T>
+constexpr bool varint_fails( uint64_t raw, error expected_error, T sentinel )
+{
+	std::array<uint8_t, 10> buf{};
+	writer w( buf );
+	w.write_varint( raw );
+	reader r( w.used_span() );
+	T out = sentinel;
+	return !r.read_varint( out ) && out == sentinel && fails_with( r, expected_error );
+}
+
+constexpr bool test_read_varint_typed()
+{
+	// Unsigned limits and out-of-range.
+	if ( !varint_round_trip<uint8_t>( 0, 0 ) || !varint_round_trip<uint8_t>( 255, 255 ) ||
+	     !varint_fails<uint8_t>( 256, error::OUT_OF_RANGE, 42 ) )
+		return false;
+	if ( !varint_round_trip<uint16_t>( 65535, 65535 ) || !varint_fails<uint16_t>( 65536, error::OUT_OF_RANGE, 42 ) )
+		return false;
+	if ( !varint_round_trip<uint32_t>( 0xFFFFFFFFu, 0xFFFFFFFFu ) ||
+	     !varint_fails<uint32_t>( 0x100000000ull, error::OUT_OF_RANGE, 42 ) )
+		return false;
+	if ( !varint_round_trip<uint64_t>( u64_max, u64_max ) )
+		return false;
+
+	// Signed limits (proto3 sign-extends negative varints to 64 bits).
+	if ( !varint_round_trip<int8_t>( 127, 127 ) ||
+	     !varint_round_trip<int8_t>( static_cast<uint64_t>( int64_t{ -128 } ), -128 ) ||
+	     !varint_round_trip<int8_t>( u64_max, -1 ) || !varint_fails<int8_t>( 128, error::OUT_OF_RANGE, 7 ) ||
+	     !varint_fails<int8_t>( static_cast<uint64_t>( int64_t{ -129 } ), error::OUT_OF_RANGE, 7 ) )
+		return false;
+	if ( !varint_round_trip<int32_t>( 0x7FFFFFFFu, std::numeric_limits<int32_t>::max() ) ||
+	     !varint_round_trip<int32_t>( static_cast<uint64_t>( int64_t{ std::numeric_limits<int32_t>::min() } ),
+	                                  std::numeric_limits<int32_t>::min() ) ||
+	     !varint_round_trip<int32_t>( u64_max, -1 ) ||
+	     !varint_fails<int32_t>( 0x80000000ull, error::OUT_OF_RANGE, 99 ) ||
+	     !varint_fails<int32_t>( static_cast<uint64_t>( int64_t{ std::numeric_limits<int32_t>::min() } - 1 ),
+	                             error::OUT_OF_RANGE,
+	                             99 ) )
+		return false;
+	if ( !varint_round_trip<int64_t>( static_cast<uint64_t>( std::numeric_limits<int64_t>::min() ),
+	                                  std::numeric_limits<int64_t>::min() ) ||
+	     !varint_round_trip<int64_t>( static_cast<uint64_t>( std::numeric_limits<int64_t>::max() ),
+	                                  std::numeric_limits<int64_t>::max() ) )
+		return false;
+
+	// Bool follows proto3: 0 is false, any non-zero is true.
+	if ( !varint_round_trip<bool>( 0, false ) || !varint_round_trip<bool>( 1, true ) ||
+	     !varint_round_trip<bool>( 2, true ) || !varint_round_trip<bool>( u64_max, true ) )
+		return false;
+
+	// Enums check underlying type range.
+	if ( !varint_round_trip<signed_mode>( u64_max, signed_mode::NEG ) ||
+	     !varint_fails<signed_mode>( 128, error::OUT_OF_RANGE, signed_mode::POS ) ||
+	     !varint_round_trip<unsigned_mode>( 255, unsigned_mode::MAX ) ||
+	     !varint_fails<unsigned_mode>( 256, error::OUT_OF_RANGE, unsigned_mode::ZERO ) )
+		return false;
+
+	// Truncated and already-failed readers leave `out` unchanged and keep the first error.
+	constexpr std::array<uint8_t, 1> cut{ 0x80 };
+	reader r( cut );
+	uint32_t u = 123;
+	if ( r.read_varint( u ) || u != 123 || !fails_with( r, error::TRUNCATED ) )
+		return false;
+	bool b = true;
+	return !r.read_varint( b ) && b && fails_with( r, error::TRUNCATED );
+}
+
+constexpr bool test_read_zigzag_typed()
+{
+	auto round_trip = []<typename T>( int64_t wire_value, T expected ) {
+		std::array<uint8_t, 10> buf{};
+		writer w( buf );
+		w.write_varint( detail::zigzag_encode( wire_value ) );
+		reader r( w.used_span() );
+		T out{};
+		return r.read_zigzag( out ) && out == expected && !r.failed() && r.empty();
+	};
+	auto fails_range = []<typename T>( int64_t wire_value, T sentinel ) {
+		std::array<uint8_t, 10> buf{};
+		writer w( buf );
+		w.write_varint( detail::zigzag_encode( wire_value ) );
+		reader r( w.used_span() );
+		T out = sentinel;
+		return !r.read_zigzag( out ) && out == sentinel && fails_with( r, error::OUT_OF_RANGE );
+	};
+
+	if ( !round_trip( 0, int8_t{ 0 } ) || !round_trip( -1, int8_t{ -1 } ) || !round_trip( 127, int8_t{ 127 } ) ||
+	     !round_trip( -128, int8_t{ -128 } ) || !fails_range( 128, int8_t{ 5 } ) || !fails_range( -129, int8_t{ 5 } ) )
+		return false;
+
+	constexpr auto i32_max = std::numeric_limits<int32_t>::max();
+	constexpr auto i32_min = std::numeric_limits<int32_t>::min();
+	if ( !round_trip( i32_max, i32_max ) || !round_trip( i32_min, i32_min ) ||
+	     !fails_range( int64_t{ i32_max } + 1, int32_t{ 7 } ) || !fails_range( int64_t{ i32_min } - 1, int32_t{ 7 } ) )
+		return false;
+
+	constexpr auto i64_max = std::numeric_limits<int64_t>::max();
+	constexpr auto i64_min = std::numeric_limits<int64_t>::min();
+	if ( !round_trip( i64_max, i64_max ) || !round_trip( i64_min, i64_min ) )
+		return false;
+
+	constexpr std::array<uint8_t, 1> cut{ 0x80 };
+	reader r( cut );
+	int32_t out = 55;
+	return !r.read_zigzag( out ) && out == 55 && fails_with( r, error::TRUNCATED );
+}
+
+constexpr bool test_read_fixed_typed()
+{
+	std::array<uint8_t, 36> buf{};
+	writer w( buf );
+	w.write_fixed32( 0x12345678u );
+	w.write_fixed32( std::bit_cast<uint32_t>( int32_t{ -42 } ) );
+	w.write_fixed32( std::bit_cast<uint32_t>( -1.5f ) );
+	w.write_fixed64( 0x8000000000000001ull );
+	w.write_fixed64( std::bit_cast<uint64_t>( int64_t{ -99 } ) );
+	w.write_fixed64( std::bit_cast<uint64_t>( 3.25 ) );
+
+	reader r( w.used_span() );
+	uint32_t u32 = 0;
+	int32_t i32 = 0;
+	float f = 0.0f;
+	uint64_t u64 = 0;
+	int64_t i64 = 0;
+	double d = 0.0;
+	if ( !r.read_fixed( u32 ) || !r.read_fixed( i32 ) || !r.read_fixed( f ) || !r.read_fixed( u64 ) ||
+	     !r.read_fixed( i64 ) || !r.read_fixed( d ) )
+		return false;
+	if ( u32 != 0x12345678u || i32 != -42 || f != -1.5f || u64 != 0x8000000000000001ull || i64 != -99 || d != 3.25 ||
+	     !r.empty() )
+		return false;
+
+	// Truncated leaves `out` unchanged.
+	uint32_t sentinel32 = 77;
+	double sentinel64 = 9.5;
+	return !r.read_fixed( sentinel32 ) && sentinel32 == 77 && fails_with( r, error::TRUNCATED ) &&
+	       !r.read_fixed( sentinel64 ) && sentinel64 == 9.5;
+}
+
+constexpr bool test_read_bytes_typed()
+{
+	constexpr std::array<uint8_t, 4> in{ 0x02, 0xAA, 0xBB, 0x00 };
+	reader r( in );
+	std::span<const uint8_t> out;
+	if ( !r.read_bytes( out ) || out.size() != 2 || out[0] != 0xAA || out[1] != 0xBB )
+		return false;
+	if ( !r.read_bytes( out ) || !out.empty() || !r.empty() )
+		return false;
+
+	constexpr std::array<uint8_t, 2> sentinel{ 0x11, 0x22 };
+	out = sentinel;
+	return !r.read_bytes( out ) && out.data() == sentinel.data() && out.size() == 2 &&
+	       fails_with( r, error::TRUNCATED );
+}
+
+bool test_read_string_typed()
+{
+	constexpr std::array<uint8_t, 4> in{ 0x02, 'o', 'k', 0x00 };
+	reader r( in );
+	std::string_view out = "init";
+	if ( !r.read_string( out ) || out != "ok" )
+		return false;
+	if ( !r.read_string( out ) || !out.empty() || !r.empty() )
+		return false;
+
+	out = "keep";
+	return !r.read_string( out ) && out == "keep" && fails_with( r, error::TRUNCATED );
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 static_assert( test_varint_size() );
@@ -421,6 +633,10 @@ static_assert( test_skip() );
 static_assert( test_reader_sticky() );
 static_assert( test_reader_absorb() );
 static_assert( test_writer_and_reader_spans() );
+static_assert( test_read_varint_typed() );
+static_assert( test_read_zigzag_typed() );
+static_assert( test_read_fixed_typed() );
+static_assert( test_read_bytes_typed() );
 
 } // namespace
 
@@ -430,6 +646,8 @@ int main()
 	                test_write_key() && test_writer_full() && test_writer_exact() && test_write_text() &&
 	                test_writer_counts() && test_writer_saturates() && test_read_varint() && test_read_fixed() &&
 	                test_read_key() && test_read_length() && test_skip() && test_reader_sticky() &&
-	                test_reader_absorb() && test_writer_and_reader_spans();
+	                test_reader_absorb() && test_writer_and_reader_spans() && test_read_varint_typed() &&
+	                test_read_zigzag_typed() && test_read_fixed_typed() && test_read_bytes_typed() &&
+	                test_read_string_typed();
 	return ok ? 0 : 1;
 }
