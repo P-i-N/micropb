@@ -188,7 +188,7 @@ if(MICROPB_TESTS)
     endif()
 
     foreach(rule
-            decode_encode_only member_offset_too_large recursive_message
+            decode_encode_only member_offset_too_large
             decode_needs_arena no_field_list wide_table_required)
         micropb_add_compile_fail_test(${rule} ${rule})
     endforeach()

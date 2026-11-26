@@ -83,13 +83,14 @@ template <typename T>
 | `std::array<uint8_t, N>` | — | `bytes` | Fixed length: encodes all `N` bytes; shorter input zero-pads; longer input fails with `CAPACITY_EXCEEDED`. |
 | `std::span<const uint8_t, N>` | — | `bytes` | Encode-only fixed-extent view. |
 | Aggregate `struct` | — | `message` | Nested message. |
+| `const T*` (`T` aggregate `struct`) | — | `message` (`type:FT_POINTER`) | Indirect/recursive submessage; null means absent; decodes into `pb::arena`. |
 | `std::optional<T>` | *(element encoding)* | `optional T` | Explicit presence. |
 | `pb::oneof<A, B, ...>` | *(per-alternative encoding)* | `oneof` | Alternatives use 1-based indices `1..K` (`index() == 0` when unset); alternatives may share a C++ type (see [`oneof` fields](#oneof-fields-and-duplicate-alternative-types)). |
 | `pb::repeated<T, N>` | *(element encoding)* | `repeated T` | Fixed capacity `N` inside the struct (`push_back()`, `data()`, `span()`, range-`for`, `==`). |
 | `std::span<const T>` | *(element encoding)* | `repeated T` | Variable length; decodes into caller scratch memory / `pb::arena`. |
 | `std::array<T, N>` (`T` not `uint8_t`) | *(element encoding)* | `repeated T` | Encode-only fixed array of `N` elements. |
 
-Plain `char`, `wchar_t`, `char8_t`, `char16_t`, `char32_t`, `__int128`, pointers, and `volatile` types do not compile (`pb: unmapped_type`). `const` members compile for `encode` and `encoded_size`, and fail at compile time in `decode` (`pb: decode_const_member`).
+Plain `char`, `wchar_t`, `char8_t`, `char16_t`, `char32_t`, `__int128`, non-message or mutable pointers, and `volatile` types do not compile (`pb: unmapped_type`). `const` members compile for `encode` and `encoded_size`, and fail at compile time in `decode` (`pb: decode_const_member`).
 
 ### Presence on encode
 
@@ -98,6 +99,7 @@ Plain `char`, `wchar_t`, `char8_t`, `char16_t`, `char32_t`, `__int128`, pointers
 | Scalar, `string` (`std::string_view`, `pb::string<N>`), `bytes` (`std::span`, `pb::bytes<N>`) | Value is non-zero or non-empty (`-0.0` is non-zero) |
 | `std::array<uint8_t, N>` (`FIXED_BYTES`) | `N > 0` (writes all `N` bytes) |
 | Nested `struct` | Always |
+| `const T*` (message pointer) | Non-null (including an empty submessage) |
 | `std::optional<T>` | Engaged (including zero or empty values) |
 | `pb::oneof` | An alternative is active (`index() != 0`) |
 | Repeated field | Element count is at least 1 (scalars are always packed) |
@@ -180,12 +182,12 @@ The plugin searches for `<stem>.options` relative to the current directory first
 | `max_length:N` | `string` (including `repeated string` and `map` key/value via `<Entry>.key`/`<Entry>.value`) | `pb::string<N>` (up to `N` bytes + `'\0'`) |
 | `max_size:N` | `bytes` / `string` (including `repeated` and `map` key/value) | `pb::bytes<N>` on `bytes`; `pb::string<N - 1>` on `string` (matches NanoPB buffer size including `'\0'`) |
 | `max_size:N fixed_length:true` | `bytes` | `std::array<uint8_t, N>` |
-| `type:FT_POINTER` | `repeated`, `map`, `bytes`, or `string` | `std::span<const T>`, `std::span<const pb::kv_pair<K, V>>`, `std::span<const uint8_t>`, or `std::string_view` (overrides wildcard `max_count`/`max_size`/`max_length`) |
+| `type:FT_POINTER` | `message`, `repeated`, `map`, `bytes`, or `string` | `const T*` (singular `message`), `std::span<const T>`, `std::span<const pb::kv_pair<K, V>>`, `std::span<const uint8_t>`, or `std::string_view` (overrides wildcard `max_count`/`max_size`/`max_length`) |
 | `type:FT_STATIC`, `type:FT_DEFAULT` | `repeated`, `map`, `bytes`, `string` | Uses the other options on the field |
 | `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `int32`, `int64`, `uint32`, `uint64`, `sint32`, `sint64` | Narrow or wide `intN_t` / `uintN_t` |
 | `enum_intsize:IS_8`, `IS_16`, `IS_32` | `enum` | `enum class E : intN_t` (fails generation if a `.proto` enumerator does not fit) |
 
-Inline `.proto` annotations such as `[(nanopb).max_size = 6]` are not read. Unknown options and unmatched patterns print warnings to `stderr`. The plugin rejects proto2/editions files, recursive messages, colliding C++ member names inside a struct, `int_size:IS_8` on repeated unsigned integers, and `enum_intsize:IS_64`. Services, `extend` blocks, and `[packed = false]` are ignored.
+Inline `.proto` annotations such as `[(nanopb).max_size = 6]` are not read. Unknown options and unmatched patterns print warnings to `stderr`. The plugin rejects proto2/editions files, by-value recursive messages (use `type:FT_POINTER` on singular fields or unbounded `repeated`), colliding C++ member names inside a struct, `int_size:IS_8` on repeated unsigned integers, and `enum_intsize:IS_64`. Services, `extend` blocks, and `[packed = false]` are ignored.
 
 ## Errors
 
@@ -197,21 +199,21 @@ Inline `.proto` annotations such as `[(nanopb).max_size = 6]` are not read. Unkn
 | `INVALID_WIRE_TYPE` | `decode` | Wire type is 3, 4, 6, or 7. |
 | `INVALID_TAG` | `decode` | Field number is 0 or exceeds 2^29 - 1. |
 | `CAPACITY_EXCEEDED` | `decode` | Input has more elements or bytes than `pb::repeated`, `pb::bytes`, `pb::string`, or `std::array` holds. |
-| `ARENA_FULL` | `decode` | Scratch memory / `pb::arena` lacks space for a `std::span<const T>` repeated field. |
+| `ARENA_FULL` | `decode` | Scratch memory / `pb::arena` lacks space for a `std::span<const T>` repeated field or `const T*` message pointer. |
 | `OUT_OF_RANGE` | `pb::reader` | Typed `read_varint(T&)` or `read_zigzag(T&)` value is outside the range of `T` (`pb::decode` never returns this; it truncates narrow integers per proto3). |
+| `MAX_DEPTH_EXCEEDED` | `encode`, `decode` | Nested submessage depth exceeds `MICROPB_MAX_DEPTH` (default `32`). |
 
 ## Compile-time checks
 
-Proto3 grammar and field-table consistency are enforced by `protoc` and `tools/protoc-gen-micropb.py`. Layout limits, recursion, and call-site constraints fail compilation with `static_assert` diagnostics prefixed by `pb: <rule>:`.
+Proto3 grammar and field-table consistency are enforced by `protoc` and `tools/protoc-gen-micropb.py`. Layout limits and call-site constraints fail compilation with `static_assert` diagnostics prefixed by `pb: <rule>:`.
 
 | Rule | Cause |
 | --- | --- |
 | `no_field_list` | `pb::encode`, `pb::decode`, or `pb::encoded_size` called on a type without generated `pb::fields_of`. |
-| `recursive_message` | Message contains itself directly or indirectly (including through `std::span`). |
 | `member_offset_too_large` | Member offset or sequence capacity exceeds `65535`. |
 | `wide_table_required` | Schema exceeds default compact table limits without `MICROPB_WIDE_TABLES`. |
 | `decode_encode_only` | `pb::decode` called on a message containing an encode-only `std::array<T, N>` repeated field (`fixed_count:true`). |
-| `decode_needs_arena` | 2-argument `pb::decode(in, msg)` called on a message with a `std::span<const T>` repeated field; pass scratch memory or `pb::arena`. |
+| `decode_needs_arena` | 2-argument `pb::decode(in, msg)` called on a message with a `std::span<const T>` repeated field or `const T*` message pointer; pass scratch memory or `pb::arena`. |
 
 ## Code size
 
@@ -219,8 +221,8 @@ Proto3 grammar and field-table consistency are enforced by `protoc` and `tools/p
 
 | Configuration (default small-ROM mode) | Arm Cortex-M4 / M33 (`-mthumb`, B) | x86-64 without `.eh_frame` (B) | x86-64 with `.eh_frame` (B) |
 | --- | ---: | ---: | ---: |
-| 16 message types | **4,298** | 6,665 | 8,309 |
-| 32 message types | **4,978** | 7,705 | 9,349 |
+| 16 message types | **4,144** | 6,442 | 7,942 |
+| 32 message types | **4,824** | 7,482 | 8,982 |
 | Each additional 8-field type | **42** | 65 | 65 |
 
 For side-by-side measurements against NanoPB, see [Binary size comparison](#binary-size-comparison).
@@ -445,6 +447,7 @@ if ( pb::decode( std::span( wire ).first( *n ), rx ) )
 | `map<K, V>` | `pb::map<K, V, N>` (`find`, `insert_or_assign`, `erase`, last-key-wins) / `std::span<const pb::kv_pair<K, V>>` | Repeated synthetic `*Entry` struct (`pb_callback_t` or array, no map API) |
 | `optional T` | `std::optional<T>` | `bool has_x; T x;` |
 | `oneof` | `pb::oneof<A, B>` | `pb_size_t which_x; union { ... } x;` |
+| Recursive messages | `std::span<const T>` / `const T*` (`type:FT_POINTER`) in caller arena, bounded by `MICROPB_MAX_DEPTH` (default `32`) | `pb_callback_t` or `FT_POINTER` (`malloc`) |
 | Error handling | `std::expected<size_t, pb::error>` | `bool` + `stream.errmsg` string |
 | `.options` file | Same syntax (`max_count`, `max_size`, `max_length`, `fixed_length`, `int_size`) | Native format |
 | Generator dependencies | Python 3 stdlib only + `protoc` | Python 3 + `protobuf` Python package + `protoc` |
@@ -459,30 +462,30 @@ Measured on the `size_report` schema (an envelope `oneof` holding 1, 16, or 32 d
 
 | Configuration (`-mcpu=cortex-m4 -mthumb`) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Each extra 8-field type |
 | --- | ---: | ---: | ---: | ---: |
-| **MicroPB (default)** | **3,610 B** | **4,298 B** | **4,978 B** | **42 B** |
-| **MicroPB (`MICROPB_FAST`)** | **4,256 B** | **4,944 B** | **5,624 B** | **42 B** |
+| **MicroPB (default)** | **3,456 B** | **4,144 B** | **4,824 B** | **42 B** |
+| **MicroPB (`MICROPB_FAST`)** | **4,142 B** | **4,830 B** | **5,510 B** | **42 B** |
 | **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,150 B | 6,414 B | 7,774 B | 85 B |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,210 B | 6,606 B | 8,078 B | 92 B |
 | **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, default flags) | 6,616 B | 7,880 B | 9,240 B | 85 B |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (default flags) | 6,676 B | 8,072 B | 9,544 B | 92 B |
 
-*(With `-mcpu=cortex-m33 -mthumb`, MicroPB is `2–4 B` smaller at `3,606 / 4,294 / 4,974 B` default and `4,254 / 4,942 / 5,622 B` with `MICROPB_FAST` (`42 B/type`); NanoPB with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG` is `2 B` smaller at `5,148 / 6,412 / 7,772 B` fixed and `5,208 / 6,604 / 8,076 B` callback; NanoPB default flags are identical.)*
+*(With `-mcpu=cortex-m33 -mthumb`, MicroPB is `3,458 / 4,146 / 4,826 B` default and `4,142 / 4,830 / 5,510 B` with `MICROPB_FAST` (`42 B/type`); NanoPB with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG` is `2 B` smaller at `5,148 / 6,412 / 7,772 B` fixed and `5,208 / 6,604 / 8,076 B` callback; NanoPB default flags are identical.)*
 
-* **32-bit Arm scaling:** on 32-bit Arm, 4-byte pointers, 16-bit compact field entries, and `pb::oneof` direct tag access make MicroPB smaller than every NanoPB configuration on both base runtime (`1.5–3.1 KB` smaller at 1 type, `2.8–4.6 KB` smaller at 32 types in default mode; `0.9–2.4 KB` / `2.2–3.9 KB` smaller with `MICROPB_FAST`) and per-message growth (`42 B` vs `85–92 B` per 8-field message type).
+* **32-bit Arm scaling:** on 32-bit Arm, 4-byte pointers, 16-bit compact field entries, and `pb::oneof` direct tag access make MicroPB smaller than every NanoPB configuration on both base runtime (`1.7–3.2 KB` smaller at 1 type, `3.0–4.7 KB` smaller at 32 types in default mode; `1.0–2.5 KB` / `2.3–4.0 KB` smaller with `MICROPB_FAST`) and per-message growth (`42 B` vs `85–92 B` per 8-field message type).
 * **External symbols:** `arm-none-eabi-nm -u` shows that MicroPB references only `memcpy`, `memmove`, and `memset` (no 64-bit division helpers or C++ runtime symbols).
 
 #### Linux x86-64 (`GCC 16.2.1 -Os`)
 
 | Configuration (no `.eh_frame`) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Each extra 8-field type |
 | --- | ---: | ---: | ---: | ---: |
-| **MicroPB (default)** | **5,601 B** | **6,665 B** | **7,705 B** | **65 B** |
-| **MicroPB (`MICROPB_FAST`)** | **6,600 B** | **7,664 B** | **8,704 B** | **65 B** |
+| **MicroPB (default)** | **5,378 B** | **6,442 B** | **7,482 B** | **65 B** |
+| **MicroPB (`MICROPB_FAST`)** | **6,480 B** | **7,544 B** | **8,584 B** | **65 B** |
 | **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,405 B | 10,029 B | 11,773 B | 109 B |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,489 B | 10,366 B | 12,318 B | 122 B |
 | **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, default flags) | 10,413 B | 12,037 B | 13,781 B | 109 B |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (default flags) | 10,497 B | 12,374 B | 14,326 B | 122 B |
 
-*(With Linux default `.eh_frame` unwind tables included, x86-64 totals at 1 / 16 / 32 types are `7,245 / 8,309 / 9,349 B` for MicroPB default, `8,276 / 9,340 / 10,380 B` for MicroPB `MICROPB_FAST`, `12,469 / 14,093 / 15,837 B` for NanoPB fixed default, and `10,189 / 11,813 / 13,557 B` for NanoPB fixed with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`.)*
+*(With Linux default `.eh_frame` unwind tables included, x86-64 totals at 1 / 16 / 32 types are `6,878 / 7,942 / 8,982 B` for MicroPB default, `8,036 / 9,100 / 10,140 B` for MicroPB `MICROPB_FAST`, `12,469 / 14,093 / 15,837 B` for NanoPB fixed default, and `10,189 / 11,813 / 13,557 B` for NanoPB fixed with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`.)*
 
 ### Encode and decode speed comparison
 
@@ -550,4 +553,5 @@ ctest --test-dir .build --output-on-failure
 * **Build macros:**
   * `MICROPB_FAST`: enables speed-oriented fast paths (1-byte varint fast path, inline scalar dispatch in `emit_message`/`decode_message`/`reset_message`, two-pass cursor field lookup, and bulk packed scalar encode/decode). Without it (default), MicroPB minimizes ROM size.
   * `MICROPB_WIDE_TABLES`: enables 5-halfword field entries for schemas that exceed the compact table limits below.
-* **Limits:** by default, compact field tables support field numbers up to `4095`, member offsets up to `4095` bytes, up to `73` distinct compound types per message, and one `pb::oneof` of up to `32` alternatives per message. Define `MICROPB_WIDE_TABLES` to support field numbers up to `2^29 - 1`, member offsets up to `65535` bytes, up to `255` compound types, multiple `pb::oneof` members, and up to `255` alternatives per `oneof`. Recursive message definitions are rejected so stack depth stays bounded.
+  * `MICROPB_MAX_DEPTH`: maximum nested submessage depth for `encode` and `decode` (default `32`).
+* **Limits:** by default, compact field tables support field numbers up to `4095`, member offsets up to `4095` bytes, up to `73` distinct compound types per message, and one `pb::oneof` of up to `32` alternatives per message. Define `MICROPB_WIDE_TABLES` to support field numbers up to `2^29 - 1`, member offsets up to `65535` bytes, up to `255` compound types, multiple `pb::oneof` members, and up to `255` alternatives per `oneof`. Submessage nesting is bounded by `MICROPB_MAX_DEPTH` (default `32`).

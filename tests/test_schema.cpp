@@ -36,7 +36,9 @@ consteval bool test_kinds()
 	       kind_of<pb::oneof<std::string_view, std::string_view>>() == field_kind::ONEOF &&
 	       kind_of<pb::kv_pair<std::string_view, int32_t>>() == field_kind::MESSAGE &&
 	       kind_of<pb::map<pb::string<8>, int32_t, 4>>() == field_kind::REPEATED &&
-	       kind_of<std::span<const pb::kv_pair<uint32_t, pose>>>() == field_kind::REPEATED;
+	       kind_of<std::span<const pb::kv_pair<uint32_t, pose>>>() == field_kind::REPEATED &&
+	       kind_of<const pose*>() == field_kind::POINTER && kind_of<pose*>() == field_kind::MESSAGE &&
+	       kind_of<const int32_t*>() == field_kind::MESSAGE && kind_of<const void*>() == field_kind::MESSAGE;
 }
 
 consteval bool test_wire_types()
@@ -45,12 +47,14 @@ consteval bool test_wire_types()
 	       wire_type_of<int64_t, int_encoding::FIXED>() == wire_type::FIXED64 &&
 	       wire_type_of<int8_t>() == wire_type::VARINT && wire_type_of<bool>() == wire_type::VARINT &&
 	       wire_type_of<int32_t, int_encoding::ZIGZAG>() == wire_type::VARINT &&
-	       wire_type_of<uint32_t, int_encoding::FIXED>() == wire_type::FIXED32;
+	       wire_type_of<uint32_t, int_encoding::FIXED>() == wire_type::FIXED32 &&
+	       wire_type_of<const pose*>() == wire_type::LENGTH_DELIMITED;
 }
 
 consteval bool test_packed()
 {
-	return is_packed<float>() && is_packed<int64_t>() && !is_packed<std::string_view>() && !is_packed<pose>();
+	return is_packed<float>() && is_packed<int64_t>() && !is_packed<std::string_view>() && !is_packed<pose>() &&
+	       !is_packed<const pose*>();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -18,6 +18,20 @@ namespace pb {
 ////////////////////////////////////////////////////////////////////////////////
 
 namespace detail {
+#ifndef MICROPB_MAX_DEPTH
+#define MICROPB_MAX_DEPTH 32
+#endif
+
+/// Maximum nested submessage depth for encode and decode.
+inline constexpr uint16_t max_depth = MICROPB_MAX_DEPTH;
+static_assert( max_depth <= 65534 );
+
+/// Compact depth counter type: 1 byte for depths under 255, else 2 bytes.
+using depth_t = std::conditional_t<( max_depth < 255 ), uint8_t, uint16_t>;
+
+/// Gives the codec access to the submessage nesting depth of `writer` and `reader`.
+struct depth_access;
+
 /// Largest field number of proto3.
 inline constexpr uint32_t max_field_number = ( 1u << 29 ) - 1;
 
@@ -35,7 +49,8 @@ template <typename T>
 }
 
 /// Number of bytes that `value` uses as a varint (1 to 10).
-[[nodiscard]] constexpr size_t varint_size( uint64_t value )
+template <typename T>
+[[nodiscard]] constexpr size_t varint_size( T value )
 {
 	size_t size = 1;
 	while ( value >= 0x80 )
@@ -147,6 +162,8 @@ struct writer
 	}
 
 private:
+	friend struct detail::depth_access;
+
 	constexpr void put( uint8_t byte )
 	{
 		if ( _pos < _out.size() )
@@ -179,6 +196,7 @@ private:
 
 	std::span<uint8_t> _out;
 	size_t _pos = 0;
+	detail::depth_t _depth = 0;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -256,7 +274,7 @@ struct reader
 			return {};
 		}
 
-		const auto bytes = _in.subspan( _pos, static_cast<size_t>( length ) );
+		const std::span<const uint8_t> bytes{ _in.data() + _pos, static_cast<size_t>( length ) };
 		_pos += bytes.size();
 		return bytes;
 	}
@@ -268,19 +286,22 @@ struct reader
 		if ( _failed )
 			return {};
 
-		const uint64_t number = key >> 3;
-		const auto type = static_cast<uint8_t>( key & 7 );
-		if ( number == 0 || number > max_field_number )
+		// Field numbers 1..(2^29 - 1) fit in bits 31..3 of `key`.
+		const auto lo = static_cast<uint32_t>( key );
+		const uint32_t number = lo >> 3;
+		if ( static_cast<uint32_t>( key >> 32 ) != 0 || number == 0 )
 		{
 			fail( error::INVALID_TAG );
 			return {};
 		}
-		if ( type == 3 || type == 4 || type > 5 )
+		const auto type = static_cast<uint8_t>( lo & 7u );
+		// Valid proto3 wire types: 0 (VARINT), 1 (FIXED64), 2 (LENGTH_DELIMITED), 5 (FIXED32).
+		if ( ( ( 0x27u >> type ) & 1u ) == 0 )
 		{
 			fail( error::INVALID_WIRE_TYPE );
 			return {};
 		}
-		return { static_cast<uint32_t>( number ), static_cast<wire_type>( type ) };
+		return { number, static_cast<wire_type>( type ) };
 	}
 
 	/// Reads a varint into `out` and checks that it fits in `T`.
@@ -454,6 +475,8 @@ struct reader
 	[[nodiscard]] constexpr std::span<const uint8_t> remaining_span() const { return _in.subspan( _pos ); }
 
 private:
+	friend struct detail::depth_access;
+
 	[[nodiscard]] constexpr size_t remaining() const { return _in.size() - _pos; }
 
 	[[nodiscard]] constexpr uint64_t read_le( size_t count )
@@ -484,6 +507,37 @@ private:
 	size_t _pos = 0;
 	error _error{};
 	bool _failed = false;
+	detail::depth_t _depth = 0;
 };
+
+namespace detail {
+
+struct depth_access
+{
+	static constexpr depth_t failed_depth = static_cast<depth_t>( max_depth + 1 );
+
+	[[nodiscard]] static constexpr depth_t depth( const writer& w ) noexcept { return w._depth; }
+	[[nodiscard]] static constexpr bool depth_exceeded( const writer& w ) noexcept { return w._depth > max_depth; }
+	static constexpr void reset( writer& w ) noexcept { w._depth = 0; }
+	static constexpr void enter( writer& w ) noexcept { ++w._depth; }
+	static constexpr void leave( writer& w ) noexcept { --w._depth; }
+	static constexpr void fail( writer& w ) noexcept { w._depth = failed_depth; }
+	[[nodiscard]] static constexpr writer counter( const writer& w ) noexcept
+	{
+		writer out;
+		out._depth = w._depth;
+		return out;
+	}
+
+	[[nodiscard]] static constexpr depth_t depth( const reader& r ) noexcept { return r._depth; }
+	[[nodiscard]] static constexpr reader nested( const reader& r, std::span<const uint8_t> bytes ) noexcept
+	{
+		reader part( bytes );
+		part._depth = static_cast<depth_t>( r._depth + 1 );
+		return part;
+	}
+};
+
+} // namespace detail
 
 } // namespace pb

@@ -26,7 +26,8 @@ enum class field_kind : uint8_t
 	MESSAGE,
 	OPTIONAL,
 	ONEOF,
-	REPEATED
+	REPEATED,
+	POINTER
 };
 
 namespace detail {
@@ -167,6 +168,17 @@ template <typename T>
 		else
 			return field_kind::BYTES;
 	}
+	else if constexpr ( std::is_pointer_v<T> )
+	{
+		using pointee = std::remove_pointer_t<T>;
+		if constexpr ( std::is_const_v<pointee> && !std::is_volatile_v<pointee> && !std::is_void_v<pointee> &&
+		               !std::is_pointer_v<pointee> )
+		{
+			if constexpr ( kind_of<std::remove_const_t<pointee>>() == field_kind::MESSAGE )
+				return field_kind::POINTER;
+		}
+		return field_kind::MESSAGE;
+	}
 	else
 		return field_kind::MESSAGE;
 }
@@ -203,9 +215,9 @@ template <typename Target, typename T, typename... Visited>
 [[nodiscard]] consteval bool reaches();
 template <typename T>
 [[nodiscard]] consteval bool is_recursive();
-template <typename T>
+template <typename T, typename... Visited>
 [[nodiscard]] consteval bool needs_arena();
-template <typename T>
+template <typename T, typename... Visited>
 consteval void check_decodable();
 
 template <typename T, typename... Fields>
@@ -228,9 +240,17 @@ struct oneof_traits<oneof<A...>>
 		return ( detail::reaches<Target, A, Visited...>() || ... );
 	}
 
-	[[nodiscard]] static consteval bool needs_arena() { return ( detail::needs_arena<A>() || ... ); }
+	template <typename... Visited>
+	[[nodiscard]] static consteval bool needs_arena()
+	{
+		return ( detail::needs_arena<A, Visited...>() || ... );
+	}
 
-	static consteval void check_decodable() { ( detail::check_decodable<A>(), ... ); }
+	template <typename... Visited>
+	static consteval void check_decodable()
+	{
+		( detail::check_decodable<A, Visited...>(), ... );
+	}
 };
 
 /// The entries of a field list.
@@ -248,14 +268,11 @@ struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 	using message = T;
 	static constexpr size_t count = sizeof...( M );
 
-	/// Applies the layout and recursion rules that the code generator cannot verify.
+	/// Applies the layout rules that the code generator cannot verify.
 	static consteval void check()
 	{
 		static_assert( ( ( Offset <= max_offset ) && ... ),
 		               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
-		static_assert( !is_recursive<T>(),
-		               "pb: recursive_message: a message cannot contain itself, also through a std::span or other "
-		               "messages" );
 	}
 
 	/// `true` when a member reaches `Target`. `Visited` has the message types on the path, `T` included.
@@ -265,9 +282,17 @@ struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 		return ( detail::reaches<Target, std::remove_const_t<M>, Visited...>() || ... );
 	}
 
-	[[nodiscard]] static consteval bool needs_arena() { return ( detail::needs_arena<std::remove_const_t<M>>() || ... ); }
+	template <typename... Visited>
+	[[nodiscard]] static consteval bool needs_arena()
+	{
+		return ( detail::needs_arena<std::remove_const_t<M>, Visited...>() || ... );
+	}
 
-	static consteval void check_decodable() { ( detail::check_decodable<std::remove_const_t<M>>(), ... ); }
+	template <typename... Visited>
+	static consteval void check_decodable()
+	{
+		( detail::check_decodable<std::remove_const_t<M>, Visited...>(), ... );
+	}
 };
 
 /// `true` when `T`, or a member, element, optional value or alternative of it, is
@@ -285,6 +310,8 @@ template <typename Target, typename T, typename... Visited>
 		constexpr field_kind kind = kind_of<T>();
 		if constexpr ( kind == field_kind::OPTIONAL )
 			return reaches<Target, typename T::value_type, Visited...>();
+		else if constexpr ( kind == field_kind::POINTER )
+			return reaches<Target, std::remove_const_t<std::remove_pointer_t<T>>, Visited...>();
 		else if constexpr ( kind == field_kind::REPEATED )
 			return reaches<Target, element_t<T>, Visited...>();
 		else if constexpr ( kind == field_kind::ONEOF )
@@ -297,37 +324,36 @@ template <typename Target, typename T, typename... Visited>
 }
 
 /// `true` when a member, element, optional value or alternative of the message
-/// type `T` is `T`, also through other message types. `decode` recurses for each
-/// message in a message: for a recursive type, the stack has no bound.
+/// type `T` is `T`, also through other message types.
 template <typename T>
 [[nodiscard]] consteval bool is_recursive()
 {
 	return list_traits<field_list_of<T>>::template reaches<T, T>();
 }
 
-/// `true` when `T` has a `std::span<const E>` repeated field: in it, or in a member,
-/// alternative, value or element of it. `decode` puts the items of such a field in a
-/// `pb::arena`. The walk stops at a recursive message type: the rule
-/// `recursive_message` rejects it.
-template <typename T>
+/// `true` when `T` has a `std::span<const E>` repeated field or a `const M*`
+/// message pointer: in it, or in a member, alternative, value or element of it.
+/// `decode` allocates such fields in a `pb::arena`.
+template <typename T, typename... Visited>
 [[nodiscard]] consteval bool needs_arena()
 {
 	constexpr field_kind kind = kind_of<T>();
-	if constexpr ( kind == field_kind::REPEATED )
-		return ( is_std_span<T> && !is_fixed_span<T> ) || needs_arena<element_t<T>>();
+	if constexpr ( kind == field_kind::POINTER )
+		return true;
+	else if constexpr ( kind == field_kind::REPEATED )
+		return ( is_std_span<T> && !is_fixed_span<T> ) || needs_arena<element_t<T>, Visited...>();
 	else if constexpr ( kind == field_kind::OPTIONAL )
-		return needs_arena<typename T::value_type>();
+		return needs_arena<typename T::value_type, Visited...>();
 	else if constexpr ( kind == field_kind::ONEOF )
-		return oneof_traits<T>::needs_arena();
-	else if constexpr ( kind == field_kind::MESSAGE )
-		return !is_recursive<T>() && list_traits<field_list_of<T>>::needs_arena();
+		return oneof_traits<T>::template needs_arena<Visited...>();
+	else if constexpr ( kind == field_kind::MESSAGE && !is_one_of<T, Visited...> )
+		return list_traits<field_list_of<T>>::template needs_arena<T, Visited...>();
 	else
 		return false;
 }
 
 /// Rejects encode-only repeated containers (`std::array`) in `decode`.
-/// It stops at a recursive message type: the rule `recursive_message` rejects it.
-template <typename T>
+template <typename T, typename... Visited>
 consteval void check_decodable()
 {
 	constexpr field_kind kind = kind_of<T>();
@@ -337,30 +363,34 @@ consteval void check_decodable()
 		static_assert( !is_std_array<T>,
 		               "pb: decode_encode_only: std::array is encode-only, use pb::repeated or std::span<const T> "
 		               "to decode" );
-		check_decodable<element_t<T>>();
+		check_decodable<element_t<T>, Visited...>();
+	}
+	else if constexpr ( kind == field_kind::POINTER )
+	{
+		check_decodable<std::remove_const_t<std::remove_pointer_t<T>>, Visited...>();
 	}
 	else if constexpr ( kind == field_kind::OPTIONAL )
 	{
-		check_decodable<typename T::value_type>();
+		check_decodable<typename T::value_type, Visited...>();
 	}
 	else if constexpr ( kind == field_kind::ONEOF )
 	{
-		oneof_traits<T>::check_decodable();
+		oneof_traits<T>::template check_decodable<Visited...>();
 	}
-	else if constexpr ( kind == field_kind::MESSAGE )
+	else if constexpr ( kind == field_kind::MESSAGE && !is_one_of<T, Visited...> )
 	{
-		if constexpr ( !is_recursive<T>() )
-			list_traits<field_list_of<T>>::check_decodable();
+		list_traits<field_list_of<T>>::template check_decodable<T, Visited...>();
 	}
 }
 
-/// Rejects a message for `decode` without a `pb::arena` when it has a `std::span<const T>` repeated field.
+/// Rejects a message for `decode` without a `pb::arena` when it has a
+/// `std::span<const T>` repeated field or a `const T*` message pointer.
 template <typename T>
 consteval void check_no_arena()
 {
 	static_assert( !needs_arena<T>(),
-	               "pb: decode_needs_arena: a std::span<const T> repeated field needs a pb::arena, use decode( in, msg, "
-	               "arena )" );
+	               "pb: decode_needs_arena: a std::span<const T> repeated field or message pointer needs a pb::arena, "
+	               "use decode( in, msg, arena )" );
 }
 
 } // namespace detail

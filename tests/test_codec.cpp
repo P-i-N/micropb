@@ -165,20 +165,20 @@ bool test_optional_accessor()
 {
 	const d::optional_desc& desc = *d::value_descriptor<std::optional<plain>>::value.optional;
 	std::optional<plain> value;
-	if ( desc.access( &value, d::optional_op::GET ) != nullptr )
+	if ( desc.access( &value, d::optional_op::GET, nullptr ) != nullptr )
 		return false;
 
-	auto* first = static_cast<plain*>( desc.access( &value, d::optional_op::ENGAGE ) );
+	auto* first = static_cast<plain*>( desc.access( &value, d::optional_op::ENGAGE, nullptr ) );
 	if ( first == nullptr || !value || value->b != 0 )
 		return false;
 
 	first->b = 7;
-	if ( desc.access( &value, d::optional_op::ENGAGE ) != first || value->b != 7 )
+	if ( desc.access( &value, d::optional_op::ENGAGE, nullptr ) != first || value->b != 7 )
 		return false;
-	if ( desc.access( &value, d::optional_op::GET ) != first )
+	if ( desc.access( &value, d::optional_op::GET, nullptr ) != first )
 		return false;
 
-	return desc.access( &value, d::optional_op::RESET ) == nullptr && !value;
+	return desc.access( &value, d::optional_op::RESET, nullptr ) == nullptr && !value;
 }
 
 bool test_variant_accessor()

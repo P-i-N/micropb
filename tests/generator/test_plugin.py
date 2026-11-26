@@ -812,6 +812,61 @@ class MapTest(unittest.TestCase):
         self.assertEqual(members(text, "outer"), ["pb::map<uint32_t, inner, 4> items = {};"])
 
 
+class RecursiveTest(unittest.TestCase):
+    def test_repeated_self_recursive(self):
+        text = header("package p; message node { int32 id = 1; repeated node children = 2; }")
+        self.assertNotIn("struct node;", text)
+        self.assertEqual(members(text, "node"), ["int32_t id = 0;", "std::span<const node> children = {};"])
+
+    def test_singular_pointer_recursive(self):
+        text = header(
+            "package p; message node { int32 id = 1; node next = 2; optional node prev = 3; }",
+            "node.next type:FT_POINTER\nnode.prev type:FT_POINTER\n",
+        )
+        self.assertNotIn("struct node;", text)
+        self.assertEqual(members(text, "node"),
+                         ["int32_t id = 0;", "const node* next = nullptr;", "const node* prev = nullptr;"])
+
+    def test_oneof_pointer_recursive(self):
+        text = header(
+            "package p; message node { oneof child { node left = 1; int32 leaf = 2; } }",
+            "node.left type:FT_POINTER\n",
+        )
+        self.assertEqual(members(text, "node"), [
+            "static constexpr size_t child_left = 1;",
+            "static constexpr size_t child_leaf = 2;",
+            "pb::oneof<const node*, int32_t> child = {};",
+        ])
+
+    def test_mutual_recursion_forward_decl(self):
+        text = header(
+            "package p; message a { repeated b bs = 1; } message b { a parent = 1; }",
+        )
+        self.assertIn("struct b;", text)
+        self.assertLess(text.index("struct b;"), text.index("struct a {"))
+        self.assertLess(text.index("struct a {"), text.index("struct b {"))
+        self.assertEqual(members(text, "a"), ["std::span<const b> bs = {};"])
+        self.assertEqual(members(text, "b"), ["a parent = {};"])
+
+    def test_mutual_pointer_recursion_forward_decl(self):
+        text = header(
+            "package p; message a { b other = 1; } message b { a other = 1; }",
+            "a.other type:FT_POINTER\nb.other type:FT_POINTER\n",
+        )
+        self.assertIn("struct a;", text)
+        self.assertLess(text.index("struct a;"), text.index("struct b {"))
+        self.assertLess(text.index("struct b {"), text.index("struct a {"))
+        self.assertEqual(members(text, "a"), ["const b* other = nullptr;"])
+        self.assertEqual(members(text, "b"), ["const a* other = nullptr;"])
+
+    def test_map_pointer_value_recursive(self):
+        text = header(
+            "package p; message m { map<string, m> children = 1; }",
+            "m.ChildrenEntry.value type:FT_POINTER\n",
+        )
+        self.assertEqual(members(text, "m"), ["std::span<const pb::kv_pair<std::string_view, const m*>> children = {};"])
+
+
 class ErrorTest(unittest.TestCase):
     def test_proto2(self):
         self.assertIn("a.proto: only proto3 files are supported",

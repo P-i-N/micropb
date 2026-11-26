@@ -106,8 +106,8 @@ bool round_trip()
 
   | Configuration (Cortex-M4 / M33) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Extra 8-field type |
   | --- | ---: | ---: | ---: | ---: |
-  | **MicroPB (default)** | **3,610&nbsp;B** | **4,298&nbsp;B** | **4,978&nbsp;B** | **42&nbsp;B** |
-  | **MicroPB (`MICROPB_FAST`)** | **4,256&nbsp;B** | **4,944&nbsp;B** | **5,624&nbsp;B** | **42&nbsp;B** |
+  | **MicroPB (default)** | **3,456&nbsp;B** | **4,144&nbsp;B** | **4,824&nbsp;B** | **42&nbsp;B** |
+  | **MicroPB (`MICROPB_FAST`)** | **4,142&nbsp;B** | **4,830&nbsp;B** | **5,510&nbsp;B** | **42&nbsp;B** |
   | NanoPB 0.4.9.3 — fixed-size (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,150&nbsp;B | 6,414&nbsp;B | 7,774&nbsp;B | 85&nbsp;B |
   | NanoPB 0.4.9.3 — `pb_callback_t` (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,210&nbsp;B | 6,606&nbsp;B | 8,078&nbsp;B | 92&nbsp;B |
   | NanoPB 0.4.9.3 — fixed-size (default flags) | 6,616&nbsp;B | 7,880&nbsp;B | 9,240&nbsp;B | 85&nbsp;B |
@@ -124,7 +124,7 @@ bool round_trip()
   | `oneof` envelope (16 submsgs) | 44 B | **77 ns** (3.8x) | 287 ns | **80 ns** (2.8x) | 223 ns |
 
 * **No heap, no exceptions, no RTTI, no startup code:** compiles with `-fno-exceptions -fno-rtti -Wall -Wextra -Werror`. Tables live in `.rodata` with zero static constructors before `main()`.
-* **Compile-time safety checks:** recursive messages, encode-only `std::array` decodes, missing scratch buffers, and table/offset limits fail at compile time with named `static_assert` diagnostics (`pb: <rule>:`).
+* **Compile-time safety checks:** encode-only `std::array` decodes, missing scratch buffers, and table/offset limits fail at compile time with named `static_assert` diagnostics (`pb: <rule>:`).
 * **Wire-identical to `protoc` & zero external dependencies:** verified byte-for-byte against `protoc`, using 5 standard-library-only C++23 headers and a single-file Python 3 plugin (stdlib only).
 
 > [!NOTE]
@@ -169,6 +169,7 @@ void on_packet( std::span<const uint8_t> packet )
 | `bytes` | *(none)* / `max_size:N` / `max_size:N fixed_length:true` | `std::span<const uint8_t>` / `pb::bytes<N>` / `std::array<uint8_t, N>` |
 | `repeated T` | *(none)* / `max_count:N` / `max_count:N fixed_count:true` | `std::span<const T>` / `pb::repeated<T, N>` / `std::array<T, N>` |
 | `map<K, V>` | *(none)* / `max_count:N` / `max_count:N fixed_count:true` | `std::span<const pb::kv_pair<K, V>>` / `pb::map<K, V, N>` / `std::array<pb::kv_pair<K, V>, N>` |
+| `message T` | *(none)* / `type:FT_POINTER` | `T` / `const T*` (allocated in scratch/arena; supports recursion) |
 | `optional T` / `oneof` | — | `std::optional<T>` / `pb::oneof<...>` |
 
 ## API
@@ -222,10 +223,10 @@ ctest --test-dir .build --output-on-failure
 
 * **Contiguous buffers only:** MicroPB encodes into and decodes from contiguous `std::span` buffers. Streaming I/O and user callbacks (`pb_callback_t`) are not supported.
 * **Proto3 subset:** no proto2, editions, groups, well-known types (`Any`, `Timestamp`), JSON, or unknown-field preservation (unknown fields are skipped on decode).
-* **No recursive messages:** recursive schemas are rejected at compile time so call stack depth stays bounded.
+* **Bounded recursion depth (`MICROPB_MAX_DEPTH`):** recursive messages (via `std::span<const T>` or `const T*` with `type:FT_POINTER`) are supported up to `MICROPB_MAX_DEPTH` nested submessages (default `32`; deeper inputs or cyclic pointer graphs return `pb::error::MAX_DEPTH_EXCEEDED`).
 * **C++23 and runtime-only codec:** requires C++23 (`std::expected`). `pb::encode`, `pb::decode`, and `pb::encoded_size` access members by byte offset and cannot run in `constexpr` evaluation.
 * **Compact table limits vs. `MICROPB_WIDE_TABLES`:** default compact tables support field numbers up to `4095`, member offsets up to `4095` bytes, up to `73` distinct compound types per message, and one `pb::oneof` of up to `32` alternatives per message. Define `MICROPB_WIDE_TABLES` to support field numbers up to `2^29 - 1`, offsets up to `65535` bytes, `255` compound types, multiple `pb::oneof` members, and `255` alternatives per `oneof`, at the cost of larger ROM tables.
-* **ROM size vs. speed (`MICROPB_FAST`):** the default build minimizes Flash/ROM (`3,610 B` base on Cortex-M4) with linear field lookup and element-by-element packed loops. Define `MICROPB_FAST` (`+646 B` on Cortex-M4) to enable inline scalar dispatch, cursor field lookup, 1-byte varint fast path, and bulk packed scalar encode/decode.
+* **ROM size vs. speed (`MICROPB_FAST`):** the default build minimizes Flash/ROM (`3,456 B` base on Cortex-M4) with linear field lookup and element-by-element packed loops. Define `MICROPB_FAST` (`+686 B` on Cortex-M4) to enable inline scalar dispatch, cursor field lookup, 1-byte varint fast path, and bulk packed scalar encode/decode.
 * **Two-pass `std::span<const T>` decode:** decoding a dynamic `repeated` span scans the input first to count elements and allocate one contiguous block in scratch memory, which is slower than a single-pass callback.
 
 ## Further reading

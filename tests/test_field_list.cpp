@@ -70,17 +70,54 @@ struct const_items
 	std::span<const const_item> items;
 };
 
-/// A message that contains itself. The codec rejects it (`recursive_message`).
+/// A message that contains itself through a `std::span`.
 struct tree
 {
-	int32_t id;
-	std::span<const tree> children;
+	int32_t id = 0;
+	std::span<const tree> children = {};
 };
 
 /// Holds a recursive type, but is not on its cycle.
 struct forest
 {
-	tree t;
+	tree t = {};
+};
+
+/// A message that contains itself through singular pointers.
+struct list_node
+{
+	int32_t id = 0;
+	const list_node* next = nullptr;
+	const list_node* alt = nullptr;
+};
+
+/// Mutual recursion through singular pointers.
+struct mutual_b;
+
+struct mutual_a
+{
+	int32_t id = 0;
+	const mutual_b* b = nullptr;
+};
+
+struct mutual_b
+{
+	int32_t id = 0;
+	const mutual_a* a = nullptr;
+};
+
+/// Recursion through a `pb::oneof` pointer alternative.
+struct oneof_node
+{
+	int32_t id = 0;
+	pb::oneof<const oneof_node*, int32_t> choice = {};
+};
+
+/// Recursion through a `map` span with pointer values.
+struct map_node
+{
+	int32_t id = 0;
+	std::span<const pb::kv_pair<std::string_view, const map_node*>> children = {};
 };
 
 /// A cycle through a `std::optional`: `opt_node`, `opt_link`, `opt_node`.
@@ -194,6 +231,43 @@ struct pb::fields_of<manual::forest>
 {};
 
 template <>
+struct pb::fields_of<manual::list_node>
+  : pb::field_list<manual::list_node,
+                   pb::field_at<decltype( manual::list_node::id ), 1, offsetof( manual::list_node, id )>,
+                   pb::field_at<decltype( manual::list_node::next ), 2, offsetof( manual::list_node, next )>,
+                   pb::field_at<decltype( manual::list_node::alt ), 3, offsetof( manual::list_node, alt )>>
+{};
+
+template <>
+struct pb::fields_of<manual::mutual_a>
+  : pb::field_list<manual::mutual_a,
+                   pb::field_at<decltype( manual::mutual_a::id ), 1, offsetof( manual::mutual_a, id )>,
+                   pb::field_at<decltype( manual::mutual_a::b ), 2, offsetof( manual::mutual_a, b )>>
+{};
+
+template <>
+struct pb::fields_of<manual::mutual_b>
+  : pb::field_list<manual::mutual_b,
+                   pb::field_at<decltype( manual::mutual_b::id ), 1, offsetof( manual::mutual_b, id )>,
+                   pb::field_at<decltype( manual::mutual_b::a ), 2, offsetof( manual::mutual_b, a )>>
+{};
+
+template <>
+struct pb::fields_of<manual::oneof_node>
+  : pb::field_list<manual::oneof_node,
+                   pb::field_at<decltype( manual::oneof_node::id ), 1, offsetof( manual::oneof_node, id )>,
+                   pb::field_at<decltype( manual::oneof_node::choice ), 2, offsetof( manual::oneof_node, choice ), 1>,
+                   pb::field_at<decltype( manual::oneof_node::choice ), 3, offsetof( manual::oneof_node, choice ), 2>>
+{};
+
+template <>
+struct pb::fields_of<manual::map_node>
+  : pb::field_list<manual::map_node,
+                   pb::field_at<decltype( manual::map_node::id ), 1, offsetof( manual::map_node, id )>,
+                   pb::field_at<decltype( manual::map_node::children ), 2, offsetof( manual::map_node, children )>>
+{};
+
+template <>
 struct pb::fields_of<manual::opt_link>
   : pb::field_list<manual::opt_link,
                    pb::field_at<decltype( manual::opt_link::nodes ), 1, offsetof( manual::opt_link, nodes )>>
@@ -242,10 +316,17 @@ static_assert( !d::is_recursive<manual::inner>() && !d::is_recursive<manual::mes
                !d::is_recursive<manual::constants>() );
 static_assert( d::is_recursive<manual::tree>() );
 static_assert( !d::is_recursive<manual::forest>() );
+static_assert( d::is_recursive<manual::list_node>() );
+static_assert( d::is_recursive<manual::mutual_a>() && d::is_recursive<manual::mutual_b>() );
+static_assert( d::is_recursive<manual::oneof_node>() );
+static_assert( d::is_recursive<manual::map_node>() );
 static_assert( d::is_recursive<manual::opt_node>() && d::is_recursive<manual::opt_link>() );
 static_assert( d::is_recursive<manual::var_node>() && d::is_recursive<manual::var_link>() );
 
-static_assert( d::needs_arena<manual::spans>() && !d::needs_arena<manual::message>() &&
+static_assert( d::needs_arena<manual::spans>() && d::needs_arena<manual::tree>() &&
+               d::needs_arena<manual::forest>() && d::needs_arena<manual::list_node>() &&
+               d::needs_arena<manual::mutual_a>() && d::needs_arena<manual::oneof_node>() &&
+               d::needs_arena<manual::map_node>() && !d::needs_arena<manual::message>() &&
                !d::needs_arena<manual::inner>() && !d::needs_arena<manual::empty>() );
 
 template <typename T, size_t N>
@@ -342,11 +423,186 @@ bool test_const_members()
 	return encodes_to( constants, std::array<uint8_t, 9>{ 0x08, 0x07, 0x10, 0x03, 0x18, 0x09, 0x32, 0x01, 0x61 } );
 }
 
+bool test_recursive_tree()
+{
+	const std::array<manual::tree, 1> grandchildren{ manual::tree{ 3, {} } };
+	const std::array<manual::tree, 2> children{ manual::tree{ 2, grandchildren }, manual::tree{ 4, {} } };
+	const manual::tree root{ 1, children };
+
+	std::array<uint8_t, 64> wire{};
+	const auto size = pb::encode( root, std::span<uint8_t>( wire ) );
+	if ( !size || *size != pb::encoded_size( root ) )
+		return false;
+
+	std::array<uint8_t, 256> storage{};
+	manual::tree decoded{};
+	const auto read = pb::decode( std::span<const uint8_t>( wire ).first( *size ), decoded, storage );
+	if ( !read || *read != *size )
+		return false;
+
+	std::array<uint8_t, 64> again{};
+	const auto reencoded = pb::encode( decoded, std::span<uint8_t>( again ) );
+	return decoded.id == 1 && decoded.children.size() == 2 && decoded.children[0].id == 2 &&
+	       decoded.children[0].children.size() == 1 && decoded.children[0].children[0].id == 3 &&
+	       decoded.children[0].children[0].children.empty() && decoded.children[1].id == 4 &&
+	       decoded.children[1].children.empty() && reencoded && *reencoded == *size && again == wire;
+}
+
+bool test_recursive_list()
+{
+	const manual::list_node n3{ 3, nullptr };
+	const manual::list_node n2{ 2, &n3 };
+	const manual::list_node n1{ 1, &n2 };
+
+	std::array<uint8_t, 64> wire{};
+	const auto size = pb::encode( n1, std::span<uint8_t>( wire ) );
+	if ( !size || *size != pb::encoded_size( n1 ) )
+		return false;
+
+	std::array<uint8_t, 128> storage{};
+	manual::list_node decoded{ 99, &n3 };
+	const auto read = pb::decode( std::span<const uint8_t>( wire ).first( *size ), decoded, storage );
+	if ( !read || *read != *size )
+		return false;
+
+	std::array<uint8_t, 64> again{};
+	const auto reencoded = pb::encode( decoded, std::span<uint8_t>( again ) );
+	const bool round_trip = decoded.id == 1 && decoded.next != nullptr && decoded.next->id == 2 &&
+	                        decoded.next->next != nullptr && decoded.next->next->id == 3 &&
+	                        decoded.next->next->next == nullptr && reencoded && *reencoded == *size && again == wire;
+
+	// Empty input resets pointer to null.
+	manual::list_node empty_rx{ 5, &n3 };
+	const auto empty_read = pb::decode( std::span<const uint8_t>{}, empty_rx, storage );
+	const bool reset_ok = empty_read && *empty_read == 0 && empty_rx.id == 0 && empty_rx.next == nullptr;
+
+	// Duplicate wire occurrences of `next` merge into the same arena-allocated node.
+	// Field 2: { id: 7 } followed by Field 2: { next: { id: 8 } }.
+	const auto merged_wire = std::to_array<uint8_t>( { 0x12, 0x02, 0x08, 0x07, 0x12, 0x04, 0x12, 0x02, 0x08, 0x08 } );
+	manual::list_node merged{};
+	const auto merged_read = pb::decode( merged_wire, merged, storage );
+	const bool merge_ok = merged_read && merged.next != nullptr && merged.next->id == 7 &&
+	                      merged.next->next != nullptr && merged.next->next->id == 8 &&
+	                      merged.next->next->next == nullptr;
+
+	// Arena too small returns ARENA_FULL.
+	std::array<uint8_t, 4> tiny{};
+	manual::list_node oom{};
+	const auto oom_read = pb::decode( std::span<const uint8_t>( wire ).first( *size ), oom, tiny );
+	const bool oom_ok = !oom_read && oom_read.error() == pb::error::ARENA_FULL;
+
+	return round_trip && reset_ok && merge_ok && oom_ok;
+}
+
+bool test_mutual_and_oneof_and_map_recursion()
+{
+	// Mutual singular recursion: a(1) -> b(2) -> a(3).
+	const manual::mutual_a a3{ 3, nullptr };
+	const manual::mutual_b b2{ 2, &a3 };
+	const manual::mutual_a a1{ 1, &b2 };
+
+	std::array<uint8_t, 64> wire{};
+	std::array<uint8_t, 256> storage{};
+	const auto m_size = pb::encode( a1, std::span<uint8_t>( wire ) );
+	manual::mutual_a m_dec{};
+	const auto m_read = m_size ? pb::decode( std::span<const uint8_t>( wire ).first( *m_size ), m_dec, storage )
+	                           : std::unexpected( pb::error::TRUNCATED );
+	const bool mutual_ok = m_read && m_dec.id == 1 && m_dec.b != nullptr && m_dec.b->id == 2 &&
+	                       m_dec.b->a != nullptr && m_dec.b->a->id == 3 && m_dec.b->a->b == nullptr;
+
+	// Recursive oneof with pointer alternative.
+	const manual::oneof_node leaf{ 2, int32_t{ 42 } };
+	const manual::oneof_node top{ 1, &leaf };
+	const auto o_size = pb::encode( top, std::span<uint8_t>( wire ) );
+	manual::oneof_node o_dec{};
+	const auto o_read = o_size ? pb::decode( std::span<const uint8_t>( wire ).first( *o_size ), o_dec, storage )
+	                           : std::unexpected( pb::error::TRUNCATED );
+	const auto* child_ptr = pb::get_if<const manual::oneof_node*>( &o_dec.choice );
+	const auto* leaf_val = ( child_ptr && *child_ptr ) ? pb::get_if<int32_t>( &( *child_ptr )->choice ) : nullptr;
+	const bool oneof_ok = o_read && o_dec.id == 1 && child_ptr != nullptr && *child_ptr != nullptr &&
+	                      ( *child_ptr )->id == 2 && leaf_val != nullptr && *leaf_val == 42;
+
+	// Recursive map via span of kv_pair with pointer value.
+	const manual::map_node map_leaf{ 2, {} };
+	const std::array<pb::kv_pair<std::string_view, const manual::map_node*>, 1> entries{
+		pb::kv_pair<std::string_view, const manual::map_node*>{ "child", &map_leaf }
+	};
+	const manual::map_node map_root{ 1, entries };
+	const auto k_size = pb::encode( map_root, std::span<uint8_t>( wire ) );
+	manual::map_node k_dec{};
+	const auto k_read = k_size ? pb::decode( std::span<const uint8_t>( wire ).first( *k_size ), k_dec, storage )
+	                           : std::unexpected( pb::error::TRUNCATED );
+	const bool map_ok = k_read && k_dec.id == 1 && k_dec.children.size() == 1 && k_dec.children[0].key == "child" &&
+	                    k_dec.children[0].value != nullptr && k_dec.children[0].value->id == 2 &&
+	                    k_dec.children[0].value->children.empty();
+
+	return mutual_ok && oneof_ok && map_ok;
+}
+
+bool test_max_depth()
+{
+	// Build a chain of depth MICROPB_MAX_DEPTH (32 nested submessages): must encode and decode.
+	constexpr size_t limit = d::max_depth;
+	std::array<manual::list_node, limit + 2> chain{};
+	for ( size_t i = 0; i < chain.size(); ++i )
+		chain[i].id = static_cast<int32_t>( i + 1 );
+	for ( size_t i = 0; i < limit; ++i )
+		chain[i].next = &chain[i + 1];
+
+	std::array<uint8_t, limit * 8 + 64> wire{};
+	const auto ok_enc = pb::encode( chain[0], std::span<uint8_t>( wire ) );
+	if ( !ok_enc )
+		return false;
+
+	std::array<uint8_t, ( limit + 2 ) * sizeof( manual::list_node ) + 64> storage{};
+	manual::list_node dec{};
+	const auto ok_dec = pb::decode( std::span<const uint8_t>( wire ).first( *ok_enc ), dec, storage );
+	if ( !ok_dec )
+		return false;
+
+	const manual::list_node* cur = &dec;
+	for ( size_t i = 0; i < limit; ++i )
+	{
+		if ( cur->id != static_cast<int32_t>( i + 1 ) || cur->next == nullptr )
+			return false;
+		cur = cur->next;
+	}
+	if ( cur->id != static_cast<int32_t>( limit + 1 ) || cur->next != nullptr )
+		return false;
+
+	// Depth MICROPB_MAX_DEPTH + 1: encode fails with MAX_DEPTH_EXCEEDED.
+	chain[limit].next = &chain[limit + 1];
+	const auto deep_enc = pb::encode( chain[0], std::span<uint8_t>( wire ) );
+	if ( deep_enc || deep_enc.error() != pb::error::MAX_DEPTH_EXCEEDED )
+		return false;
+
+	// In-memory binary cycle: encode fails with MAX_DEPTH_EXCEEDED and encoded_size terminates in O(max_depth).
+	manual::list_node cycle{ 1, nullptr, nullptr };
+	cycle.next = &cycle;
+	cycle.alt = &cycle;
+	const auto cyc_enc = pb::encode( cycle, std::span<uint8_t>( wire ) );
+	const size_t cyc_sz = pb::encoded_size( cycle );
+	if ( cyc_enc || cyc_enc.error() != pb::error::MAX_DEPTH_EXCEEDED || cyc_sz == 0 )
+		return false;
+
+	// Wire payload nested to MICROPB_MAX_DEPTH + 1: decode fails with MAX_DEPTH_EXCEEDED.
+	// Wrap the depth-`limit` wire message in one more field-2 submessage envelope.
+	std::array<uint8_t, limit * 8 + 80> deep_wire{};
+	pb::writer w( deep_wire );
+	w.write_key( 2, pb::wire_type::LENGTH_DELIMITED );
+	w.write_varint( *ok_enc );
+	w.write_bytes( std::span<const uint8_t>( wire ).first( *ok_enc ) );
+	manual::list_node deep_dec{};
+	const auto deep_read = pb::decode( w.used_span(), deep_dec, storage );
+	return !deep_read && deep_read.error() == pb::error::MAX_DEPTH_EXCEEDED;
+}
+
 } // namespace
 
 int main()
 {
 	const bool ok = test_encode() && test_decode() && test_decode_message_alternative() && test_decode_spans() &&
-	                test_encode_only() && test_const_members() && test_const_span_element();
+	                test_encode_only() && test_const_members() && test_const_span_element() && test_recursive_tree() &&
+	                test_recursive_list() && test_mutual_and_oneof_and_map_recursion() && test_max_depth();
 	return ok ? 0 : 1;
 }

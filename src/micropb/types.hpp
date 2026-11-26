@@ -29,10 +29,12 @@ enum class error : uint8_t
 	INVALID_TAG,
 	/// decode: a field has more elements or bytes than its `pb::repeated`, `pb::bytes`, `pb::string` or `std::array` holds.
 	CAPACITY_EXCEEDED,
-	/// decode: the arena has no space for the items of a repeated field.
+	/// decode: the arena has no space for a repeated span or message pointer.
 	ARENA_FULL,
 	/// reader: a varint or zigzag value is outside the range of the target type.
 	OUT_OF_RANGE,
+	/// encode/decode: nested submessage depth exceeds `MICROPB_MAX_DEPTH`.
+	MAX_DEPTH_EXCEEDED,
 };
 
 /// Wire types of proto3 that this library supports. It does not support the group types (3, 4).

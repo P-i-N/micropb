@@ -98,7 +98,7 @@ struct value_desc
 		const void* table;
 		/// REPEATED, BYTES and `pb::string`. Null for the views `std::string_view` and `std::span<const uint8_t>`.
 		const sequence_desc* sequence;
-		/// OPTIONAL.
+		/// OPTIONAL and POINTER (`const T*`).
 		const optional_desc* optional;
 		/// ONEOF: array of `const value_desc*` for alternatives `1..K` (at index `alt - 1`).
 		const value_desc* const* oneof;
@@ -170,14 +170,14 @@ inline constexpr uint16_t message_always_emit = 0x8000u;
 
 enum class sequence_storage : uint8_t
 {
-	/// `pb::repeated`, `pb::bytes`, `pb::string` with a `uint8_t` count (`max_size <= 255`).
-	REPEATED_8,
-	/// `pb::repeated`, `pb::bytes`, `pb::string` with a `uint16_t` count (`max_size <= 65535`).
-	REPEATED_16,
 	/// `pb::map` with a `uint8_t` count (`max_size <= 255`).
 	MAP_8,
 	/// `pb::map` with a `uint16_t` count (`max_size <= 65535`).
 	MAP_16,
+	/// `pb::repeated`, `pb::bytes`, `pb::string` with a `uint8_t` count (`max_size <= 255`).
+	REPEATED_8,
+	/// `pb::repeated`, `pb::bytes`, `pb::string` with a `uint16_t` count (`max_size <= 65535`).
+	REPEATED_16,
 	/// `std::array`: the items are at offset 0, the count is `capacity`.
 	ARRAY,
 	/// `std::span<const T>`: `span->access` gives the items.
@@ -224,7 +224,7 @@ enum class optional_op : uint8_t
 	RESET,
 };
 
-using optional_accessor = void* ( * )( void* optional, optional_op op );
+using optional_accessor = void* ( * )( void* optional, optional_op op, arena* memory );
 
 struct optional_desc
 {
@@ -296,7 +296,7 @@ void construct_item( void* item )
 /// member again in its place. Such a value type is encode-only
 /// (`check_decodable`), and `ENGAGE` does nothing for it.
 template <typename O>
-[[nodiscard]] void* access_optional( void* optional, optional_op op )
+[[nodiscard]] void* access_optional( void* optional, optional_op op, arena* )
 {
 	O& value = *static_cast<O*>( optional );
 	if ( op == optional_op::RESET )
@@ -313,6 +313,33 @@ template <typename O>
 			value.emplace();
 	}
 	return value ? &*value : nullptr;
+}
+
+/// Accessor of a `const T*` message pointer. Uses the same `optional_desc`
+/// dispatch as `std::optional`: `GET` returns the target or null, `RESET`
+/// nulls the pointer, and `ENGAGE` allocates `T` in `memory`.
+template <typename T>
+[[nodiscard]] void* access_pointer( void* slot, optional_op op, arena* memory )
+{
+	if ( op == optional_op::RESET )
+	{
+		const void* empty = nullptr;
+		std::memcpy( slot, &empty, sizeof empty );
+		return nullptr;
+	}
+	void* target = nullptr;
+	std::memcpy( &target, slot, sizeof target );
+	if ( op == optional_op::ENGAGE && target == nullptr && memory != nullptr )
+	{
+		target = memory->allocate( sizeof( T ), alignof( T ) );
+		if ( target != nullptr )
+		{
+			if constexpr ( std::is_default_constructible_v<T> )
+				::new ( target ) T();
+			std::memcpy( slot, &target, sizeof target );
+		}
+	}
+	return target;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -439,6 +466,9 @@ template <typename O, int_encoding Encoding = int_encoding::VARINT>
 inline constexpr optional_desc optional_descriptor{ &value_descriptor<typename O::value_type, Encoding>::value,
                                                     access_optional<O> };
 
+template <typename T>
+inline constexpr optional_desc pointer_descriptor{ &value_descriptor<T>::value, access_pointer<T> };
+
 template <typename V, int_encoding... AltEncodings>
 struct oneof_alternatives;
 
@@ -452,11 +482,12 @@ template <typename V, int_encoding... AltEncodings>
 [[nodiscard]] consteval value_desc describe_oneof()
 {
 	static_assert( oneof_access::storage_offset<V> == 0 );
+	static_assert( oneof_access::index_size<V> == 1 );
 	static_assert( oneof_access::index_offset<V> <= max_offset,
 	               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
 	return {
 		.kind = field_kind::ONEOF,
-		.scalar = static_cast<uint8_t>( oneof_access::index_size<V> ),
+		.scalar = 1,
 		.words = static_cast<uint16_t>( oneof_access::index_offset<V> ),
 		.oneof = oneof_alternatives<V, AltEncodings...>::value,
 	};
@@ -809,6 +840,11 @@ template <typename T, int_encoding Encoding>
 			.table = table,
 		};
 	}
+	else if constexpr ( kind == field_kind::POINTER )
+		return { .kind = field_kind::OPTIONAL,
+		         .scalar = 0,
+		         .words = 0,
+		         .optional = &pointer_descriptor<std::remove_const_t<std::remove_pointer_t<T>>> };
 	else if constexpr ( kind == field_kind::OPTIONAL )
 		return { .kind = kind, .scalar = 0, .words = 0, .optional = &optional_descriptor<T, Encoding> };
 	else
@@ -924,12 +960,12 @@ constexpr value_desc value_descriptor<T, Encoding>::value = describe_value<T, En
 
 [[nodiscard]] inline bool is_map_storage( sequence_storage storage )
 {
-	return storage == sequence_storage::MAP_8 || storage == sequence_storage::MAP_16;
+	return storage <= sequence_storage::MAP_16;
 }
 
 [[nodiscard]] inline bool is_repeated_storage( sequence_storage storage )
 {
-	return storage == sequence_storage::REPEATED_8 || storage == sequence_storage::REPEATED_16 || is_map_storage( storage );
+	return storage <= sequence_storage::REPEATED_16;
 }
 
 [[nodiscard]] inline const span_desc* sequence_span( const sequence_desc& sequence )
@@ -940,7 +976,7 @@ constexpr value_desc value_descriptor<T, Encoding>::value = describe_value<T, En
 [[nodiscard]] inline size_t load_count( const sequence_desc& sequence, const void* object )
 {
 	const void* ptr = member_at( object, sequence.count_offset );
-	if ( sequence.storage == sequence_storage::REPEATED_8 || sequence.storage == sequence_storage::MAP_8 )
+	if ( ( static_cast<uint8_t>( sequence.storage ) & 1u ) == 0 )
 		return *static_cast<const uint8_t*>( ptr );
 	uint16_t count;
 	std::memcpy( &count, ptr, sizeof count );
@@ -950,7 +986,7 @@ constexpr value_desc value_descriptor<T, Encoding>::value = describe_value<T, En
 inline void store_count( const sequence_desc& sequence, void* object, size_t count )
 {
 	void* ptr = member_at( object, sequence.count_offset );
-	if ( sequence.storage == sequence_storage::REPEATED_8 || sequence.storage == sequence_storage::MAP_8 )
+	if ( ( static_cast<uint8_t>( sequence.storage ) & 1u ) == 0 )
 	{
 		*static_cast<uint8_t*>( ptr ) = static_cast<uint8_t>( count );
 		return;
@@ -961,24 +997,12 @@ inline void store_count( const sequence_desc& sequence, void* object, size_t cou
 
 [[nodiscard]] inline size_t oneof_index( const value_desc& type, const void* object )
 {
-	const void* ptr = member_at( object, type.words );
-	if ( type.scalar == 1 )
-		return *static_cast<const uint8_t*>( ptr );
-	uint16_t index;
-	std::memcpy( &index, ptr, sizeof index );
-	return index;
+	return *static_cast<const uint8_t*>( member_at( object, type.words ) );
 }
 
 inline void set_oneof_index( const value_desc& type, void* object, size_t index )
 {
-	void* ptr = member_at( object, type.words );
-	if ( type.scalar == 1 )
-	{
-		*static_cast<uint8_t*>( ptr ) = static_cast<uint8_t>( index );
-		return;
-	}
-	const auto narrow = static_cast<uint16_t>( index );
-	std::memcpy( ptr, &narrow, sizeof narrow );
+	*static_cast<uint8_t*>( member_at( object, type.words ) ) = static_cast<uint8_t>( index );
 }
 
 /// The items of the sequence at `object`. The interpreter writes through the
@@ -1003,31 +1027,26 @@ inline void set_oneof_index( const value_desc& type, void* object, size_t index 
 		case 0: {
 			uint8_t narrow;
 			std::memcpy( &narrow, value, sizeof narrow );
-			bits = narrow;
+			bits = ( code & scalar_signed ) ? static_cast<uint64_t>( static_cast<int8_t>( narrow ) ) : narrow;
 			break;
 		}
 		case 1: {
 			uint16_t narrow;
 			std::memcpy( &narrow, value, sizeof narrow );
-			bits = narrow;
+			bits = ( code & scalar_signed ) ? static_cast<uint64_t>( static_cast<int16_t>( narrow ) ) : narrow;
 			break;
 		}
 		case 2: {
 			uint32_t narrow;
 			std::memcpy( &narrow, value, sizeof narrow );
-			bits = narrow;
+			bits = ( code & scalar_signed ) || code == scalar_enum
+			         ? static_cast<uint64_t>( static_cast<int32_t>( narrow ) )
+			         : narrow;
 			break;
 		}
 		default: std::memcpy( &bits, value, sizeof bits );
 	}
 
-	if ( code & scalar_signed )
-	{
-		const unsigned shift = 64 - ( 8u << ( code & scalar_size_mask ) );
-		bits = static_cast<uint64_t>( static_cast<int64_t>( bits << shift ) >> shift );
-	}
-	if ( code == scalar_enum )
-		bits = static_cast<uint64_t>( static_cast<int64_t>( static_cast<int32_t>( bits ) ) );
 	if ( is_scalar_zigzag( code ) )
 		bits = zigzag_encode( static_cast<int64_t>( bits ) );
 	return bits;
@@ -1084,29 +1103,48 @@ MICROPB_ENTRY inline size_t encoded_size( const value_desc& message, const void*
 /// Writes a field of a message type: the key, the length prefix and the fields.
 inline void emit_submessage( writer& sink, uint32_t number, const value_desc& message, const void* object )
 {
-	sink.write_key( number, wire_type::LENGTH_DELIMITED );
-	if ( !sink.counts_only() )
+	if ( depth_access::depth( sink ) >= max_depth )
 	{
-		// The length prefix comes before the fields, so measure them first.
-		sink.write_varint( encoded_size( message, object ) );
-		emit_message( sink, message, object );
+		depth_access::fail( sink );
 		return;
 	}
 
-	// The writer writes no byte, so the order is free: count the fields, then
-	// the length prefix. This walks the message only one time.
-	const size_t start = sink.size();
-	emit_message( sink, message, object );
-	sink.advance( varint_size( sink.size() - start ) );
+	depth_access::enter( sink );
+	// The length prefix comes before the fields, so measure them first.
+	writer counter = depth_access::counter( sink );
+	emit_message( counter, message, object );
+	if ( depth_access::depth_exceeded( counter ) )
+	{
+		depth_access::fail( sink );
+		return;
+	}
+
+	sink.write_key( number, wire_type::LENGTH_DELIMITED );
+	sink.write_varint( counter.size() );
+	if ( sink.counts_only() )
+		sink.advance( counter.size() );
+	else
+		emit_message( sink, message, object );
+	depth_access::leave( sink );
 }
+
+#ifndef MICROPB_FAST
+inline void emit_packed_elements( writer& out, const sequence_desc& sequence, const sequence_view& items )
+{
+	const uint8_t code = sequence.element->scalar;
+	const auto* ptr = static_cast<const unsigned char*>( items.data );
+	for ( size_t i = 0; i < items.count; ++i, ptr += sequence.element_size )
+		emit_scalar( out, code, load_scalar( ptr, code ) );
+}
+#endif
 
 /// Writes the scalar elements of a repeated field as one packed field. `items`
 /// must not be empty: with no items, the function writes a key and the length
 /// 0, which `protoc` does not write.
 inline void emit_packed( writer& sink, uint32_t number, const sequence_desc& sequence, const sequence_view& items )
 {
-	const uint8_t code = sequence.element->scalar;
 #ifdef MICROPB_FAST
+	const uint8_t code = sequence.element->scalar;
 	const bool fixed = ( code & scalar_fixed ) != 0;
 
 	// The length prefix comes before the values, so measure them first.
@@ -1148,17 +1186,11 @@ inline void emit_packed( writer& sink, uint32_t number, const sequence_desc& seq
 			sink.write_varint( load_scalar( ptr, code ) );
 	}
 #else
-	const auto write_all = [&]( writer& out ) {
-		const auto* ptr = static_cast<const unsigned char*>( items.data );
-		for ( size_t i = 0; i < items.count; ++i, ptr += sequence.element_size )
-			emit_scalar( out, code, load_scalar( ptr, code ) );
-	};
-
-	writer counter( std::span<uint8_t>{} );
-	write_all( counter );
+	writer counter;
+	emit_packed_elements( counter, sequence, items );
 	sink.write_key( number, wire_type::LENGTH_DELIMITED );
 	sink.write_varint( counter.size() );
-	write_all( sink );
+	emit_packed_elements( sink, sequence, items );
 #endif
 }
 
@@ -1179,36 +1211,36 @@ inline void emit_value( writer& sink, uint32_t number, const value_desc& type, c
 			break;
 		}
 		case field_kind::STRING:
-			if ( type.sequence == nullptr )
-			{
-				std::string_view text;
-				std::memcpy( static_cast<void*>( &text ), value, sizeof text );
-				emit_bytes( sink, number, { reinterpret_cast<const uint8_t*>( text.data() ), text.size() }, always );
-				break;
-			}
-			[[fallthrough]];
-		case field_kind::BYTES: {
+		case field_kind::BYTES:
+		case field_kind::FIXED_BYTES: {
 			std::span<const uint8_t> bytes;
-			if ( type.sequence == nullptr )
+			if ( type.kind == field_kind::FIXED_BYTES )
 			{
-				std::memcpy( static_cast<void*>( &bytes ), value, sizeof bytes );
+				// The length is never 0 here, except for an array of length 0.
+				bytes = { static_cast<const uint8_t*>( value ), type.size };
 			}
-			else
+			else if ( type.sequence != nullptr )
 			{
 				const sequence_view items = view_of( *type.sequence, const_cast<void*>( value ) );
 				bytes = { static_cast<const uint8_t*>( items.data ), items.count };
 			}
+			else if ( type.kind == field_kind::STRING )
+			{
+				std::string_view text;
+				std::memcpy( static_cast<void*>( &text ), value, sizeof text );
+				bytes = { reinterpret_cast<const uint8_t*>( text.data() ), text.size() };
+			}
+			else
+			{
+				std::memcpy( static_cast<void*>( &bytes ), value, sizeof bytes );
+			}
 			emit_bytes( sink, number, bytes, always );
 			break;
 		}
-		case field_kind::FIXED_BYTES:
-			// The length is never 0 here, except for an array of length 0.
-			emit_bytes( sink, number, { static_cast<const uint8_t*>( value ), type.size }, always );
-			break;
 		case field_kind::MESSAGE: emit_submessage( sink, number, type, value ); break;
 		case field_kind::OPTIONAL: {
 			const optional_desc& optional = *type.optional;
-			if ( const void* held = optional.access( const_cast<void*>( value ), optional_op::GET ) )
+			if ( const void* held = optional.access( const_cast<void*>( value ), optional_op::GET, nullptr ) )
 				emit_value( sink, number, *optional.value, held, true );
 			break;
 		}
@@ -1229,8 +1261,9 @@ inline void emit_value( writer& sink, uint32_t number, const value_desc& type, c
 			emit_packed( sink, number, sequence, items );
 			break;
 		}
+		case field_kind::POINTER:
 		case field_kind::ONEOF:
-			// `emit_message` writes the active alternative of a oneof.
+			// `emit_message` writes the active alternative of a oneof; pointers use `OPTIONAL`.
 			break;
 	}
 }
@@ -1284,7 +1317,10 @@ MICROPB_ENTRY inline std::expected<size_t, error> encode(
   const value_desc& message, const void* object, writer& sink )
 {
 	const size_t start = sink.size();
+	depth_access::reset( sink );
 	emit_message( sink, message, object );
+	if ( depth_access::depth_exceeded( sink ) )
+		return std::unexpected( error::MAX_DEPTH_EXCEEDED );
 	if ( !sink.fits() )
 		return std::unexpected( error::BUFFER_TOO_SMALL );
 	return sink.size() - start;
@@ -1361,13 +1397,10 @@ inline void reset_value( const value_desc& type, void* value )
 			{
 				const std::string_view empty;
 				std::memcpy( value, static_cast<const void*>( &empty ), sizeof empty );
+				break;
 			}
-			else
-			{
-				*static_cast<char*>( value ) = '\0';
-				store_count( *type.sequence, value, 0 );
-			}
-			break;
+			*static_cast<char*>( value ) = '\0';
+			[[fallthrough]];
 		case field_kind::BYTES:
 			if ( type.sequence == nullptr )
 			{
@@ -1377,14 +1410,18 @@ inline void reset_value( const value_desc& type, void* value )
 			}
 			[[fallthrough]];
 		case field_kind::REPEATED:
-			if ( const span_desc* span = sequence_span( *type.sequence ); span != nullptr && span->bind != nullptr )
-				span->bind( value, nullptr, 0 );
+			if ( type.sequence->storage == sequence_storage::ACCESSOR )
+			{
+				if ( type.sequence->span->bind != nullptr )
+					type.sequence->span->bind( value, nullptr, 0 );
+			}
 			else if ( is_repeated_storage( type.sequence->storage ) )
 				store_count( *type.sequence, value, 0 );
 			break;
 		case field_kind::MESSAGE: reset_message( type, value ); break;
-		case field_kind::OPTIONAL: static_cast<void>( type.optional->access( value, optional_op::RESET ) ); break;
+		case field_kind::OPTIONAL: static_cast<void>( type.optional->access( value, optional_op::RESET, nullptr ) ); break;
 		case field_kind::ONEOF: set_oneof_index( type, value, 0 ); break;
+		case field_kind::POINTER: break;
 	}
 }
 
@@ -1567,18 +1604,24 @@ inline void decode_element( reader& in, wire_type wire, const sequence_desc& seq
 		return sequence.map_decode( in, wire, sequence, value, memory );
 
 	const sequence_view items = view_of( sequence, value );
-	if ( items.count >= decode_capacity( sequence, items ) )
-		return in.fail( capacity_error( sequence ) );
+	const span_desc* span = sequence.storage == sequence_storage::ACCESSOR ? sequence.span : nullptr;
+	const bool bound = span != nullptr && span->bind != nullptr;
+	const size_t capacity = bound ? block_capacity( items.data ) : sequence.capacity;
+	if ( items.count >= capacity )
+		return in.fail( bound ? error::TRUNCATED : error::CAPACITY_EXCEEDED );
 
 	void* item = member_at( items.data, items.count * sequence.element_size );
-	if ( const span_desc* span = sequence_span( sequence ); span != nullptr && span->construct != nullptr )
+	if ( span != nullptr && span->construct != nullptr )
 		span->construct( item );
 	reset_value( *sequence.element, item );
 	decode_value( in, wire, *sequence.element, item, memory );
 	if ( in.failed() )
 		return;
 
-	commit_count( sequence, value, items.data, items.count + 1 );
+	if ( bound )
+		span->bind( value, items.data, items.count + 1 );
+	else
+		store_count( sequence, value, items.count + 1 );
 }
 
 #ifdef MICROPB_FAST
@@ -1656,11 +1699,12 @@ inline void decode_packed_scalars( reader& in, const sequence_desc& sequence, vo
 /// record or a single value, also mixed in one message.
 inline void decode_repeated( reader& in, field_key key, const sequence_desc& sequence, void* value, arena* memory )
 {
-	if ( const span_desc* span = sequence_span( sequence );
-	     span != nullptr && span->reserve != nullptr && !span->reserve( in, key, sequence, value, memory ) )
+	if ( sequence.storage == sequence_storage::ACCESSOR && sequence.span->reserve != nullptr &&
+	     !sequence.span->reserve( in, key, sequence, value, memory ) )
 		return in.fail( error::ARENA_FULL );
 
 	const value_desc& element = *sequence.element;
+	const wire_type elem_wire = wire_of( element );
 	if ( element.kind == field_kind::SCALAR && key.type == wire_type::LENGTH_DELIMITED )
 	{
 #ifdef MICROPB_FAST
@@ -1668,11 +1712,11 @@ inline void decode_repeated( reader& in, field_key key, const sequence_desc& seq
 #else
 		reader packed( in.read_length_delimited() );
 		while ( !packed.empty() )
-			decode_element( packed, wire_of( element ), sequence, value, memory );
+			decode_element( packed, elem_wire, sequence, value, memory );
 		in.absorb( packed );
 #endif
 	}
-	else if ( key.type == wire_of( element ) )
+	else if ( key.type == elem_wire )
 	{
 		decode_element( in, key.type, sequence, value, memory );
 	}
@@ -1701,10 +1745,12 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 	{
 		// A new value starts from the reset state, as each member of `msg` does.
 		const optional_desc& optional = *type.optional;
-		void* held = optional.access( value, optional_op::GET );
+		void* held = optional.access( value, optional_op::GET, nullptr );
 		if ( held == nullptr )
 		{
-			held = optional.access( value, optional_op::ENGAGE );
+			held = optional.access( value, optional_op::ENGAGE, memory );
+			if ( held == nullptr )
+				return in.fail( error::ARENA_FULL );
 			reset_value( *optional.value, held );
 		}
 		return decode_value( in, wire, *optional.value, held, memory );
@@ -1750,8 +1796,13 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 				std::memcpy( value, bytes.data(), bytes.size() );
 			break;
 		case field_kind::MESSAGE: {
+			if ( depth_access::depth( in ) >= max_depth )
+			{
+				in.fail( error::MAX_DEPTH_EXCEEDED );
+				break;
+			}
 			// The codec does not reset the message: a second occurrence merges into the first.
-			reader part( bytes );
+			reader part = depth_access::nested( in, bytes );
 			decode_message( part, type, value, memory );
 			in.absorb( part );
 			break;
@@ -1820,13 +1871,10 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 	uint32_t prev = 0;
 	for ( size_t pos = 0; pos < total_words; )
 	{
-		const field_entry entry = decode_entry( words, pos, prev );
-		if ( entry.number == number )
-		{
-			out = entry;
+		out = decode_entry( words, pos, prev );
+		if ( out.number == number )
 			return true;
-		}
-		prev = entry.number;
+		prev = out.number;
 	}
 	return false;
 }
@@ -1911,7 +1959,7 @@ inline void decode_message( reader& in, const value_desc& message, void* object,
 	}
 }
 
-/// `memory` is null for a message without a `std::span<const T>` repeated field.
+/// `memory` is null for a message without a `std::span<const T>` repeated field or message pointer.
 MICROPB_ENTRY inline std::expected<size_t, error> decode(
   const value_desc& message, std::span<const uint8_t> in, void* object, arena* memory )
 {

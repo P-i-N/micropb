@@ -15,7 +15,8 @@ fields come from app.options, a file in the NanoPB format:
     Message.field  max_size:6 fixed_length:true   bytes: std::array<uint8_t, 6>
     Message.field  int_size:IS_8                  int8_t or uint8_t (also IS_16, IS_32, IS_64)
     Message.field  type:FT_POINTER                repeated: std::span<const T>, also with max_count;
-                                                    bytes: std::span<const uint8_t>; string: std::string_view
+                                                    message: const T*; bytes: std::span<const uint8_t>;
+                                                    string: std::string_view
     Enum           enum_intsize:IS_8              enum class Enum : int8_t (also IS_16, IS_32)
 
 The plugin looks for app.options with the path that protoc has for app.proto: first from the
@@ -520,7 +521,10 @@ class Header:
             if repeated and text == "uint8_t":
                 raise self.error(f"{name}: int_size:IS_8 on a repeated unsigned field gives a bytes field")
 
-        pointer = option("type") if repeated or field.type in (Field.TYPE_BYTES, Field.TYPE_STRING) else False
+        pointer = (option("type")
+                   if repeated or field.type in (Field.TYPE_BYTES, Field.TYPE_STRING, Field.TYPE_MESSAGE) else False)
+        if field.type == Field.TYPE_MESSAGE and not repeated and pointer:
+            text = f"const {text}*"
 
         if field.type == Field.TYPE_BYTES and not pointer:
             size, fixed = option("max_size"), option("fixed_length")
@@ -579,7 +583,9 @@ class Header:
             index = oneof_of(field)
             if index is None:
                 text = self.field_type(message, field, member_names)
-                if field.proto3_optional:
+                if text.endswith("*"):
+                    default = "nullptr"
+                elif field.proto3_optional:
                     text = f"std::optional<{text}>"
                     default = "{}"
                 elif field.label == Field.LABEL_REPEATED:
@@ -620,35 +626,89 @@ class Header:
             lines.append(f"    pb::field_at<decltype({name}::{member}), {number}, offsetof({name}, {member}){tail}>")
         return ",\n".join(lines) + "> {};"
 
-    def in_dependency_order(self, messages):
-        """`messages` in an order where each message comes after the messages of this file that it contains."""
-        order, stack = [], []
+    def message_deps(self, message):
+        """Same-file message dependencies of `message` as `(hard, soft)`.
+        Hard dependencies are by-value members; soft dependencies are pointers or `std::span`."""
+        hard, soft = [], []
+        for field in message.desc.field:
+            if field.type != Field.TYPE_MESSAGE:
+                continue
+            target = self.types[field.type_name]
+            found = self.options.of(f"{message.proto_name}.{field.name}", self.file.package)
+            is_pointer = found.get("type", (False,))[0]
+            if target.desc.options.map_entry:
+                val_field = next(f for f in target.desc.field if f.number == 2)
+                if val_field.type != Field.TYPE_MESSAGE:
+                    continue
+                val_target = self.types[val_field.type_name]
+                if val_target.file.name != self.file.name:
+                    continue
+                val_found = self.options.of(f"{target.proto_name}.{val_field.name}", self.file.package)
+                val_pointer = val_found.get("type", (False,))[0]
+                (soft if val_pointer else hard).append(val_target)
+            elif target.file.name == self.file.name:
+                if field.label == Field.LABEL_REPEATED:
+                    has_count = not is_pointer and "max_count" in found
+                    (hard if has_count else soft).append(target)
+                else:
+                    (soft if is_pointer else hard).append(target)
+        return hard, soft
 
-        def visit(message):
+    def in_dependency_order(self, messages):
+        """`messages` in an order where each message comes after the messages of this file that it contains
+        by value, and the messages that need a forward declaration."""
+        deps = {m: self.message_deps(m) for m in messages}
+
+        checked, stack = set(), []
+
+        def check_hard(message):
             if message in stack:
                 cycle = stack[stack.index(message):] + [message]
                 raise self.error("a message cannot contain itself: " + " -> ".join(m.name for m in cycle))
-            if message in order:
+            if message in checked:
                 return
-
             stack.append(message)
-            for field in message.desc.field:
-                if field.type == Field.TYPE_MESSAGE:
-                    target = self.types[field.type_name]
-                    if target.desc.options.map_entry:
-                        val_field = next(f for f in target.desc.field if f.number == 2)
-                        if val_field.type == Field.TYPE_MESSAGE:
-                            val_target = self.types[val_field.type_name]
-                            if val_target.file.name == self.file.name:
-                                visit(val_target)
-                    elif target.file.name == self.file.name:
-                        visit(target)
+            for target in deps[message][0]:
+                check_hard(target)
             stack.pop()
+            checked.add(message)
+
+        for message in messages:
+            check_hard(message)
+
+        def hard_reaches(src, dst):
+            seen = set()
+            work = list(deps[src][0])
+            while work:
+                cur = work.pop()
+                if cur is dst:
+                    return True
+                if cur not in seen:
+                    seen.add(cur)
+                    work.extend(deps[cur][0])
+            return False
+
+        order, visiting = [], set()
+
+        def visit(message):
+            if message in order or message in visiting:
+                return
+            visiting.add(message)
+            for target in deps[message][0]:
+                visit(target)
+            for target in deps[message][1]:
+                if target is not message and target not in visiting and not hard_reaches(target, message):
+                    visit(target)
+            visiting.remove(message)
             order.append(message)
 
         for message in messages:
             visit(message)
-        return order
+
+        pos = {m: i for i, m in enumerate(order)}
+        need_fwd = {target for m in order for target in deps[m][1] if pos[target] > pos[m]}
+        forward = [m for m in order if m in need_fwd]
+        return order, forward
 
     def text(self):
         """The complete text of the header."""
@@ -673,8 +733,11 @@ class Header:
                 self.options.of(each.proto_name, self.file.package)
         self.options.check_rules()
 
+        ordered, forward = self.in_dependency_order(messages)
         blocks = [enum_text(each, self.options) for each in types if each.is_enum]
-        blocks += [self.struct_text(each) for each in self.in_dependency_order(messages)]
+        if forward:
+            blocks.append("\n".join(f"struct {each.name};" for each in forward))
+        blocks += [self.struct_text(each) for each in ordered]
         body = "\n\n".join(blocks)
         lists = "\n\n".join(self.field_lists)
 
