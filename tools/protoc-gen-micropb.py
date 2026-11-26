@@ -289,10 +289,10 @@ def boolean(text):
 
 
 def field_type(text):
-    """`true` for FT_POINTER."""
+    """FT_DEFAULT, FT_STATIC or FT_POINTER."""
     if text not in ("FT_DEFAULT", "FT_STATIC", "FT_POINTER"):
         raise ValueError("FT_DEFAULT, FT_STATIC or FT_POINTER")
-    return text == "FT_POINTER"
+    return text
 
 
 def int_size(text):
@@ -458,6 +458,7 @@ class Header:
         self.namespace_prefix = namespace_prefix
         self.imports = set()
         self.field_lists = []
+        self.auto_pointers = set()
 
     def error(self, text):
         return Error(f"{self.file.name}: {text}")
@@ -496,7 +497,7 @@ class Header:
                     enc_args.append(key_enc or "pb::int_encoding::VARINT")
                     if val_enc:
                         enc_args.append(val_enc)
-                pointer = option("type")
+                pointer = option("type") == "FT_POINTER"
                 count = option("max_count") if not pointer else None
                 if not pointer and not count and option("fixed_count"):
                     raise self.error(f"{name}: fixed_count needs max_count")
@@ -521,9 +522,10 @@ class Header:
             if repeated and text == "uint8_t":
                 raise self.error(f"{name}: int_size:IS_8 on a repeated unsigned field gives a bytes field")
 
-        pointer = (option("type")
-                   if repeated or field.type in (Field.TYPE_BYTES, Field.TYPE_STRING, Field.TYPE_MESSAGE) else False)
-        if field.type == Field.TYPE_MESSAGE and not repeated and pointer:
+        opt_type = (option("type")
+                    if repeated or field.type in (Field.TYPE_BYTES, Field.TYPE_STRING, Field.TYPE_MESSAGE) else None)
+        pointer = opt_type == "FT_POINTER"
+        if field.type == Field.TYPE_MESSAGE and not repeated and (pointer or name in self.auto_pointers):
             text = f"const {text}*"
 
         if field.type == Field.TYPE_BYTES and not pointer:
@@ -626,16 +628,17 @@ class Header:
             lines.append(f"    pb::field_at<decltype({name}::{member}), {number}, offsetof({name}, {member}){tail}>")
         return ",\n".join(lines) + "> {};"
 
-    def message_deps(self, message):
-        """Same-file message dependencies of `message` as `(hard, soft)`.
-        Hard dependencies are by-value members; soft dependencies are pointers or `std::span`."""
-        hard, soft = [], []
+    def message_edges(self, message):
+        """Same-file message edges of `message` as `(pinned_hard, promotable_hard, soft)`.
+        `promotable_hard` holds `(target, field_proto_name)` pairs that can auto-promote to `const T*` on a cycle."""
+        pinned, promotable, soft = [], [], []
         for field in message.desc.field:
             if field.type != Field.TYPE_MESSAGE:
                 continue
             target = self.types[field.type_name]
-            found = self.options.of(f"{message.proto_name}.{field.name}", self.file.package)
-            is_pointer = found.get("type", (False,))[0]
+            name = f"{message.proto_name}.{field.name}"
+            found = self.options.of(name, self.file.package)
+            opt_type = found["type"][0] if "type" in found else None
             if target.desc.options.map_entry:
                 val_field = next(f for f in target.desc.field if f.number == 2)
                 if val_field.type != Field.TYPE_MESSAGE:
@@ -643,21 +646,59 @@ class Header:
                 val_target = self.types[val_field.type_name]
                 if val_target.file.name != self.file.name:
                     continue
-                val_found = self.options.of(f"{target.proto_name}.{val_field.name}", self.file.package)
-                val_pointer = val_found.get("type", (False,))[0]
-                (soft if val_pointer else hard).append(val_target)
+                val_name = f"{target.proto_name}.{val_field.name}"
+                val_found = self.options.of(val_name, self.file.package)
+                val_type = val_found["type"][0] if "type" in val_found else None
+                if val_type == "FT_POINTER":
+                    soft.append(val_target)
+                elif val_type == "FT_STATIC":
+                    pinned.append(val_target)
+                else:
+                    promotable.append((val_target, val_name))
             elif target.file.name == self.file.name:
                 if field.label == Field.LABEL_REPEATED:
-                    has_count = not is_pointer and "max_count" in found
-                    (hard if has_count else soft).append(target)
+                    has_count = opt_type != "FT_POINTER" and "max_count" in found
+                    (pinned if has_count else soft).append(target)
+                elif opt_type == "FT_POINTER":
+                    soft.append(target)
+                elif opt_type == "FT_STATIC":
+                    pinned.append(target)
                 else:
-                    (soft if is_pointer else hard).append(target)
-        return hard, soft
+                    promotable.append((target, name))
+        return pinned, promotable, soft
 
     def in_dependency_order(self, messages):
         """`messages` in an order where each message comes after the messages of this file that it contains
-        by value, and the messages that need a forward declaration."""
-        deps = {m: self.message_deps(m) for m in messages}
+        by value, and the messages that need a forward declaration. Unpinned singular and map-value fields on a
+        hard cycle are automatically promoted to `const T*`."""
+        raw = {m: self.message_edges(m) for m in messages}
+        hard_all = {m: raw[m][0] + [t for t, _ in raw[m][1]] for m in messages}
+
+        def reaches(graph, src, dst):
+            seen = {src}
+            work = [src]
+            while work:
+                cur = work.pop()
+                if cur is dst:
+                    return True
+                for nxt in graph[cur]:
+                    if nxt not in seen:
+                        seen.add(nxt)
+                        work.append(nxt)
+            return False
+
+        deps = {}
+        for m in messages:
+            pinned, promotable, soft = raw[m]
+            hard = list(pinned)
+            soft = list(soft)
+            for target, field_name in promotable:
+                if reaches(hard_all, target, m):
+                    self.auto_pointers.add(field_name)
+                    soft.append(target)
+                else:
+                    hard.append(target)
+            deps[m] = (hard, soft)
 
         checked, stack = set(), []
 
@@ -676,18 +717,7 @@ class Header:
         for message in messages:
             check_hard(message)
 
-        def hard_reaches(src, dst):
-            seen = set()
-            work = list(deps[src][0])
-            while work:
-                cur = work.pop()
-                if cur is dst:
-                    return True
-                if cur not in seen:
-                    seen.add(cur)
-                    work.extend(deps[cur][0])
-            return False
-
+        hard_only = {m: deps[m][0] for m in messages}
         order, visiting = [], set()
 
         def visit(message):
@@ -697,7 +727,7 @@ class Header:
             for target in deps[message][0]:
                 visit(target)
             for target in deps[message][1]:
-                if target is not message and target not in visiting and not hard_reaches(target, message):
+                if target is not message and target not in visiting and not reaches(hard_only, target, message):
                     visit(target)
             visiting.remove(message)
             order.append(message)

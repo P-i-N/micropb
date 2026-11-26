@@ -169,7 +169,7 @@ void on_packet( std::span<const uint8_t> packet )
 | `bytes` | *(none)* / `max_size:N` / `max_size:N fixed_length:true` | `std::span<const uint8_t>` / `pb::bytes<N>` / `std::array<uint8_t, N>` |
 | `repeated T` | *(none)* / `max_count:N` / `max_count:N fixed_count:true` | `std::span<const T>` / `pb::repeated<T, N>` / `std::array<T, N>` |
 | `map<K, V>` | *(none)* / `max_count:N` / `max_count:N fixed_count:true` | `std::span<const pb::kv_pair<K, V>>` / `pb::map<K, V, N>` / `std::array<pb::kv_pair<K, V>, N>` |
-| `message T` | *(none)* / `type:FT_POINTER` | `T` / `const T*` (allocated in scratch/arena; supports recursion) |
+| `message T` | *(none)* / `type:FT_POINTER` (auto on cycles) | `T` / `const T*` (allocated in scratch/arena) |
 | `optional T` / `oneof` | — | `std::optional<T>` / `pb::oneof<...>` |
 
 ## API
@@ -223,7 +223,7 @@ ctest --test-dir .build --output-on-failure
 
 * **Contiguous buffers only:** MicroPB encodes into and decodes from contiguous `std::span` buffers. Streaming I/O and user callbacks (`pb_callback_t`) are not supported.
 * **Proto3 subset:** no proto2, editions, groups, well-known types (`Any`, `Timestamp`), JSON, or unknown-field preservation (unknown fields are skipped on decode).
-* **Bounded recursion depth (`MICROPB_MAX_DEPTH`):** recursive messages (via `std::span<const T>` or `const T*` with `type:FT_POINTER`) are supported up to `MICROPB_MAX_DEPTH` nested submessages (default `32`; deeper inputs or cyclic pointer graphs return `pb::error::MAX_DEPTH_EXCEEDED`).
+* **Bounded recursion depth (`MICROPB_MAX_DEPTH`):** recursive messages are supported automatically (`std::span<const T>` for unbounded `repeated`; `const T*` for singular and `map`-value cycle fields, or explicit `type:FT_POINTER`) up to `MICROPB_MAX_DEPTH` nested submessages (default `32`; deeper inputs or cyclic pointer graphs return `pb::error::MAX_DEPTH_EXCEEDED`).
 * **C++23 and runtime-only codec:** requires C++23 (`std::expected`). `pb::encode`, `pb::decode`, and `pb::encoded_size` access members by byte offset and cannot run in `constexpr` evaluation.
 * **Compact table limits vs. `MICROPB_WIDE_TABLES`:** default compact tables support field numbers up to `4095`, member offsets up to `4095` bytes, up to `73` distinct compound types per message, and one `pb::oneof` of up to `32` alternatives per message. Define `MICROPB_WIDE_TABLES` to support field numbers up to `2^29 - 1`, offsets up to `65535` bytes, `255` compound types, multiple `pb::oneof` members, and `255` alternatives per `oneof`, at the cost of larger ROM tables.
 * **ROM size vs. speed (`MICROPB_FAST`):** the default build minimizes Flash/ROM (`3,456 B` base on Cortex-M4) with linear field lookup and element-by-element packed loops. Define `MICROPB_FAST` (`+686 B` on Cortex-M4) to enable inline scalar dispatch, cursor field lookup, 1-byte varint fast path, and bulk packed scalar encode/decode.

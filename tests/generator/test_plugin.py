@@ -818,20 +818,14 @@ class RecursiveTest(unittest.TestCase):
         self.assertNotIn("struct node;", text)
         self.assertEqual(members(text, "node"), ["int32_t id = 0;", "std::span<const node> children = {};"])
 
-    def test_singular_pointer_recursive(self):
-        text = header(
-            "package p; message node { int32 id = 1; node next = 2; optional node prev = 3; }",
-            "node.next type:FT_POINTER\nnode.prev type:FT_POINTER\n",
-        )
+    def test_singular_auto_pointer_recursive(self):
+        text = header("package p; message node { int32 id = 1; node next = 2; optional node prev = 3; }")
         self.assertNotIn("struct node;", text)
         self.assertEqual(members(text, "node"),
                          ["int32_t id = 0;", "const node* next = nullptr;", "const node* prev = nullptr;"])
 
-    def test_oneof_pointer_recursive(self):
-        text = header(
-            "package p; message node { oneof child { node left = 1; int32 leaf = 2; } }",
-            "node.left type:FT_POINTER\n",
-        )
+    def test_oneof_auto_pointer_recursive(self):
+        text = header("package p; message node { oneof child { node left = 1; int32 leaf = 2; } }")
         self.assertEqual(members(text, "node"), [
             "static constexpr size_t child_left = 1;",
             "static constexpr size_t child_leaf = 2;",
@@ -848,22 +842,32 @@ class RecursiveTest(unittest.TestCase):
         self.assertEqual(members(text, "a"), ["std::span<const b> bs = {};"])
         self.assertEqual(members(text, "b"), ["a parent = {};"])
 
-    def test_mutual_pointer_recursion_forward_decl(self):
-        text = header(
-            "package p; message a { b other = 1; } message b { a other = 1; }",
-            "a.other type:FT_POINTER\nb.other type:FT_POINTER\n",
-        )
+    def test_mutual_auto_pointer_recursion(self):
+        text = header("package p; message a { b other = 1; } message b { a other = 1; }")
         self.assertIn("struct a;", text)
         self.assertLess(text.index("struct a;"), text.index("struct b {"))
         self.assertLess(text.index("struct b {"), text.index("struct a {"))
         self.assertEqual(members(text, "a"), ["const b* other = nullptr;"])
         self.assertEqual(members(text, "b"), ["const a* other = nullptr;"])
 
-    def test_map_pointer_value_recursive(self):
-        text = header(
-            "package p; message m { map<string, m> children = 1; }",
-            "m.ChildrenEntry.value type:FT_POINTER\n",
-        )
+    def test_mutual_override_one_side(self):
+        # Pinning one side with FT_POINTER or FT_STATIC keeps the other side by value.
+        for opt in ("b.other type:FT_POINTER\n", "a.other type:FT_STATIC\n"):
+            with self.subTest(opt=opt):
+                text = header("package p; message a { b other = 1; } message b { a other = 1; }", opt)
+                self.assertIn("struct a;", text)
+                self.assertLess(text.index("struct b {"), text.index("struct a {"))
+                self.assertEqual(members(text, "a"), ["b other = {};"])
+                self.assertEqual(members(text, "b"), ["const a* other = nullptr;"])
+
+    def test_non_cyclic_root_stays_by_value(self):
+        text = header("package p; message root { x a = 1; } message x { y a = 1; } message y { optional x a = 1; }")
+        self.assertEqual(members(text, "root"), ["x a = {};"])
+        self.assertEqual(members(text, "x"), ["const y* a = nullptr;"])
+        self.assertEqual(members(text, "y"), ["const x* a = nullptr;"])
+
+    def test_map_auto_pointer_value_recursive(self):
+        text = header("package p; message m { map<string, m> children = 1; }")
         self.assertEqual(members(text, "m"), ["std::span<const pb::kv_pair<std::string_view, const m*>> children = {};"])
 
 
@@ -872,9 +876,10 @@ class ErrorTest(unittest.TestCase):
         self.assertIn("a.proto: only proto3 files are supported",
                       error('syntax = "proto2"; message m { optional int32 a = 1; }'))
 
-    def test_map_recursive(self):
+    def test_map_recursive_static(self):
         self.assertIn("a.proto: a message cannot contain itself: m -> m",
-                      error(PROTO3 + "message m { map<string, m> children = 1; }"))
+                      error(PROTO3 + "message m { map<string, m> children = 1; }",
+                            "m.ChildrenEntry.value type:FT_STATIC\n"))
 
     def test_repeated_without_max_count(self):
         text = header("package p; message m { repeated int32 a = 1; }")
@@ -897,17 +902,18 @@ class ErrorTest(unittest.TestCase):
         self.assertIn("a.proto: m.a: give max_length or max_size, not both",
                       error(PROTO3 + "message m { string a = 1; }", "m.a max_length:8 max_size:9\n"))
 
-    def test_message_that_contains_itself(self):
+    def test_message_that_contains_itself_static(self):
         self.assertIn("a.proto: a message cannot contain itself: node -> node",
-                      error(PROTO3 + "message node { optional node next = 1; }"))
+                      error(PROTO3 + "message node { optional node next = 1; }", "node.next type:FT_STATIC\n"))
 
-    def test_messages_that_contain_each_other(self):
+    def test_messages_that_contain_each_other_static(self):
         text = error(PROTO3 + "message a { b x = 1; } message b { oneof v { c x = 1; } } message c { repeated a x = 1; }",
-                     "* max_count:2\n")
+                     "a.x type:FT_STATIC\nb.x type:FT_STATIC\nc.x max_count:2\n")
         self.assertIn("a.proto: a message cannot contain itself: a -> b -> c -> a", text)
 
-    def test_cycle_that_does_not_start_at_the_first_message(self):
-        text = error(PROTO3 + "message root { x a = 1; } message x { y a = 1; } message y { optional x a = 1; }")
+    def test_cycle_that_does_not_start_at_the_first_message_static(self):
+        text = error(PROTO3 + "message root { x a = 1; } message x { y a = 1; } message y { optional x a = 1; }",
+                     "x.a type:FT_STATIC\ny.a type:FT_STATIC\n")
         self.assertIn("a.proto: a message cannot contain itself: x -> y -> x\n", text)
 
     def test_options_file_that_is_not_utf8(self):

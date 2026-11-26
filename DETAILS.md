@@ -182,12 +182,12 @@ The plugin searches for `<stem>.options` relative to the current directory first
 | `max_length:N` | `string` (including `repeated string` and `map` key/value via `<Entry>.key`/`<Entry>.value`) | `pb::string<N>` (up to `N` bytes + `'\0'`) |
 | `max_size:N` | `bytes` / `string` (including `repeated` and `map` key/value) | `pb::bytes<N>` on `bytes`; `pb::string<N - 1>` on `string` (matches NanoPB buffer size including `'\0'`) |
 | `max_size:N fixed_length:true` | `bytes` | `std::array<uint8_t, N>` |
-| `type:FT_POINTER` | `message`, `repeated`, `map`, `bytes`, or `string` | `const T*` (singular `message`), `std::span<const T>`, `std::span<const pb::kv_pair<K, V>>`, `std::span<const uint8_t>`, or `std::string_view` (overrides wildcard `max_count`/`max_size`/`max_length`) |
-| `type:FT_STATIC`, `type:FT_DEFAULT` | `repeated`, `map`, `bytes`, `string` | Uses the other options on the field |
+| `type:FT_POINTER` | `message`, `repeated`, `map`, `bytes`, or `string` | `const T*` (singular `message`; also automatic on cycle edges unless pinned with `type:FT_STATIC`), `std::span<const T>`, `std::span<const pb::kv_pair<K, V>>`, `std::span<const uint8_t>`, or `std::string_view` (overrides wildcard `max_count`/`max_size`/`max_length`) |
+| `type:FT_STATIC`, `type:FT_DEFAULT` | `message`, `repeated`, `map`, `bytes`, `string` | `FT_STATIC` keeps a singular `message` by value (disabling auto-pointer on cycles); otherwise uses the other options on the field |
 | `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `int32`, `int64`, `uint32`, `uint64`, `sint32`, `sint64` | Narrow or wide `intN_t` / `uintN_t` |
 | `enum_intsize:IS_8`, `IS_16`, `IS_32` | `enum` | `enum class E : intN_t` (fails generation if a `.proto` enumerator does not fit) |
 
-Inline `.proto` annotations such as `[(nanopb).max_size = 6]` are not read. Unknown options and unmatched patterns print warnings to `stderr`. The plugin rejects proto2/editions files, by-value recursive messages (use `type:FT_POINTER` on singular fields or unbounded `repeated`), colliding C++ member names inside a struct, `int_size:IS_8` on repeated unsigned integers, and `enum_intsize:IS_64`. Services, `extend` blocks, and `[packed = false]` are ignored.
+Inline `.proto` annotations such as `[(nanopb).max_size = 6]` are not read. Unknown options and unmatched patterns print warnings to `stderr`. Singular and `map`-value message fields on a by-value cycle automatically become `const T*` (unless pinned with `type:FT_STATIC` or already broken by an indirect field). The plugin rejects proto2/editions files, pinned by-value recursive cycles, colliding C++ member names inside a struct, `int_size:IS_8` on repeated unsigned integers, and `enum_intsize:IS_64`. Services, `extend` blocks, and `[packed = false]` are ignored.
 
 ## Errors
 
