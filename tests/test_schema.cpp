@@ -31,6 +31,33 @@ enum class unsigned_e32 : uint32_t
 	A = 0,
 };
 
+enum class trait_small : int32_t
+{
+	RED = 0,
+	GREEN = 1,
+	BLUE = 2,
+};
+
+enum class trait_wide : int32_t
+{
+	ZERO = 0,
+	BIG = 128,
+};
+
+enum class trait_neg : int32_t
+{
+	ZERO = 0,
+	NEG = -1,
+};
+
+struct trait_enum_msg
+{
+	trait_small one;
+	trait_wide wide;
+	trait_neg neg;
+	pb::repeated<trait_small, 4> many;
+};
+
 struct pose
 {
 	std::array<float, 3> pos;
@@ -130,6 +157,36 @@ struct mut_b
 };
 
 } // namespace
+
+template <>
+struct pb::enum_traits<trait_small>
+{
+	static constexpr trait_small min = trait_small::RED;
+	static constexpr trait_small max = trait_small::BLUE;
+};
+
+template <>
+struct pb::enum_traits<trait_wide>
+{
+	static constexpr trait_wide min = trait_wide::ZERO;
+	static constexpr trait_wide max = trait_wide::BIG;
+};
+
+template <>
+struct pb::enum_traits<trait_neg>
+{
+	static constexpr trait_neg min = trait_neg::NEG;
+	static constexpr trait_neg max = trait_neg::ZERO;
+};
+
+template <>
+struct pb::fields_of<trait_enum_msg>
+  : pb::field_list<trait_enum_msg,
+                   pb::field_at<decltype( trait_enum_msg::one ), 1, offsetof( trait_enum_msg, one )>,
+                   pb::field_at<decltype( trait_enum_msg::wide ), 2, offsetof( trait_enum_msg, wide )>,
+                   pb::field_at<decltype( trait_enum_msg::neg ), 3, offsetof( trait_enum_msg, neg )>,
+                   pb::field_at<decltype( trait_enum_msg::many ), 4, offsetof( trait_enum_msg, many )>>
+{};
 
 template <>
 struct pb::fields_of<empty_msg> : pb::field_list<empty_msg>
@@ -300,11 +357,17 @@ consteval bool test_max_encoded_size()
 	// total = 22
 	constexpr size_t expected_oneof = 22;
 
+	// trait_enum_msg (tags 1..4, 1 B key each):
+	// one (0..2): 1+1=2, wide (0..128): 1+2=3, neg (-1..0): 1+10=11, many (4 packed 0..2): 1+1+4*1=6
+	// total = 22
+	constexpr size_t expected_trait_enums = 22;
+
 	return has_max_encoded_size<empty_msg> && max_encoded_size<empty_msg> == 0 &&
 	       has_max_encoded_size<const empty_msg> && max_encoded_size<const empty_msg> == 0 &&
 	       has_max_encoded_size<bounded_scalars> && max_encoded_size<bounded_scalars> == expected_scalars &&
 	       has_max_encoded_size<bounded_containers> && max_encoded_size<bounded_containers> == expected_containers &&
 	       has_max_encoded_size<multi_oneof_msg> && max_encoded_size<multi_oneof_msg> == expected_oneof &&
+	       has_max_encoded_size<trait_enum_msg> && max_encoded_size<trait_enum_msg> == expected_trait_enums &&
 	       !has_max_encoded_size<unbounded_sv> && !has_max_encoded_size<unbounded_bytes> &&
 	       !has_max_encoded_size<unbounded_repeated> && !has_max_encoded_size<unbounded_oneof> &&
 	       !has_max_encoded_size<unbounded_nested> && !has_max_encoded_size<rec_node> &&

@@ -87,16 +87,45 @@ struct fields_of;
 /// Declared minimum and maximum enumerators of a generated proto3 enum type `E`.
 template <typename E>
 struct enum_traits
-{
-	static_assert( sizeof( E ) == 0,
-	               "pb: no_enum_traits: this enum type has no pb::enum_traits. Generate it with protoc-gen-micropb" );
+{};
+
+namespace detail {
+
+template <typename E>
+inline constexpr bool has_enum_traits = requires {
+	enum_traits<E>::min;
+	enum_traits<E>::max;
 };
 
 template <typename E>
-inline constexpr E enum_min = enum_traits<E>::min;
+[[nodiscard]] consteval E checked_enum_min()
+{
+	static_assert( has_enum_traits<E>,
+	               "pb: no_enum_traits: this enum type has no pb::enum_traits. Generate it with protoc-gen-micropb" );
+	if constexpr ( has_enum_traits<E> )
+		return enum_traits<E>::min;
+	else
+		return E{};
+}
 
 template <typename E>
-inline constexpr E enum_max = enum_traits<E>::max;
+[[nodiscard]] consteval E checked_enum_max()
+{
+	static_assert( has_enum_traits<E>,
+	               "pb: no_enum_traits: this enum type has no pb::enum_traits. Generate it with protoc-gen-micropb" );
+	if constexpr ( has_enum_traits<E> )
+		return enum_traits<E>::max;
+	else
+		return E{};
+}
+
+} // namespace detail
+
+template <typename E>
+inline constexpr E enum_min = detail::checked_enum_min<E>();
+
+template <typename E>
+inline constexpr E enum_max = detail::checked_enum_max<E>();
 
 namespace detail {
 /// Gives the codec the `_items` and `_count` members of `repeated`, `bytes` and `string`.

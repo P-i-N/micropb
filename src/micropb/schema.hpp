@@ -246,11 +246,21 @@ template <typename T, int_encoding Encoding>
 		return 8;
 	else if constexpr ( std::is_enum_v<T> )
 	{
-		using U = std::underlying_type_t<T>;
-		if constexpr ( std::is_signed_v<U> || sizeof( T ) == 4 )
-			return 10;
+		if constexpr ( has_enum_traits<T> )
+		{
+			if constexpr ( static_cast<int64_t>( enum_traits<T>::min ) < 0 )
+				return 10;
+			else
+				return varint_size( static_cast<uint64_t>( enum_traits<T>::max ) );
+		}
 		else
-			return varint_size( uint64_t{ std::numeric_limits<U>::max() } );
+		{
+			using U = std::underlying_type_t<T>;
+			if constexpr ( std::is_signed_v<U> || sizeof( T ) == 4 )
+				return 10;
+			else
+				return varint_size( uint64_t{ std::numeric_limits<U>::max() } );
+		}
 	}
 	else if constexpr ( Encoding == int_encoding::ZIGZAG )
 		return varint_size( zigzag_encode( static_cast<int64_t>( std::numeric_limits<T>::min() ) ) );
