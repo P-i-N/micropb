@@ -10,10 +10,13 @@
 namespace detail {
 
 struct tag {
+    static constexpr uint32_t error_tag = 1;
     uint32_t error = 0;
 };
 
 struct reader {
+    static constexpr uint32_t tag_tag = 1;
+    static constexpr uint32_t repeated_tag = 2;
     std::optional<::detail::tag> tag = {};
     pb::repeated<::detail::tag, 2> repeated = {};
 };

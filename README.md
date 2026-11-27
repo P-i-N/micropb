@@ -45,6 +45,15 @@ enum class Mode : int32_t
 
 struct Reading
 {
+	static constexpr uint32_t id_tag = 1;
+	static constexpr uint32_t temperature_mc_tag = 2;
+	static constexpr uint32_t mode_tag = 3;
+	static constexpr uint32_t label_tag = 4;
+	static constexpr uint32_t channels_tag = 5;
+	static constexpr uint32_t token_tag = 6;
+	static constexpr uint32_t mac_tag = 7;
+	static constexpr uint32_t uptime_s_tag = 8;
+	static constexpr uint32_t fault_tag = 9;
 	uint32_t id = 0;
 	int32_t temperature_mc = 0;
 	Mode mode = Mode::IDLE;
@@ -175,6 +184,18 @@ void on_packet( std::span<const uint8_t> packet )
 ## API
 
 ```cpp
+template <typename T>
+inline constexpr bool pb::has_max_encoded_size;
+
+template <typename T>
+inline constexpr size_t pb::max_encoded_size;
+
+template <typename E>
+inline constexpr E pb::enum_min;
+
+template <typename E>
+inline constexpr E pb::enum_max;
+
 template <typename T>
 [[nodiscard]] size_t pb::encoded_size( const T& msg );
 

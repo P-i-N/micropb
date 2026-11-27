@@ -20,6 +20,22 @@ enum class color : int32_t {
 };
 
 struct scalars {
+    static constexpr uint32_t i32_tag = 1;
+    static constexpr uint32_t i64_tag = 2;
+    static constexpr uint32_t u32_tag = 3;
+    static constexpr uint32_t u64_tag = 4;
+    static constexpr uint32_t s32_tag = 5;
+    static constexpr uint32_t s64_tag = 6;
+    static constexpr uint32_t flag_tag = 7;
+    static constexpr uint32_t f_tag = 8;
+    static constexpr uint32_t d_tag = 9;
+    static constexpr uint32_t fx32_tag = 10;
+    static constexpr uint32_t fx64_tag = 11;
+    static constexpr uint32_t sfx32_tag = 12;
+    static constexpr uint32_t sfx64_tag = 13;
+    static constexpr uint32_t c_tag = 14;
+    static constexpr uint32_t i8_tag = 15;
+    static constexpr uint32_t u16_tag = 16;
     int32_t i32 = 0;
     int64_t i64 = 0;
     uint32_t u32 = 0;
@@ -39,17 +55,26 @@ struct scalars {
 };
 
 struct text {
+    static constexpr uint32_t name_tag = 1;
+    static constexpr uint32_t data_tag = 2;
+    static constexpr uint32_t mac_tag = 3;
     std::string_view name = {};
     std::span<const uint8_t> data = {};
     std::array<uint8_t, 6> mac = {};
 };
 
 struct inner {
+    static constexpr uint32_t x_tag = 1;
+    static constexpr uint32_t label_tag = 2;
     int32_t x = 0;
     std::string_view label = {};
 };
 
 struct outer {
+    static constexpr uint32_t child_tag = 1;
+    static constexpr uint32_t maybe_tag = 2;
+    static constexpr uint32_t maybe_child_tag = 3;
+    static constexpr uint32_t gap_tag = 10;
     std::optional<inner> child = {};
     std::optional<int32_t> maybe = {};
     std::optional<inner> maybe_child = {};
@@ -57,6 +82,11 @@ struct outer {
 };
 
 struct lists {
+    static constexpr uint32_t ints_tag = 1;
+    static constexpr uint32_t floats_tag = 2;
+    static constexpr uint32_t names_tag = 3;
+    static constexpr uint32_t items_tag = 4;
+    static constexpr uint32_t zz_tag = 5;
     pb::repeated<int32_t, 8> ints = {};
     pb::repeated<float, 8> floats = {};
     pb::repeated<std::string_view, 8> names = {};
@@ -65,15 +95,22 @@ struct lists {
 };
 
 struct pose {
+    static constexpr uint32_t pos_tag = 1;
+    static constexpr uint32_t rot_tag = 2;
     pb::repeated<float, 3> pos = {};
     pb::repeated<float, 4> rot = {};
 };
 
 struct ping {
+    static constexpr uint32_t seq_tag = 1;
     uint32_t seq = 0;
 };
 
 struct envelope {
+    static constexpr uint32_t id_tag = 1;
+    static constexpr uint32_t pose_tag = 2;
+    static constexpr uint32_t ping_tag = 3;
+    static constexpr uint32_t text_tag = 4;
     uint32_t id = 0;
     static constexpr size_t payload_pose = 1;
     static constexpr size_t payload_ping = 2;
@@ -82,6 +119,14 @@ struct envelope {
 };
 
 } // namespace micropb::test
+
+// Enum traits.
+
+template <>
+struct pb::enum_traits<::micropb::test::color> {
+    static constexpr ::micropb::test::color min = ::micropb::test::color::NEG;
+    static constexpr ::micropb::test::color max = ::micropb::test::color::BLUE;
+};
 
 // Field lists.
 

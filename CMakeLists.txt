@@ -189,7 +189,8 @@ if(MICROPB_TESTS)
 
     foreach(rule
             decode_encode_only member_offset_too_large
-            decode_needs_arena no_field_list wide_table_required)
+            decode_needs_arena no_enum_traits no_field_list
+            unbounded_encoded_size wide_table_required)
         micropb_add_compile_fail_test(${rule} ${rule})
     endforeach()
 

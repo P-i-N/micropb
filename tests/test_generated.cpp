@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <span>
 #include <stddef.h>
 #include <stdint.h>
@@ -38,6 +39,35 @@ static_assert( std::is_same_v<decltype( features::Frame::origin ), std::optional
 static_assert( std::is_same_v<decltype( features::Calibration::gains ), std::array<float, 4>> );
 static_assert( std::is_same_v<decltype( features::Batch::slots ), std::span<const features::Device_Slot>> );
 static_assert( std::is_same_v<decltype( features::Batch::blob ), std::span<const uint8_t>> );
+
+// Generated field tag constants (regular fields, oneof arms, and keyword names).
+static_assert( gen::scalars::i32_tag == 1 && gen::scalars::u16_tag == 16 );
+static_assert( gen::envelope::id_tag == 1 && gen::envelope::pose_tag == 2 && gen::envelope::ping_tag == 3 &&
+               gen::envelope::text_tag == 4 );
+static_assert( features::Device::class_tag == 1 && features::Device::serial_tag == 10 &&
+               features::Device::code_tag == 20 && features::Device::text_tag == 22 &&
+               features::Device::moved_tag == 25 && features::Device::ready_tag == 26 );
+static_assert( ::detail::reader::tag_tag == 1 && ::detail::reader::repeated_tag == 2 );
+
+// Generated enum min/max traits.
+static_assert( pb::enum_min<gen::color> == gen::color::NEG && pb::enum_max<gen::color> == gen::color::BLUE );
+static_assert( pb::enum_min<features::RxMode> == features::RxMode::FIXED &&
+               pb::enum_max<features::RxMode> == features::RxMode::VARIABLE );
+static_assert( pb::enum_min<features::Device_State> == features::Device_State::IDLE &&
+               pb::enum_max<features::Device_State> == features::Device_State::BUSY );
+static_assert( pb::enum_min<shared::types::Unit> == shared::types::Unit::NONE &&
+               pb::enum_max<shared::types::Unit> == shared::types::Unit::METER );
+
+// Compile-time boundedness and max encoded size checks on generated messages.
+static_assert( pb::has_max_encoded_size<gen::scalars> && pb::has_max_encoded_size<gen::pose> &&
+               pb::has_max_encoded_size<gen::ping> && pb::has_max_encoded_size<shared::types::Point> &&
+               pb::has_max_encoded_size<features::Calibration> && pb::has_max_encoded_size<features::Device_Slot> &&
+               pb::has_max_encoded_size<features::limits> && pb::has_max_encoded_size<::detail::reader> );
+static_assert( !pb::has_max_encoded_size<gen::text> && !pb::has_max_encoded_size<gen::inner> &&
+               !pb::has_max_encoded_size<gen::outer> && !pb::has_max_encoded_size<gen::lists> &&
+               !pb::has_max_encoded_size<gen::envelope> && !pb::has_max_encoded_size<features::Device> &&
+               !pb::has_max_encoded_size<features::Frame> && !pb::has_max_encoded_size<features::Batch> &&
+               !pb::has_max_encoded_size<features::Report> && !pb::has_max_encoded_size<features::Log> );
 
 namespace d = pb::detail;
 
@@ -296,6 +326,46 @@ bool test_duplicate_oneof()
 	       rx.msg.index() == features::Log::msg_html && html_text && *html_text == "<b>";
 }
 
+/// Worst-case values of bounded generated messages hit `pb::max_encoded_size<T>` exactly.
+bool test_max_encoded_size_tight()
+{
+	const gen::scalars worst_scalars{
+		.i32 = -1,
+		.i64 = -1,
+		.u32 = std::numeric_limits<uint32_t>::max(),
+		.u64 = std::numeric_limits<uint64_t>::max(),
+		.s32 = std::numeric_limits<int32_t>::min(),
+		.s64 = std::numeric_limits<int64_t>::min(),
+		.flag = true,
+		.f = 1.0f,
+		.d = 1.0,
+		.fx32 = 1,
+		.fx64 = 1,
+		.sfx32 = -1,
+		.sfx64 = -1,
+		.c = gen::color::NEG,
+		.i8 = -1,
+		.u16 = std::numeric_limits<uint16_t>::max(),
+	};
+	const gen::pose worst_pose{ .pos = { { 1.0f, 2.0f, 3.0f } }, .rot = { { 1.0f, 2.0f, 3.0f, 4.0f } } };
+	const shared::types::Point worst_point{ .x = std::numeric_limits<int32_t>::min(),
+		                                    .y = std::numeric_limits<int32_t>::min() };
+	const features::Calibration worst_cal{ .gains = { 1.0f, 2.0f, 3.0f, 4.0f }, .id = { 1, 2, 3, 4, 5, 6 } };
+	features::Device_Slot worst_slot{ .index = std::numeric_limits<uint32_t>::max() };
+	for ( size_t i = 0; i < 16; ++i )
+		if ( !worst_slot.key.push_back( 0xFF ) )
+			return false;
+
+	std::array<uint8_t, pb::max_encoded_size<gen::scalars>> buf{};
+	const auto written = pb::encode( worst_scalars, buf );
+	return written && *written == pb::max_encoded_size<gen::scalars> &&
+	       pb::encoded_size( worst_scalars ) == pb::max_encoded_size<gen::scalars> &&
+	       pb::encoded_size( worst_pose ) == pb::max_encoded_size<gen::pose> &&
+	       pb::encoded_size( worst_point ) == pb::max_encoded_size<shared::types::Point> &&
+	       pb::encoded_size( worst_cal ) == pb::max_encoded_size<features::Calibration> &&
+	       pb::encoded_size( worst_slot ) == pb::max_encoded_size<features::Device_Slot>;
+}
+
 } // namespace
 
 int main()
@@ -303,6 +373,6 @@ int main()
 	const bool ok = test_default_initialization() && test_reference_vectors() && test_reference_values() &&
 	                test_singular_message_presence() && test_field_numbers() && test_fixed_arrays() && test_views() &&
 	                test_views_decode() && test_frame_encode() && test_frame_decode() && test_names_of_the_library() &&
-	                test_duplicate_oneof();
+	                test_duplicate_oneof() && test_max_encoded_size_tight();
 	return ok ? 0 : 1;
 }

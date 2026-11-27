@@ -18,6 +18,18 @@ This document covers the API rules, proto3-to-C++23 type mapping, `.options` ref
 
 ```cpp
 template <typename T>
+inline constexpr bool pb::has_max_encoded_size;
+
+template <typename T>
+inline constexpr size_t pb::max_encoded_size;
+
+template <typename E>
+inline constexpr E pb::enum_min;
+
+template <typename E>
+inline constexpr E pb::enum_max;
+
+template <typename T>
 [[nodiscard]] size_t pb::encoded_size( const T& msg );
 
 template <typename T>
@@ -44,6 +56,7 @@ template <typename T>
 * It never writes past `out`. If `out` is too short, it returns `pb::error::BUFFER_TOO_SMALL`, and the partial contents of `out` are not valid.
 * `encode(msg, sink)` appends one message into an existing `pb::writer` and returns the byte count that the call wrote. `sink.used_span()` and `sink.remaining_span()` return the written prefix (clamped to buffer size) and unused suffix of `sink`; `pb::reader` provides matching `used_span()` and `remaining_span()` accessors, plus typed `read_varint(T&)`, `read_zigzag(T&)`, `read_fixed(T&)`, `read_bytes(std::span<const uint8_t>&)`, and `read_string(std::string_view&)` helpers that return `bool`, check integer bounds (setting `pb::error::OUT_OF_RANGE`), and leave `out` unchanged on failure.
 * `encoded_size` computes the exact byte count using the same code path without writing bytes.
+* `pb::has_max_encoded_size<T>` is `true` when every field of `T` has a compile-time upper bound (no `std::string_view`, dynamic `std::span`, or recursive pointer). `pb::max_encoded_size<T>` gives the exact worst-case encoded size in bytes (and fails compilation with `pb: unbounded_encoded_size` when unbounded).
 
 ### Decode rules
 
@@ -164,7 +177,9 @@ void handle_log( std::span<uint8_t> wire )
 * Every generated struct member has a proto3 default initializer (`= 0` for integers, `= 0.0f` / `= 0.0` for floats, `= false` for `bool`, `= Enum::ZERO` for enums, and `= {}` for views, messages, optionals, `oneof` variants, bounded containers, and fixed `std::array`s), so unbraced declarations (`T msg;`) start at proto3 defaults.
 * Generated headers include `<stdint.h>` and `<stddef.h>` (only when needed) and emit unqualified `int8_t`..`int64_t` and `uint8_t`..`uint64_t` types.
 * `sint32`/`sint64` and `fixed32`/`fixed64`/`sfixed32`/`sfixed64` emit plain `int32_t`/`int64_t`/`uint32_t`/`uint64_t` members and record `pb::int_encoding::ZIGZAG` or `pb::int_encoding::FIXED` in `pb::field_at`.
+* Every field (including `oneof` alternatives) emits `static constexpr uint32_t <field>_tag = <number>;` at the top of its struct.
 * Each `oneof` emits 1-based `static constexpr size_t <oneof>_<field> = 1..K;` constants for its alternatives above the `pb::oneof` member.
+* Each generated enum emits a `pb::enum_traits<E>` specialization exposing `pb::enum_min<E>` and `pb::enum_max<E>` (the declared enumerators with the minimum and maximum numeric values).
 * `package a.b;` maps to `namespace a::b`. Pass `--micropb_opt=namespace_prefix=foo::bar` to prepend `foo::bar` to the C++ namespace of every generated file (`namespace foo::bar::a::b`, or `namespace foo::bar` when a file has no `package`).
 * Nested definitions flatten with underscores: `Outer.Inner` becomes `Outer_Inner`.
 * C++ keywords, `pb`, `std`, `<stdint.h>`/`<stddef.h>` typedefs (`uint32_t`, `size_t`, etc.), and common C macros (`NULL`, `EOF`, `errno`, `stdin`, `stdout`, `stderr`, `assert`, `offsetof`) receive a trailing `_`.
@@ -209,7 +224,9 @@ Proto3 grammar and field-table consistency are enforced by `protoc` and `tools/p
 
 | Rule | Cause |
 | --- | --- |
-| `no_field_list` | `pb::encode`, `pb::decode`, or `pb::encoded_size` called on a type without generated `pb::fields_of`. |
+| `no_field_list` | `pb::encode`, `pb::decode`, `pb::encoded_size`, or `pb::max_encoded_size` called on a type without generated `pb::fields_of`. |
+| `no_enum_traits` | `pb::enum_min<E>` or `pb::enum_max<E>` used on an enum without generated `pb::enum_traits`. |
+| `unbounded_encoded_size` | `pb::max_encoded_size<T>` instantiated for a message with an unbounded view (`std::string_view`, dynamic `std::span`) or recursive pointer; guard with `pb::has_max_encoded_size<T>`. |
 | `member_offset_too_large` | Member offset or sequence capacity exceeds `65535`. |
 | `wide_table_required` | Schema exceeds default compact table limits without `MICROPB_WIDE_TABLES`. |
 | `decode_encode_only` | `pb::decode` called on a message containing an encode-only `std::array<T, N>` repeated field (`fixed_count:true`). |

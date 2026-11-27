@@ -84,6 +84,20 @@ struct field_list
 template <typename T>
 struct fields_of;
 
+/// Declared minimum and maximum enumerators of a generated proto3 enum type `E`.
+template <typename E>
+struct enum_traits
+{
+	static_assert( sizeof( E ) == 0,
+	               "pb: no_enum_traits: this enum type has no pb::enum_traits. Generate it with protoc-gen-micropb" );
+};
+
+template <typename E>
+inline constexpr E enum_min = enum_traits<E>::min;
+
+template <typename E>
+inline constexpr E enum_max = enum_traits<E>::max;
+
 namespace detail {
 /// Gives the codec the `_items` and `_count` members of `repeated`, `bytes` and `string`.
 struct sequence_access;

@@ -136,10 +136,16 @@ class CoreTest(unittest.TestCase):
             };
 
             struct Inner {
+                static constexpr uint32_t x_tag = 1;
                 int32_t x = 0;
             };
 
             struct Outer {
+                static constexpr uint32_t child_tag = 1;
+                static constexpr uint32_t mode_tag = 2;
+                static constexpr uint32_t name_tag = 3;
+                static constexpr uint32_t data_tag = 4;
+                static constexpr uint32_t delta_tag = 5;
                 std::optional<Inner> child = {};
                 Mode mode = Mode::OFF;
                 std::string_view name = {};
@@ -148,6 +154,14 @@ class CoreTest(unittest.TestCase):
             };
 
             } // namespace app::link
+
+            // Enum traits.
+
+            template <>
+            struct pb::enum_traits<::app::link::Mode> {
+                static constexpr ::app::link::Mode min = ::app::link::Mode::OFF;
+                static constexpr ::app::link::Mode max = ::app::link::Mode::ON;
+            };
 
             // Field lists.
 
@@ -171,8 +185,7 @@ class CoreTest(unittest.TestCase):
               float h = 8; double i = 9; fixed32 j = 10; fixed64 k = 11; sfixed32 l = 12; sfixed64 n = 13;
             }
             """)
-        members = [line.strip() for line in text.split("struct m {\n")[1].split("\n};")[0].splitlines()]
-        self.assertEqual(members, [
+        self.assertEqual(members(text, "m"), [
             "int32_t a = 0;", "int64_t b = 0;", "uint32_t c = 0;", "uint64_t d = 0;", "int32_t e = 0;",
             "int64_t f = 0;", "bool g = false;", "float h = 0.0f;", "double i = 0.0;", "uint32_t j = 0;",
             "uint64_t k = 0;", "int32_t l = 0;", "int64_t n = 0;"])
@@ -183,14 +196,16 @@ class CoreTest(unittest.TestCase):
     def test_no_package_has_no_namespace(self):
         text = header("message m { bool a = 1; }")
         self.assertNotIn("namespace", text)
-        self.assertIn("\n\nstruct m {\n    bool a = false;\n};\n\n// Field lists", text)
+        self.assertIn("\n\nstruct m {\n    static constexpr uint32_t a_tag = 1;\n    bool a = false;\n};\n\n// Field lists", text)
         self.assertEqual(field_list(text, "m"), ["a = 1"])
 
     def test_includes_only_what_the_header_uses(self):
+        text = header("message m {}")
+        self.assertEqual(includes(text), ["<micropb/types.hpp>"])
         text = header("message m { bool a = 1; }")
-        self.assertEqual(includes(text), ["<stddef.h>", "<micropb/types.hpp>"])
+        self.assertEqual(includes(text), ["<stddef.h>", "<stdint.h>", "<micropb/types.hpp>"])
         text = header("enum e { E_A = 0; }")
-        self.assertEqual(includes(text), ["<stdint.h>"])
+        self.assertEqual(includes(text), ["<stdint.h>", "<micropb/types.hpp>"])
         self.assertNotIn("Field lists", text)
 
     def test_empty_message(self):
@@ -216,6 +231,57 @@ class CoreTest(unittest.TestCase):
         self.assertIn("    MIN = 0,\n    LOW = -2147483648,\n    HIGH = 2147483647,\n", text)
         self.assertEqual(field_list(text, "m"), ["a = 536870911"])
 
+    def test_field_tags(self):
+        text = header("""
+            message m {
+              int32 class = 1;
+              optional bool flag = 10;
+              oneof payload {
+                string err = 20;
+                uint32 code = 536870911;
+              }
+            }
+            """)
+        self.assertEqual(tags(text, "m"), [
+            "static constexpr uint32_t class_tag = 1;",
+            "static constexpr uint32_t flag_tag = 10;",
+            "static constexpr uint32_t err_tag = 20;",
+            "static constexpr uint32_t code_tag = 536870911;",
+        ])
+
+    def test_enum_traits_min_max(self):
+        text = header("""
+            package p;
+            enum Unsorted { UNSORTED_ZERO = 0; UNSORTED_HIGH = 10; UNSORTED_NEG = -5; UNSORTED_MID = 3; }
+            enum Single { SINGLE_ONLY = 0; }
+            enum Aliased { option allow_alias = true; A_ZERO = 0; A_MIN = -2; A_MIN_DUP = -2; A_MAX = 7; A_MAX_DUP = 7; }
+            message M { enum Nested { NESTED_A = 0; NESTED_B = 2; } Nested n = 1; }
+            """)
+        self.assertIn(textwrap.dedent("""\
+            template <>
+            struct pb::enum_traits<::p::Unsorted> {
+                static constexpr ::p::Unsorted min = ::p::Unsorted::NEG;
+                static constexpr ::p::Unsorted max = ::p::Unsorted::HIGH;
+            };"""), text)
+        self.assertIn(textwrap.dedent("""\
+            template <>
+            struct pb::enum_traits<::p::Single> {
+                static constexpr ::p::Single min = ::p::Single::ONLY;
+                static constexpr ::p::Single max = ::p::Single::ONLY;
+            };"""), text)
+        self.assertIn(textwrap.dedent("""\
+            template <>
+            struct pb::enum_traits<::p::Aliased> {
+                static constexpr ::p::Aliased min = ::p::Aliased::A_MIN;
+                static constexpr ::p::Aliased max = ::p::Aliased::A_MAX;
+            };"""), text)
+        self.assertIn(textwrap.dedent("""\
+            template <>
+            struct pb::enum_traits<::p::M_Nested> {
+                static constexpr ::p::M_Nested min = ::p::M_Nested::A;
+                static constexpr ::p::M_Nested max = ::p::M_Nested::B;
+            };"""), text)
+
     def test_output_is_next_to_the_proto_path(self):
         result = run({"sub/dir/b.proto": 'syntax = "proto3"; message m {}'})
         self.assertEqual(result.rc, 0, result.stderr)
@@ -225,8 +291,15 @@ class CoreTest(unittest.TestCase):
 
 
 def members(text, name):
-    """The member lines of the struct `name` in the header `text`."""
-    return [line.strip() for line in text.split(f"struct {name} {{\n")[1].split("\n};")[0].splitlines()]
+    """The member lines (excluding `_tag` constants) of the struct `name` in the header `text`."""
+    lines = [line.strip() for line in text.split(f"struct {name} {{\n")[1].split("\n};")[0].splitlines()]
+    return [line for line in lines if not re.match(r"static constexpr uint32_t \w+_tag = \d+;$", line)]
+
+
+def tags(text, name):
+    """The `_tag` constant lines of the struct `name` in the header `text`."""
+    lines = [line.strip() for line in text.split(f"struct {name} {{\n")[1].split("\n};")[0].splitlines()]
+    return [line for line in lines if re.match(r"static constexpr uint32_t \w+_tag = \d+;$", line)]
 
 
 def field_list(text, name):
@@ -575,7 +648,8 @@ class StructureTest(unittest.TestCase):
             "b.proto": 'syntax = "proto3"; package app; message point { int32 x = 1; }'})
         self.assertEqual(result.rc, 0, result.stderr)
         self.assertEqual(members(result.headers["a.pb.hpp"], "m"), ["std::optional<point> p = {};"])
-        self.assertEqual(includes(result.headers["a.pb.hpp"]), ["<optional>", "<stddef.h>", "<micropb/types.hpp>", '"b.pb.hpp"'])
+        self.assertEqual(includes(result.headers["a.pb.hpp"]),
+                         ["<optional>", "<stddef.h>", "<stdint.h>", "<micropb/types.hpp>", '"b.pb.hpp"'])
 
     def test_import_that_is_not_used_gives_no_include(self):
         result = run({
@@ -602,7 +676,7 @@ class StructureTest(unittest.TestCase):
         self.assertEqual(members(text, "m"), ["std::optional<::inner> inner = {};"])
 
     def test_cstdint_is_not_included_for_a_name_that_contains_int(self):
-        self.assertNotIn("<stdint.h>", includes(header("message point { bool int_flag = 1; }")))
+        self.assertNotIn("<stdint.h>", includes(header("message int_flag {}")))
 
     def test_service_is_ignored(self):
         text = header("message m { bool a = 1; } service control { rpc run(m) returns (m); }")
@@ -752,7 +826,7 @@ class PackageTest(unittest.TestCase):
     def test_each_used_import_gives_an_include(self):
         _, headers = self.members_of('import "top.proto"; import "ab.proto"; import "a.proto"; '
                                      'message m { top x = 1; a.b.t y = 2; }')
-        self.assertEqual(headers, ["<optional>", "<stddef.h>", "<micropb/types.hpp>", '"ab.pb.hpp"', '"top.pb.hpp"'])
+        self.assertEqual(headers, ["<optional>", "<stddef.h>", "<stdint.h>", "<micropb/types.hpp>", '"ab.pb.hpp"', '"top.pb.hpp"'])
 
     def test_namespace_prefix_with_package(self):
         text = header("package app.link; message inner { int32 x = 1; } message m { inner inner = 1; }",
@@ -953,6 +1027,8 @@ class ErrorTest(unittest.TestCase):
                       error(PROTO3 + "message m { int32 msg_err = 1; oneof msg { string err = 2; } }"))
         self.assertIn("a.proto: m: two members have the C++ name a_b_c",
                       error(PROTO3 + "message m { oneof a { int32 b_c = 1; } oneof a_b { int32 c = 2; } }"))
+        self.assertIn("a.proto: m: two members have the C++ name foo_tag",
+                      error(PROTO3 + "message m { int32 foo = 1; int32 foo_tag = 2; }"))
 
     def test_two_types_with_the_same_flat_name(self):
         self.assertIn("a.proto: two types have the C++ name A_B",

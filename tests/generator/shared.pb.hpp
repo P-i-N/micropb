@@ -14,11 +14,21 @@ enum class Unit : int32_t {
 };
 
 struct Point {
+    static constexpr uint32_t x_tag = 1;
+    static constexpr uint32_t y_tag = 2;
     int32_t x = 0;
     int32_t y = 0;
 };
 
 } // namespace shared::types
+
+// Enum traits.
+
+template <>
+struct pb::enum_traits<::shared::types::Unit> {
+    static constexpr ::shared::types::Unit min = ::shared::types::Unit::NONE;
+    static constexpr ::shared::types::Unit max = ::shared::types::Unit::METER;
+};
 
 // Field lists.
 

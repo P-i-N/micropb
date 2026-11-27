@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <limits>
 #include <optional>
 #include <span>
 #include <stddef.h>
@@ -219,6 +220,68 @@ template <typename T, typename... Visited>
 [[nodiscard]] consteval bool needs_arena();
 template <typename T, typename... Visited>
 consteval void check_decodable();
+template <typename T, uint32_t Number, int_encoding Encoding, bool Always, typename... Visited>
+[[nodiscard]] consteval std::optional<size_t> max_field_size();
+
+[[nodiscard]] consteval size_t key_size( uint32_t number )
+{
+	return varint_size( uint64_t{ number } << 3 );
+}
+
+[[nodiscard]] consteval size_t max_delimited_size( uint32_t number, size_t payload, bool always )
+{
+	if ( payload == 0 && !always )
+		return 0;
+	return key_size( number ) + varint_size( uint64_t{ payload } ) + payload;
+}
+
+template <typename T, int_encoding Encoding>
+[[nodiscard]] consteval size_t max_scalar_value_size()
+{
+	if constexpr ( std::is_same_v<T, bool> )
+		return 1;
+	else if constexpr ( std::is_same_v<T, float> || ( Encoding == int_encoding::FIXED && sizeof( T ) == 4 ) )
+		return 4;
+	else if constexpr ( std::is_same_v<T, double> || ( Encoding == int_encoding::FIXED && sizeof( T ) == 8 ) )
+		return 8;
+	else if constexpr ( std::is_enum_v<T> )
+	{
+		using U = std::underlying_type_t<T>;
+		if constexpr ( std::is_signed_v<U> || sizeof( T ) == 4 )
+			return 10;
+		else
+			return varint_size( uint64_t{ std::numeric_limits<U>::max() } );
+	}
+	else if constexpr ( Encoding == int_encoding::ZIGZAG )
+		return varint_size( zigzag_encode( static_cast<int64_t>( std::numeric_limits<T>::min() ) ) );
+	else if constexpr ( std::is_signed_v<T> )
+		return 10;
+	else
+		return varint_size( uint64_t{ std::numeric_limits<T>::max() } );
+}
+
+template <typename T>
+[[nodiscard]] consteval std::optional<size_t> sequence_max_count()
+{
+	if constexpr ( is_std_span<T> )
+	{
+		if constexpr ( T::extent == std::dynamic_extent )
+			return std::nullopt;
+		else
+			return T::extent;
+	}
+	else
+		return sequence_traits<T>::capacity;
+}
+
+template <typename M, uint32_t Number, size_t Alternative, int_encoding Encoding, bool Always, typename... Visited>
+[[nodiscard]] consteval std::optional<size_t> entry_max_size()
+{
+	if constexpr ( Alternative != 0 )
+		return max_field_size<typename M::template alternative_t<Alternative>, Number, Encoding, true, Visited...>();
+	else
+		return max_field_size<M, Number, Encoding, Always, Visited...>();
+}
 
 template <typename T, typename... Fields>
 [[nodiscard]] field_list<T, Fields...> list_of( const field_list<T, Fields...>& );
@@ -292,6 +355,55 @@ struct list_traits<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 	static consteval void check_decodable()
 	{
 		( detail::check_decodable<std::remove_const_t<M>, Visited...>(), ... );
+	}
+
+	template <typename... Visited>
+	[[nodiscard]] static consteval std::optional<size_t> max_size()
+	{
+		if constexpr ( count == 0 )
+		{
+			return size_t{ 0 };
+		}
+		else
+		{
+			constexpr bool always = is_kv_pair<T>;
+			constexpr size_t offsets[]{ Offset... };
+			constexpr size_t alts[]{ Alternative... };
+			constexpr std::optional<size_t> sizes[]{
+				entry_max_size<std::remove_const_t<M>, Number, Alternative, Encoding, always, Visited...>()...
+			};
+
+			size_t total = 0;
+			for ( size_t i = 0; i < count; ++i )
+			{
+				if ( !sizes[i].has_value() )
+					return std::nullopt;
+				if ( alts[i] == 0 )
+				{
+					total += *sizes[i];
+					continue;
+				}
+				bool seen = false;
+				for ( size_t j = 0; j < i; ++j )
+					if ( alts[j] != 0 && offsets[j] == offsets[i] )
+						seen = true;
+				if ( seen )
+					continue;
+				size_t group_max = *sizes[i];
+				for ( size_t j = i + 1; j < count; ++j )
+				{
+					if ( alts[j] != 0 && offsets[j] == offsets[i] )
+					{
+						if ( !sizes[j].has_value() )
+							return std::nullopt;
+						if ( *sizes[j] > group_max )
+							group_max = *sizes[j];
+					}
+				}
+				total += group_max;
+			}
+			return total;
+		}
 	}
 };
 
@@ -393,6 +505,104 @@ consteval void check_no_arena()
 	               "use decode( in, msg, arena )" );
 }
 
+template <typename T, uint32_t Number, int_encoding Encoding, bool Always, typename... Visited>
+[[nodiscard]] consteval std::optional<size_t> max_field_size()
+{
+	constexpr field_kind kind = kind_of<T>();
+	if constexpr ( kind == field_kind::SCALAR )
+		return key_size( Number ) + max_scalar_value_size<T, Encoding>();
+	else if constexpr ( kind == field_kind::STRING )
+	{
+		if constexpr ( std::is_same_v<T, std::string_view> )
+			return std::nullopt;
+		else
+			return max_delimited_size( Number, T::max_size, Always );
+	}
+	else if constexpr ( kind == field_kind::FIXED_BYTES )
+		return max_delimited_size( Number, sequence_traits<T>::capacity, Always );
+	else if constexpr ( kind == field_kind::BYTES )
+	{
+		constexpr std::optional<size_t> count = sequence_max_count<T>();
+		if constexpr ( !count.has_value() )
+			return std::nullopt;
+		else
+			return max_delimited_size( Number, *count, Always );
+	}
+	else if constexpr ( kind == field_kind::OPTIONAL )
+		return max_field_size<typename T::value_type, Number, Encoding, true, Visited...>();
+	else if constexpr ( kind == field_kind::POINTER )
+	{
+		using pointee = std::remove_const_t<std::remove_pointer_t<T>>;
+		if constexpr ( is_one_of<pointee, Visited...> )
+			return std::nullopt;
+		else
+		{
+			constexpr std::optional<size_t> body =
+			  list_traits<field_list_of<pointee>>::template max_size<pointee, Visited...>();
+			if constexpr ( !body.has_value() )
+				return std::nullopt;
+			else
+				return key_size( Number ) + varint_size( uint64_t{ *body } ) + *body;
+		}
+	}
+	else if constexpr ( kind == field_kind::MESSAGE )
+	{
+		if constexpr ( is_one_of<T, Visited...> )
+			return std::nullopt;
+		else
+		{
+			constexpr std::optional<size_t> body = list_traits<field_list_of<T>>::template max_size<T, Visited...>();
+			if constexpr ( !body.has_value() )
+				return std::nullopt;
+			else
+				return key_size( Number ) + varint_size( uint64_t{ *body } ) + *body;
+		}
+	}
+	else if constexpr ( kind == field_kind::REPEATED )
+	{
+		constexpr std::optional<size_t> count = sequence_max_count<T>();
+		if constexpr ( !count.has_value() )
+			return std::nullopt;
+		else if constexpr ( *count == 0 )
+			return size_t{ 0 };
+		else
+		{
+			using elem = element_t<T>;
+			if constexpr ( is_packed<elem>() )
+			{
+				constexpr size_t payload = *count * max_scalar_value_size<elem, Encoding>();
+				return key_size( Number ) + varint_size( uint64_t{ payload } ) + payload;
+			}
+			else
+			{
+				constexpr std::optional<size_t> item = max_field_size<elem, Number, Encoding, true, Visited...>();
+				if constexpr ( !item.has_value() )
+					return std::nullopt;
+				else
+					return *count * *item;
+			}
+		}
+	}
+	else
+		return std::nullopt;
+}
+
+template <typename T>
+[[nodiscard]] consteval std::optional<size_t> max_encoded_size_of()
+{
+	return list_traits<field_list_of<T>>::template max_size<T>();
+}
+
+template <typename T>
+[[nodiscard]] consteval size_t checked_max_encoded_size()
+{
+	constexpr std::optional<size_t> bound = max_encoded_size_of<T>();
+	static_assert( bound.has_value(),
+	               "pb: unbounded_encoded_size: message contains an unbounded view or recursive field; check "
+	               "pb::has_max_encoded_size<T>" );
+	return bound.value_or( 0 );
+}
+
 } // namespace detail
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -403,5 +613,15 @@ struct fields_of
 	static_assert( sizeof( T ) == 0,
 	               "pb: no_field_list: this message type has no pb::fields_of. Generate it with protoc-gen-micropb" );
 };
+
+/// `true` when every field of message `T` has a compile-time upper bound on its encoded size.
+template <typename T>
+inline constexpr bool has_max_encoded_size = detail::max_encoded_size_of<std::remove_cv_t<T>>().has_value();
+
+/// Upper bound in bytes on `pb::encoded_size( msg )` for any value of message `T`.
+/// Fails at compile time (`pb: unbounded_encoded_size`) when `T` contains an unbounded view
+/// or a recursive pointer.
+template <typename T>
+inline constexpr size_t max_encoded_size = detail::checked_max_encoded_size<std::remove_cv_t<T>>();
 
 } // namespace pb
