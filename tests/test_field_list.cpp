@@ -1,5 +1,4 @@
 #include <array>
-#include <optional>
 #include <span>
 #include <stddef.h>
 #include <stdint.h>
@@ -120,7 +119,7 @@ struct map_node
 	std::span<const pb::kv_pair<std::string_view, const map_node*>> children = {};
 };
 
-/// A cycle through a `std::optional`: `opt_node`, `opt_link`, `opt_node`.
+/// A cycle through a `pb::optional`: `opt_node`, `opt_link`, `opt_node`.
 struct opt_node;
 
 struct opt_link
@@ -133,7 +132,7 @@ struct opt_node
 	pb::optional<opt_link> link;
 };
 
-/// A cycle through a `std::variant` alternative: `var_node`, `var_link`, `var_node`.
+/// A cycle through a `pb::oneof` alternative: `var_node`, `var_link`, `var_node`.
 struct var_node;
 
 struct var_link

@@ -61,7 +61,7 @@ enum class int_encoding : uint8_t
 ////////////////////////////////////////////////////////////////////////////////
 
 /// One field of a message: the type `M` of the member, the field number, the
-/// offset of the member in bytes, the 1-based `std::variant` alternative index
+/// offset of the member in bytes, the 1-based `pb::oneof` alternative index
 /// (0 for plain members), and the wire encoding for integer scalars.
 template <typename M,
           uint32_t Number,
@@ -983,9 +983,10 @@ template <typename T, typename... Ts>
 	return value.template holds<T>();
 }
 
-/// Memory for the items of repeated fields that `decode` makes. The caller owns
-/// the storage. The arena gives out aligned blocks from the start of the storage
-/// and never frees one block: `clear()` frees all. Does not allocate.
+/// Memory for `std::span<const T>` repeated fields and `const T*` message
+/// pointers that `decode` makes. The caller owns the storage. The arena gives
+/// out aligned blocks from the start of the storage and never frees one block:
+/// `clear()` frees all. Does not allocate.
 struct arena
 {
 	constexpr explicit arena( std::span<uint8_t> storage ) : _storage( storage ) {}

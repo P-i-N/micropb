@@ -1,7 +1,6 @@
 #pragma once
 
 #include <array>
-#include <optional>
 #include <span>
 #include <stddef.h>
 #include <stdint.h>

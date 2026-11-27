@@ -9,7 +9,6 @@
 #include <array>
 #include <bit>
 #include <functional>
-#include <optional>
 #include <span>
 #include <stddef.h>
 #include <stdint.h>
@@ -187,7 +186,7 @@ struct byte_lists
 	std::span<const std::span<const uint8_t>> blobs;
 };
 
-/// Members with bytes that are not all valid: a `bool`, the flag of a `std::optional`, the index of a `std::variant`.
+/// Members with bytes that are not all valid: a `bool`, the flag of a `pb::optional`, the index of a `pb::oneof`.
 struct fragile
 {
 	pb::optional<int32_t> o;
@@ -1014,7 +1013,7 @@ bool test_arena_merge()
 	       holds_items( message.child.names, std::to_array<std::string_view>( { "x" } ) ) && storage.intact();
 }
 
-/// Span fields in the message of a `std::optional` and of a oneof alternative.
+/// Span fields in the message of a `pb::optional` and of a oneof alternative.
 bool test_arena_oneof_and_optional()
 {
 	// maybe { ints: [7] } choice { ints: [8, 9] names: "c" }
@@ -1205,7 +1204,7 @@ bool test_arena_wrong_wire_type()
 	       memory.used() == without_memory.used() && storage.intact() && without_storage.intact();
 }
 
-/// A value that `decode` makes for a `std::optional` or a oneof alternative starts from its reset state: a span
+/// A value that `decode` makes for a `pb::optional` or a oneof alternative starts from its reset state: a span
 /// with a default member initializer gets only the items of the wire, in the arena, and the caller items do not
 /// change. A scalar with a default member initializer is 0 when the field is absent.
 bool test_arena_new_value_reset()
@@ -1364,7 +1363,7 @@ bool test_no_arena_needed()
 	return result && message.ints.size() == 2 && message.ints[1] == 2;
 }
 
-/// Alternatives of the same C++ type in one `std::variant` select by 1-based index; same tag merges, other tag resets.
+/// Alternatives of the same C++ type in one `pb::oneof` select by 1-based index; same tag merges, other tag resets.
 bool test_same_type_oneof()
 {
 	same_type_oneof rx{};

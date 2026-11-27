@@ -31,7 +31,7 @@ message Reading {
 }
 ```
 
-`protoc-gen-micropb` generates plain C++23 aggregates — using standard `<stdint.h>` types, Protobuf default member initializers, and no wrapper classes — plus a compile-time `pb::fields_of` table:
+`protoc-gen-micropb` generates plain C++23 aggregates — using standard `<stdint.h>` types, Protobuf default member initializers, and no wrapper classes — plus compile-time `pb::fields_of` and `pb::traits` specializations:
 
 ```cpp
 // sensor.pb.hpp (generated)
@@ -108,8 +108,8 @@ bool round_trip()
 
   | Configuration (Cortex-M4 / M33) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Extra 8-field type |
   | --- | ---: | ---: | ---: | ---: |
-  | **MicroPB (default)** | **3,456&nbsp;B** | **4,144&nbsp;B** | **4,824&nbsp;B** | **42&nbsp;B** |
-  | **MicroPB (`MICROPB_FAST`)** | **4,142&nbsp;B** | **4,830&nbsp;B** | **5,510&nbsp;B** | **42&nbsp;B** |
+  | **MicroPB (default)** | **3,410&nbsp;B** | **4,098&nbsp;B** | **4,778&nbsp;B** | **42&nbsp;B** |
+  | **MicroPB (`MICROPB_FAST`)** | **4,082&nbsp;B** | **4,770&nbsp;B** | **5,450&nbsp;B** | **42&nbsp;B** |
   | NanoPB 0.4.9.3 — fixed-size (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,150&nbsp;B | 6,414&nbsp;B | 7,774&nbsp;B | 85&nbsp;B |
   | NanoPB 0.4.9.3 — `pb_callback_t` (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,210&nbsp;B | 6,606&nbsp;B | 8,078&nbsp;B | 92&nbsp;B |
   | NanoPB 0.4.9.3 — fixed-size (default flags) | 6,616&nbsp;B | 7,880&nbsp;B | 9,240&nbsp;B | 85&nbsp;B |
@@ -231,7 +231,7 @@ ctest --test-dir .build --output-on-failure
 * **Bounded recursion depth (`MICROPB_MAX_DEPTH`):** recursive messages are supported automatically (`std::span<const T>` for unbounded `repeated`; `const T*` for singular and `map`-value cycle fields, or explicit `type:FT_POINTER`) up to `MICROPB_MAX_DEPTH` nested submessages (default `32`; deeper inputs or cyclic pointer graphs return `pb::error::MAX_DEPTH_EXCEEDED`).
 * **C++23 and runtime-only codec:** requires C++23 (`std::expected`). `pb::encode`, `pb::decode`, and `pb::encoded_size` access members by byte offset and cannot run in `constexpr` evaluation.
 * **Compact table limits vs. `MICROPB_WIDE_TABLES`:** default compact tables support field numbers up to `4095`, member offsets up to `4095` bytes, up to `73` distinct compound types per message, and one `pb::oneof` of up to `32` alternatives per message. Define `MICROPB_WIDE_TABLES` to support field numbers up to `2^29 - 1`, offsets up to `65535` bytes, `255` compound types, multiple `pb::oneof` members, and `255` alternatives per `oneof`, at the cost of larger ROM tables.
-* **ROM size vs. speed (`MICROPB_FAST`):** the default build minimizes Flash/ROM (`3,456 B` base on Cortex-M4) with linear field lookup and element-by-element packed loops. Define `MICROPB_FAST` (`+686 B` on Cortex-M4) to enable inline scalar dispatch, cursor field lookup, 1-byte varint fast path, and bulk packed scalar encode/decode.
+* **ROM size vs. speed (`MICROPB_FAST`):** the default build minimizes Flash/ROM (`3,410 B` base on Cortex-M4) with linear field lookup and element-by-element packed loops. Define `MICROPB_FAST` (`+672 B` on Cortex-M4) to enable inline scalar dispatch, cursor field lookup, 1-byte varint fast path, and bulk packed scalar encode/decode.
 * **Two-pass `std::span<const T>` decode:** decoding a dynamic `repeated` span scans the input first to count elements and allocate one contiguous block in scratch memory, which is slower than a single-pass callback.
 
 ## Further reading

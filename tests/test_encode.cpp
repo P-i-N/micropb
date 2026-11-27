@@ -7,12 +7,12 @@
 #endif
 #include <algorithm>
 #include <array>
-#include <optional>
 #include <span>
 #include <stddef.h>
 #include <stdint.h>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include <micropb/codec.hpp>
 
@@ -448,7 +448,7 @@ bool test_encode_fixed_extent_span()
 	return matches( fixed_view{ std::span<const uint8_t, 6>( address ), 5 }, expected );
 }
 
-/// A message with a `const` nested struct is encode-only, also in a `std::optional` and a `std::variant`.
+/// A message with a `const` nested struct is encode-only, also in a `pb::optional` and a `pb::oneof`.
 bool test_encode_const_nested()
 {
 	constexpr std::array<uint8_t, 16> expected{ 0x0a, 0x06, 0x0a, 0x02, 0x08, 0x01, 0x10, 0x02,

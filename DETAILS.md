@@ -93,8 +93,10 @@ template <typename T>
 | `pb::repeated<T, N>` | *(element encoding)* | `repeated T` | Fixed capacity `N` inside the struct (`push_back()`, `data()`, `span()`, range-`for`, `==`). |
 | `std::span<const T>` | *(element encoding)* | `repeated T` | Variable length; decodes into caller scratch memory / `pb::arena`. |
 | `std::array<T, N>` (`T` not `uint8_t`) | *(element encoding)* | `repeated T` | Encode-only fixed array of `N` elements. |
+| `pb::map<K, V, N>` | *(key/value encoding template args)* | `map<K, V>` | Fixed-capacity map (`find`, `insert_or_assign`, `erase`, last-key-wins on decode). |
+| `std::span<const pb::kv_pair<K, V>>` | *(key/value encoding template args)* | `map<K, V>` | Variable-length map entries; decodes into caller scratch memory / `pb::arena`. |
 
-Plain `char`, `wchar_t`, `char8_t`, `char16_t`, `char32_t`, `__int128`, non-message or mutable pointers, and `volatile` types do not compile (`pb: unmapped_type`). `const` members compile for `encode` and `encoded_size`, and fail at compile time in `decode` (`pb: decode_const_member`).
+Plain `char`, `wchar_t`, `char8_t`, `char16_t`, `char32_t`, `__int128`, non-message or mutable pointers, and `volatile` types have no scalar mapping and fail compilation with `pb: no_field_list`. `const` members are encode-only (`encode` and `encoded_size`).
 
 ### Presence on encode
 
@@ -155,7 +157,7 @@ void handle_log( std::span<uint8_t> wire )
 * Multiple `decode` calls can share one `pb::arena`. `memory.used_span()` and `memory.remaining_span()` return the allocated prefix and unallocated suffix. `memory.clear()` resets usage to 0 and invalidates previously decoded spans.
 * If space is insufficient, `decode` returns `pb::error::ARENA_FULL` without writing out of bounds.
 * If a non-canonical sender splits one nested submessage across multiple wire records and appends repeated elements in both, `decode` allocates a larger block and copies prior elements; the earlier block stays used until `clear()`.
-* Element types in `std::span<const T>` must be trivially copyable and trivially destructible (`pb: span_element_trivial`). `pb::string<N>`, `pb::bytes<N>`, and `pb::repeated<T, N>` (for trivially copyable `T`) satisfy this requirement.
+* Element types in `std::span<const T>` must be trivially copyable and trivially destructible. `pb::string<N>`, `pb::bytes<N>`, and `pb::repeated<T, N>` (for trivially copyable `T`) satisfy this requirement.
 
 ## Code generator (`protoc-gen-micropb`)
 
@@ -224,8 +226,8 @@ Proto3 grammar and field-table consistency are enforced by `protoc` and `tools/p
 
 | Configuration (default small-ROM mode) | Arm Cortex-M4 / M33 (`-mthumb`, B) | x86-64 without `.eh_frame` (B) | x86-64 with `.eh_frame` (B) |
 | --- | ---: | ---: | ---: |
-| 16 message types | **4,144** | 6,442 | 7,942 |
-| 32 message types | **4,824** | 7,482 | 8,982 |
+| 16 message types | **4,098** | 6,374 | 7,838 |
+| 32 message types | **4,778** | 7,414 | 8,878 |
 | Each additional 8-field type | **42** | 65 | 65 |
 
 For side-by-side measurements against NanoPB, see [Binary size comparison](#binary-size-comparison).
@@ -463,30 +465,30 @@ Measured on the `size_report` schema (an envelope `oneof` holding 1, 16, or 32 d
 
 | Configuration (`-mcpu=cortex-m4 -mthumb`) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Each extra 8-field type |
 | --- | ---: | ---: | ---: | ---: |
-| **MicroPB (default)** | **3,456 B** | **4,144 B** | **4,824 B** | **42 B** |
-| **MicroPB (`MICROPB_FAST`)** | **4,142 B** | **4,830 B** | **5,510 B** | **42 B** |
+| **MicroPB (default)** | **3,410 B** | **4,098 B** | **4,778 B** | **42 B** |
+| **MicroPB (`MICROPB_FAST`)** | **4,082 B** | **4,770 B** | **5,450 B** | **42 B** |
 | **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,150 B | 6,414 B | 7,774 B | 85 B |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 5,210 B | 6,606 B | 8,078 B | 92 B |
 | **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, default flags) | 6,616 B | 7,880 B | 9,240 B | 85 B |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (default flags) | 6,676 B | 8,072 B | 9,544 B | 92 B |
 
-*(With `-mcpu=cortex-m33 -mthumb`, MicroPB is `3,458 / 4,146 / 4,826 B` default and `4,142 / 4,830 / 5,510 B` with `MICROPB_FAST` (`42 B/type`); NanoPB with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG` is `2 B` smaller at `5,148 / 6,412 / 7,772 B` fixed and `5,208 / 6,604 / 8,076 B` callback; NanoPB default flags are identical.)*
+*(With `-mcpu=cortex-m33 -mthumb`, MicroPB is `3,412 / 4,100 / 4,780 B` default and `4,082 / 4,770 / 5,450 B` with `MICROPB_FAST` (`42 B/type`); NanoPB with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG` is `2 B` smaller at `5,148 / 6,412 / 7,772 B` fixed and `5,208 / 6,604 / 8,076 B` callback; NanoPB default flags are identical.)*
 
-* **32-bit Arm scaling:** on 32-bit Arm, 4-byte pointers, 16-bit compact field entries, and `pb::oneof` direct tag access make MicroPB smaller than every NanoPB configuration on both base runtime (`1.7–3.2 KB` smaller at 1 type, `3.0–4.7 KB` smaller at 32 types in default mode; `1.0–2.5 KB` / `2.3–4.0 KB` smaller with `MICROPB_FAST`) and per-message growth (`42 B` vs `85–92 B` per 8-field message type).
+* **32-bit Arm scaling:** on 32-bit Arm, 4-byte pointers, 16-bit compact field entries, and `pb::oneof` direct tag access make MicroPB smaller than every NanoPB configuration on both base runtime (`1.7–3.3 KB` smaller at 1 type, `3.0–4.8 KB` smaller at 32 types in default mode; `1.1–2.6 KB` / `2.3–4.1 KB` smaller with `MICROPB_FAST`) and per-message growth (`42 B` vs `85–92 B` per 8-field message type).
 * **External symbols:** `arm-none-eabi-nm -u` shows that MicroPB references only `memcpy`, `memmove`, and `memset` (no 64-bit division helpers or C++ runtime symbols).
 
 #### Linux x86-64 (`GCC 16.2.1 -Os`)
 
 | Configuration (no `.eh_frame`) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Each extra 8-field type |
 | --- | ---: | ---: | ---: | ---: |
-| **MicroPB (default)** | **5,378 B** | **6,442 B** | **7,482 B** | **65 B** |
-| **MicroPB (`MICROPB_FAST`)** | **6,480 B** | **7,544 B** | **8,584 B** | **65 B** |
+| **MicroPB (default)** | **5,310 B** | **6,374 B** | **7,414 B** | **65 B** |
+| **MicroPB (`MICROPB_FAST`)** | **6,412 B** | **7,476 B** | **8,516 B** | **65 B** |
 | **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,405 B | 10,029 B | 11,773 B | 109 B |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (`PB_BUFFER_ONLY` + `PB_NO_ERRMSG`) | 8,489 B | 10,366 B | 12,318 B | 122 B |
 | **NanoPB 0.4.9.3** — fixed-size (`max_length:31`, default flags) | 10,413 B | 12,037 B | 13,781 B | 109 B |
 | **NanoPB 0.4.9.3** — `pb_callback_t` strings (default flags) | 10,497 B | 12,374 B | 14,326 B | 122 B |
 
-*(With Linux default `.eh_frame` unwind tables included, x86-64 totals at 1 / 16 / 32 types are `6,878 / 7,942 / 8,982 B` for MicroPB default, `8,036 / 9,100 / 10,140 B` for MicroPB `MICROPB_FAST`, `12,469 / 14,093 / 15,837 B` for NanoPB fixed default, and `10,189 / 11,813 / 13,557 B` for NanoPB fixed with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`.)*
+*(With Linux default `.eh_frame` unwind tables included, x86-64 totals at 1 / 16 / 32 types are `6,774 / 7,838 / 8,878 B` for MicroPB default, `7,932 / 8,996 / 10,036 B` for MicroPB `MICROPB_FAST`, `12,469 / 14,093 / 15,837 B` for NanoPB fixed default, and `10,189 / 11,813 / 13,557 B` for NanoPB fixed with `PB_BUFFER_ONLY` + `PB_NO_ERRMSG`.)*
 
 ### Encode and decode speed comparison
 

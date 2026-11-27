@@ -4,7 +4,6 @@
 // them the envelope uses.
 
 #include <expected>
-#include <optional>
 #include <span>
 #include <stddef.h>
 #include <stdint.h>

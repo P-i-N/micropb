@@ -1,5 +1,4 @@
 #include <array>
-#include <optional>
 #include <stddef.h>
 #include <stdint.h>
 

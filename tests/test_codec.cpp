@@ -669,7 +669,7 @@ struct pb::fields_of<encoded_compounds>
 
 namespace {
 
-/// `pb::int_encoding` works on `std::optional` values and `std::variant` (`oneof`) alternatives.
+/// `pb::int_encoding` works on `pb::optional` values and `pb::oneof` alternatives.
 bool test_encoded_compounds()
 {
 	// field 1 (varint zigzag -1 -> 0x01): 0x08 0x01

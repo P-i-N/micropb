@@ -84,7 +84,7 @@ struct value_desc
 {
 	field_kind kind;
 	/// SCALAR: the scalar code. MESSAGE: the number of distinct compound types in `table`.
-	/// ONEOF: size of `_index` in bytes (1 or 2).
+	/// ONEOF: size of `_index` in bytes (1).
 	uint8_t scalar;
 	/// MESSAGE: the number of `uint16_t` halfwords in `table` (bit 15 is `message_always_emit`).
 	/// OPTIONAL: byte offset of `_has_value` inside `pb::optional`.
@@ -285,9 +285,8 @@ void bind_span( void* sequence, void* data, size_t count )
 	*static_cast<S*>( sequence ) = S( static_cast<const element_t<S>*>( data ), count );
 }
 
-/// Constructor of the element of `std::span<const T>`. A new block in the arena has
-/// no objects, and `reset_value` reads a `std::optional` or `std::variant` before
-/// it writes.
+/// Constructor of the element of `std::span<const T>`. Starts the lifetime of
+/// an `E` object in raw arena storage before `reset_value` writes its members.
 template <typename E>
 void construct_item( void* item )
 {
@@ -335,7 +334,7 @@ template <typename S>
 	if constexpr ( !is_fixed_span<S> )
 	{
 		// An element without a default constructor, for example with a `const`
-		// member, is encode-only (`decode_const_member`): it gets no constructor.
+		// member, is encode-only: it gets no constructor.
 		item_constructor construct = nullptr;
 		if constexpr ( std::is_default_constructible_v<element> )
 			construct = construct_item<element>;
@@ -1951,7 +1950,7 @@ inline void decode_message( reader& in, const value_desc& message, void* object,
 		// A different active alternative gives way to a new one in the reset
 		// state, as each member of `msg` has. The same alternative stays, so a
 		// message merges. The codec skips a field with a wrong wire type and
-		// keeps the variant.
+		// keeps the oneof.
 		const value_desc& alternative = *type.oneof[field.alternative - 1];
 		if ( key.type != wire_of( alternative ) )
 		{
@@ -2015,10 +2014,10 @@ template <typename T>
 /// Decodes the proto3 message in `in` into `msg` and returns `in.size()`. Resets
 /// `msg` first. On error, `msg` holds the fields that `decode` read before the
 /// error. A `std::string_view` or a `std::span<const uint8_t>` of `msg`
-/// points into `in`. The items of each `std::span<const T>` repeated field are
-/// in one block of `memory`. `in` and `memory` must stay valid while `msg` is
-/// in use. When `memory` is too small, returns `error::ARENA_FULL`. `decode`
-/// does not free the blocks of `memory`.
+/// points into `in`. Each `std::span<const T>` repeated field and `const T*`
+/// message pointer is allocated in `memory`. `in` and `memory` must stay valid
+/// while `msg` is in use. When `memory` is too small, returns
+/// `error::ARENA_FULL`. `decode` does not free the blocks of `memory`.
 template <typename T>
 [[nodiscard]] std::expected<size_t, error> decode( std::span<const uint8_t> in, T& msg, arena& memory )
 {
@@ -2036,8 +2035,8 @@ template <typename T>
 	return decode( in, msg, pool );
 }
 
-/// `decode` for a message without a `std::span<const T>` repeated field, also
-/// not in a nested message.
+/// `decode` for a message without a `std::span<const T>` repeated field or
+/// `const T*` message pointer, also not in a nested message.
 template <typename T>
 [[nodiscard]] std::expected<size_t, error> decode( std::span<const uint8_t> in, T& msg )
 {

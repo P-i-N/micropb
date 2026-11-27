@@ -3,12 +3,12 @@
 
     protoc --plugin=protoc-gen-micropb=tools/protoc-gen-micropb.py --micropb_out=gen app.proto
 
-The output is gen/app.pb.hpp: plain structs, and a field list for each struct. The sizes of repeated
-fields come from app.options, a file in the NanoPB format:
+The output is gen/app.pb.hpp: plain structs, `pb::fields_of` field lists, and `pb::traits` metadata.
+The sizes of repeated fields come from app.options, a file in the NanoPB format:
 
     # <name pattern> <option>:<value> ...
     Message.field  (no option)                    repeated: std::span<const T>; decode needs a pb::arena
-    Message.field  max_count:8                    pb::repeated<T, 8>
+    Message.field  max_count:8                    repeated: pb::repeated<T, 8>; map: pb::map<K, V, 8>
     Message.field  max_count:3 fixed_count:true   std::array<T, 3>
     Message.field  max_size:16                    bytes: pb::bytes<16>; string: pb::string<15>
     Message.field  max_length:15                  string: pb::string<15>
