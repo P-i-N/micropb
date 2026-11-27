@@ -220,6 +220,7 @@ SIZED_INTEGERS = (Field.TYPE_INT32, Field.TYPE_INT64, Field.TYPE_UINT32, Field.T
 # The headers that the generated text can need, each with a pattern that shows the need.
 INCLUDES = [
     ("<array>", r"std::array<"),
+    ("<optional>", r"std::nullopt\b"),
     ("<span>", r"std::span<"),
     ("<stddef.h>", r"\b(offsetof\(|size_t\b)"),
     ("<stdint.h>", r"\bu?int\d+_t\b"),
@@ -594,7 +595,7 @@ class Header:
                 elif field.proto3_optional or (
                         field.type == Field.TYPE_MESSAGE and field.label != Field.LABEL_REPEATED):
                     text = f"pb::optional<{text}>"
-                    default = "{}"
+                    default = "std::nullopt"
                 elif field.label == Field.LABEL_REPEATED:
                     default = "{}"
                 elif field.type == Field.TYPE_ENUM:

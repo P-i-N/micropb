@@ -163,7 +163,7 @@ void handle_log( std::span<uint8_t> wire )
 
 ### Naming and layout rules
 
-* Every generated struct member has a proto3 default initializer (`= 0` for integers, `= 0.0f` / `= 0.0` for floats, `= false` for `bool`, `= Enum::ZERO` for enums, and `= {}` for views, messages, optionals, `oneof` variants, bounded containers, and fixed `std::array`s), so unbraced declarations (`T msg;`) start at proto3 defaults.
+* Every generated struct member has a proto3 default initializer (`= 0` for integers, `= 0.0f` / `= 0.0` for floats, `= false` for `bool`, `= Enum::ZERO` for enums, `= std::nullopt` for `pb::optional`, `= nullptr` for `const T*`, and `= {}` for views, `oneof` variants, bounded containers, and fixed `std::array`s), so unbraced declarations (`T msg;`) start at proto3 defaults.
 * Generated headers include `<stdint.h>` and `<stddef.h>` (only when needed) and emit unqualified `int8_t`..`int64_t` and `uint8_t`..`uint64_t` types.
 * `sint32`/`sint64` and `fixed32`/`fixed64`/`sfixed32`/`sfixed64` emit plain `int32_t`/`int64_t`/`uint32_t`/`uint64_t` members and record `pb::int_encoding::ZIGZAG` or `pb::int_encoding::FIXED` in `pb::field_at`.
 * Each generated message emits a `pb::traits<T>` specialization containing `static constexpr uint32_t <field>_tag = <number>;` for every field (including `oneof` alternatives), 1-based `static constexpr size_t <oneof>_<field> = 1..K;` constants for each `oneof`, `has_max_encoded_size`, and (when bounded) `max_encoded_size`.
@@ -407,8 +407,8 @@ if ( pb_decode( &in, app_Envelope_fields, &rx ) && rx.which_msg == app_Envelope_
 // struct Sample
 // {
 // 	pb::repeated<float, 8> values = {};
-// 	pb::optional<int32_t> offset = {};
-// 	pb::optional<pb::string<31>> label = {};
+// 	pb::optional<int32_t> offset = std::nullopt;
+// 	pb::optional<pb::string<31>> label = std::nullopt;
 // };
 // struct Envelope
 // {

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <span>
 #include <stddef.h>
 #include <stdint.h>
@@ -49,9 +50,9 @@ struct inner {
 };
 
 struct outer {
-    pb::optional<inner> child = {};
-    pb::optional<int32_t> maybe = {};
-    pb::optional<inner> maybe_child = {};
+    pb::optional<inner> child = std::nullopt;
+    pb::optional<int32_t> maybe = std::nullopt;
+    pb::optional<inner> maybe_child = std::nullopt;
     int32_t gap = 0;
 };
 

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <span>
 #include <stddef.h>
 #include <stdint.h>
@@ -36,12 +37,12 @@ struct limits {
 struct Device {
     int32_t class_ = 0;
     Device_State state = Device_State::IDLE;
-    pb::optional<::features::limits> limits = {};
-    pb::optional<::features::limits> backup = {};
+    pb::optional<::features::limits> limits = std::nullopt;
+    pb::optional<::features::limits> backup = std::nullopt;
     uint32_t serial = 0;
     int16_t offset = 0;
-    pb::optional<pb::bytes<8>> token = {};
-    pb::optional<Device_Slot> spare = {};
+    pb::optional<pb::bytes<8>> token = std::nullopt;
+    pb::optional<Device_Slot> spare = std::nullopt;
     pb::repeated<Device_Slot, 2> slots = {};
     pb::repeated<Device_State, 3> history = {};
     pb::repeated<int8_t, 4> trims = {};
@@ -52,9 +53,9 @@ struct Device {
 };
 
 struct Frame {
-    pb::optional<Device> device = {};
-    pb::optional<Device_Slot> slot = {};
-    pb::optional<::shared::types::Point> origin = {};
+    pb::optional<Device> device = std::nullopt;
+    pb::optional<Device_Slot> slot = std::nullopt;
+    pb::optional<::shared::types::Point> origin = std::nullopt;
     ::shared::types::Unit unit = ::shared::types::Unit::NONE;
     RxMode mode = RxMode::FIXED;
 };

@@ -48,7 +48,7 @@ struct Reading
 	uint32_t id = 0;
 	int32_t temperature_mc = 0;
 	Mode mode = Mode::IDLE;
-	pb::optional<pb::string<15>> label = {};
+	pb::optional<pb::string<15>> label = std::nullopt;
 	pb::repeated<float, 4> channels = {};
 	pb::bytes<8> token = {};
 	std::array<uint8_t, 6> mac = {};
