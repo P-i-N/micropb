@@ -38,11 +38,6 @@ namespace detail {
 inline constexpr size_t max_offset = 65535;
 
 template <typename T>
-inline constexpr bool is_optional = false;
-template <typename T>
-inline constexpr bool is_optional<optional<T>> = true;
-
-template <typename T>
 inline constexpr bool is_oneof = false;
 template <typename... A>
 inline constexpr bool is_oneof<oneof<A...>> = true;
@@ -192,7 +187,7 @@ template <typename T, int_encoding Encoding = int_encoding::VARINT>
 {
 	constexpr field_kind kind = kind_of<T>();
 	if constexpr ( kind == field_kind::OPTIONAL )
-		return wire_type_of<typename T::value_type, Encoding>();
+		return wire_type_of<std::remove_const_t<typename T::value_type>, Encoding>();
 	else if constexpr ( kind != field_kind::SCALAR )
 		return wire_type::LENGTH_DELIMITED;
 	else if constexpr ( std::is_same_v<T, float> || ( Encoding == int_encoding::FIXED && sizeof( T ) == 4 ) )
@@ -256,7 +251,7 @@ template <typename T, int_encoding Encoding>
 	{
 		if constexpr ( has_enum_traits<T> )
 		{
-			if constexpr ( static_cast<int64_t>( traits<T>::min ) < 0 )
+			if constexpr ( static_cast<int32_t>( traits<T>::min ) < 0 || static_cast<int32_t>( traits<T>::max ) < 0 )
 				return 10;
 			else
 				return varint_size( static_cast<uint64_t>( traits<T>::max ) );
@@ -296,7 +291,11 @@ template <typename M, uint32_t Number, size_t Alternative, int_encoding Encoding
 [[nodiscard]] consteval std::optional<size_t> entry_max_size()
 {
 	if constexpr ( Alternative != 0 )
-		return max_field_size<typename M::template alternative_t<Alternative>, Number, Encoding, true, Visited...>();
+		return max_field_size<std::remove_const_t<typename M::template alternative_t<Alternative>>,
+		                      Number,
+		                      Encoding,
+		                      true,
+		                      Visited...>();
 	else
 		return max_field_size<M, Number, Encoding, Always, Visited...>();
 }
@@ -318,19 +317,19 @@ struct oneof_traits<oneof<A...>>
 	template <typename Target, typename... Visited>
 	[[nodiscard]] static consteval bool reaches()
 	{
-		return ( detail::reaches<Target, A, Visited...>() || ... );
+		return ( detail::reaches<Target, std::remove_const_t<A>, Visited...>() || ... );
 	}
 
 	template <typename... Visited>
 	[[nodiscard]] static consteval bool needs_arena()
 	{
-		return ( detail::needs_arena<A, Visited...>() || ... );
+		return ( detail::needs_arena<std::remove_const_t<A>, Visited...>() || ... );
 	}
 
 	template <typename... Visited>
 	static consteval void check_decodable()
 	{
-		( detail::check_decodable<A, Visited...>(), ... );
+		( detail::check_decodable<std::remove_const_t<A>, Visited...>(), ... );
 	}
 };
 
@@ -439,7 +438,7 @@ template <typename Target, typename T, typename... Visited>
 	{
 		constexpr field_kind kind = kind_of<T>();
 		if constexpr ( kind == field_kind::OPTIONAL )
-			return reaches<Target, typename T::value_type, Visited...>();
+			return reaches<Target, std::remove_const_t<typename T::value_type>, Visited...>();
 		else if constexpr ( kind == field_kind::POINTER )
 			return reaches<Target, std::remove_const_t<std::remove_pointer_t<T>>, Visited...>();
 		else if constexpr ( kind == field_kind::REPEATED )
@@ -473,7 +472,7 @@ template <typename T, typename... Visited>
 	else if constexpr ( kind == field_kind::REPEATED )
 		return ( is_std_span<T> && !is_fixed_span<T> ) || needs_arena<element_t<T>, Visited...>();
 	else if constexpr ( kind == field_kind::OPTIONAL )
-		return needs_arena<typename T::value_type, Visited...>();
+		return needs_arena<std::remove_const_t<typename T::value_type>, Visited...>();
 	else if constexpr ( kind == field_kind::ONEOF )
 		return oneof_traits<T>::template needs_arena<Visited...>();
 	else if constexpr ( kind == field_kind::MESSAGE && !is_one_of<T, Visited...> )
@@ -501,7 +500,7 @@ consteval void check_decodable()
 	}
 	else if constexpr ( kind == field_kind::OPTIONAL )
 	{
-		check_decodable<typename T::value_type, Visited...>();
+		check_decodable<std::remove_const_t<typename T::value_type>, Visited...>();
 	}
 	else if constexpr ( kind == field_kind::ONEOF )
 	{
@@ -547,7 +546,7 @@ template <typename T, uint32_t Number, int_encoding Encoding, bool Always, typen
 			return max_delimited_size( Number, *count, Always );
 	}
 	else if constexpr ( kind == field_kind::OPTIONAL )
-		return max_field_size<typename T::value_type, Number, Encoding, true, Visited...>();
+		return max_field_size<std::remove_const_t<typename T::value_type>, Number, Encoding, true, Visited...>();
 	else if constexpr ( kind == field_kind::POINTER )
 	{
 		using pointee = std::remove_const_t<std::remove_pointer_t<T>>;

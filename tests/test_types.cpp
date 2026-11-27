@@ -115,6 +115,17 @@ constexpr bool test_optional()
 	text.emplace( "ok" );
 	if ( *text != "ok" )
 		return false;
+
+	// Heterogeneous optional comparison (both disengaged and engaged) and rvalue accessors.
+	const optional<string<8>> short_empty;
+	const optional<string<16>> wide_empty;
+	const optional<string<16>> wide_ok = "ok";
+	if ( short_empty != wide_empty || text != wide_ok || wide_ok != text || short_empty == wide_ok )
+		return false;
+	if ( optional<int32_t>( 7 ).value() != 7 || optional<int32_t>( 7 ).value_or( 9 ) != 7 ||
+	     optional<int32_t>{}.value_or( 9 ) != 9 )
+		return false;
+
 	text.reset();
 	return !text.has_value() && text == std::nullopt;
 }
@@ -246,6 +257,19 @@ static_assert( test_optional() );
 static_assert( test_oneof() );
 static_assert( test_map() );
 static_assert( test_arena_empty() );
+
+constexpr repeated<int32_t, 4> constexpr_repeated{};
+constexpr repeated<int32_t, 4> constexpr_repeated_partial{ { 1, 2 } };
+constexpr bytes<8> constexpr_bytes{};
+constexpr bytes<8> constexpr_bytes_partial{ { 0x10, 0x20 } };
+constexpr string<8> constexpr_string{};
+constexpr optional<int32_t> constexpr_optional{};
+constexpr oneof<int32_t, float> constexpr_oneof{};
+constexpr oneof<int32_t, float> constexpr_oneof_copy = constexpr_oneof;
+constexpr map<int32_t, int32_t, 4> constexpr_map{};
+static_assert( constexpr_repeated.empty() && constexpr_repeated_partial.size() == 2 && constexpr_bytes.empty() &&
+               constexpr_bytes_partial.size() == 2 && constexpr_string.empty() && !constexpr_optional.has_value() &&
+               !constexpr_oneof_copy.has_value() && constexpr_map.empty() );
 static_assert( std::is_trivially_copyable_v<optional<int32_t>> && std::is_trivially_destructible_v<optional<int32_t>> );
 static_assert( std::is_trivially_copyable_v<optional<string<8>>> &&
                std::is_trivially_destructible_v<optional<string<8>>> );

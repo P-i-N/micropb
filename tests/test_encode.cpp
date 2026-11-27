@@ -128,7 +128,8 @@ struct const_holder
 struct const_elements
 {
 	std::array<const uint8_t, 3> mac;
-	pb::oneof<const int32_t> choice;
+	pb::oneof<const int32_t, const float> choice;
+	pb::optional<const float> opt_f;
 };
 
 struct same_type_oneof
@@ -232,7 +233,9 @@ template <>
 struct pb::fields_of<const_elements>
   : pb::field_list<const_elements,
                    pb::field_at<decltype( const_elements::mac ), 1, offsetof( const_elements, mac )>,
-                   pb::field_at<decltype( const_elements::choice ), 2, offsetof( const_elements, choice ), 1>>
+                   pb::field_at<decltype( const_elements::choice ), 2, offsetof( const_elements, choice ), 1>,
+                   pb::field_at<decltype( const_elements::choice ), 3, offsetof( const_elements, choice ), 2>,
+                   pb::field_at<decltype( const_elements::opt_f ), 4, offsetof( const_elements, opt_f )>>
 {};
 
 template <>
@@ -450,8 +453,8 @@ bool test_encode_const_nested()
 {
 	constexpr std::array<uint8_t, 16> expected{ 0x0a, 0x06, 0x0a, 0x02, 0x08, 0x01, 0x10, 0x02,
 	                                                 0x12, 0x06, 0x0a, 0x02, 0x08, 0x03, 0x10, 0x04 };
-	constexpr std::array<uint8_t, 7> expected_elements{ 0x0a, 0x03, 1, 2, 3, 0x10, 0x05 };
-	const const_elements elements{ { 1, 2, 3 }, pb::oneof<const int32_t>( std::in_place_index<1>, 5 ) };
+	constexpr std::array<uint8_t, 12> expected_elements{ 0x0a, 0x03, 1, 2, 3, 0x10, 0x05, 0x25, 0x00, 0x00, 0x80, 0x3f };
+	const const_elements elements{ { 1, 2, 3 }, pb::oneof<const int32_t, const float>( std::in_place_index<1>, 5 ), 1.0f };
 	return matches( const_holder{ const_middle{ { 1, {} }, 2 }, const_middle{ { 3, {} }, 4 } }, expected ) &&
 	       matches( elements, expected_elements );
 }

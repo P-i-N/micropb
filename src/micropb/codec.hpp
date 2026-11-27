@@ -438,7 +438,9 @@ struct oneof_alternatives;
 template <typename... A, int_encoding... AltEncodings>
 struct oneof_alternatives<oneof<A...>, AltEncodings...>
 {
-	static constexpr const value_desc* value[sizeof...( A )] = { &value_descriptor<A, AltEncodings>::value... };
+	static constexpr const value_desc* value[sizeof...( A )] = {
+		&value_descriptor<std::remove_const_t<A>, AltEncodings>::value...
+	};
 };
 
 template <typename V, int_encoding... AltEncodings>
@@ -816,7 +818,7 @@ template <typename T, int_encoding Encoding>
 		return { .kind = kind,
 		         .scalar = 0,
 		         .words = static_cast<uint16_t>( optional_access::flag_offset<T> ),
-		         .inner = &value_descriptor<typename T::value_type, Encoding>::value };
+		         .inner = &value_descriptor<std::remove_const_t<typename T::value_type>, Encoding>::value };
 	}
 	else
 		return default_oneof_value_desc<T>::value;
@@ -1562,25 +1564,6 @@ inline void decode_message( reader& in, const value_desc& message, void* object,
 	return grow( sequence, value, items, items.count + count_elements( in, key, sequence ), memory );
 }
 
-[[nodiscard]] inline bool is_bound_span( const sequence_desc& sequence )
-{
-	const span_desc* span = sequence_span( sequence );
-	return span != nullptr && span->bind != nullptr;
-}
-
-[[nodiscard]] inline error capacity_error( const sequence_desc& sequence )
-{
-	return is_bound_span( sequence ) ? error::TRUNCATED : error::CAPACITY_EXCEEDED;
-}
-
-inline void commit_count( const sequence_desc& sequence, void* value, void* data, size_t count )
-{
-	if ( is_bound_span( sequence ) )
-		sequence.span->bind( value, data, count );
-	else
-		store_count( sequence, value, count );
-}
-
 /// Reads one element from `in` into the next free item of the sequence at
 /// `value`. A full sequence is an error: the function examines the capacity
 /// before it reads the element. A full span block means that the count of the
@@ -1613,6 +1596,25 @@ inline void decode_element( reader& in, wire_type wire, const sequence_desc& seq
 }
 
 #ifdef MICROPB_FAST
+[[nodiscard]] inline bool is_bound_span( const sequence_desc& sequence )
+{
+	const span_desc* span = sequence_span( sequence );
+	return span != nullptr && span->bind != nullptr;
+}
+
+[[nodiscard]] inline error capacity_error( const sequence_desc& sequence )
+{
+	return is_bound_span( sequence ) ? error::TRUNCATED : error::CAPACITY_EXCEEDED;
+}
+
+inline void commit_count( const sequence_desc& sequence, void* value, void* data, size_t count )
+{
+	if ( is_bound_span( sequence ) )
+		sequence.span->bind( value, data, count );
+	else
+		store_count( sequence, value, count );
+}
+
 /// Reads a packed scalar record into `value`. Scalar elements are trivially
 /// copyable and implicit-lifetime, so the loop writes directly into storage.
 inline void decode_packed_scalars( reader& in, const sequence_desc& sequence, void* value )

@@ -50,12 +50,26 @@ enum class trait_neg : int32_t
 	NEG = -1,
 };
 
+enum class trait_u32_high : uint32_t
+{
+	ZERO = 0,
+	HIGH = 0x80000000u,
+};
+
 struct trait_enum_msg
 {
 	trait_small one;
 	trait_wide wide;
 	trait_neg neg;
 	pb::repeated<trait_small, 4> many;
+	trait_u32_high high;
+	pb::map<uint32_t, trait_small, 2> by_id;
+};
+
+struct const_inner_msg
+{
+	pb::optional<const float> opt_f;
+	pb::oneof<const float, const bool> var_fb;
 };
 
 struct pose
@@ -180,12 +194,29 @@ struct pb::traits<trait_neg>
 };
 
 template <>
+struct pb::traits<trait_u32_high>
+{
+	static constexpr trait_u32_high min = trait_u32_high::ZERO;
+	static constexpr trait_u32_high max = trait_u32_high::HIGH;
+};
+
+template <>
 struct pb::fields_of<trait_enum_msg>
   : pb::field_list<trait_enum_msg,
                    pb::field_at<decltype( trait_enum_msg::one ), 1, offsetof( trait_enum_msg, one )>,
                    pb::field_at<decltype( trait_enum_msg::wide ), 2, offsetof( trait_enum_msg, wide )>,
                    pb::field_at<decltype( trait_enum_msg::neg ), 3, offsetof( trait_enum_msg, neg )>,
-                   pb::field_at<decltype( trait_enum_msg::many ), 4, offsetof( trait_enum_msg, many )>>
+                   pb::field_at<decltype( trait_enum_msg::many ), 4, offsetof( trait_enum_msg, many )>,
+                   pb::field_at<decltype( trait_enum_msg::high ), 5, offsetof( trait_enum_msg, high )>,
+                   pb::field_at<decltype( trait_enum_msg::by_id ), 6, offsetof( trait_enum_msg, by_id )>>
+{};
+
+template <>
+struct pb::fields_of<const_inner_msg>
+  : pb::field_list<const_inner_msg,
+                   pb::field_at<decltype( const_inner_msg::opt_f ), 1, offsetof( const_inner_msg, opt_f )>,
+                   pb::field_at<decltype( const_inner_msg::var_fb ), 2, offsetof( const_inner_msg, var_fb ), 1>,
+                   pb::field_at<decltype( const_inner_msg::var_fb ), 3, offsetof( const_inner_msg, var_fb ), 2>>
 {};
 
 template <>
@@ -321,6 +352,7 @@ consteval bool test_kinds()
 consteval bool test_wire_types()
 {
 	return wire_type_of<float>() == wire_type::FIXED32 && wire_type_of<double>() == wire_type::FIXED64 &&
+	       wire_type_of<pb::optional<const float>>() == wire_type::FIXED32 &&
 	       wire_type_of<int64_t, int_encoding::FIXED>() == wire_type::FIXED64 &&
 	       wire_type_of<int8_t>() == wire_type::VARINT && wire_type_of<bool>() == wire_type::VARINT &&
 	       wire_type_of<int32_t, int_encoding::ZIGZAG>() == wire_type::VARINT &&
@@ -364,10 +396,15 @@ consteval bool test_max_encoded_size()
 	// total = 22
 	constexpr size_t expected_oneof = 22;
 
-	// trait_enum_msg (tags 1..4, 1 B key each):
-	// one (0..2): 1+1=2, wide (0..128): 1+2=3, neg (-1..0): 1+10=11, many (4 packed 0..2): 1+1+4*1=6
-	// total = 22
-	constexpr size_t expected_trait_enums = 22;
+	// trait_enum_msg (tags 1..6, 1 B key each):
+	// one (0..2): 1+1=2, wide (0..128): 1+2=3, neg (-1..0): 1+10=11, many (4 packed 0..2): 1+1+4*1=6,
+	// high (uint32 >= 2^31 sign-extends to 10 B): 1+10=11,
+	// by_id (2 entries of uint32(1+5) + trait_small(1+1) = 8 B body -> 2*(1+1+8) = 20)
+	// total = 53
+	constexpr size_t expected_trait_enums = 53;
+
+	// const_inner_msg: opt_f (1+4=5) + max(var_fb: 1+4=5, 1+1=2) = 10
+	constexpr size_t expected_const_inner = 10;
 
 	return traits<empty_msg>::has_max_encoded_size && traits<empty_msg>::max_encoded_size == 0 &&
 	       traits<const empty_msg>::has_max_encoded_size && traits<const empty_msg>::max_encoded_size == 0 &&
@@ -379,6 +416,8 @@ consteval bool test_max_encoded_size()
 	       traits<multi_oneof_msg>::max_encoded_size == expected_oneof &&
 	       traits<trait_enum_msg>::has_max_encoded_size &&
 	       traits<trait_enum_msg>::max_encoded_size == expected_trait_enums &&
+	       traits<const_inner_msg>::has_max_encoded_size &&
+	       traits<const_inner_msg>::max_encoded_size == expected_const_inner &&
 	       traits<const trait_small>::min == trait_small::RED &&
 	       traits<const trait_small>::max == trait_small::BLUE &&
 	       !has_enum_min_trait<signed_e8> && !has_max_size_member<unbounded_sv> && has_max_size_member<empty_msg> &&

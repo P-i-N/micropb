@@ -224,10 +224,12 @@ union oneof_storage<>
 template <typename Head, typename... Tail>
 union oneof_storage<Head, Tail...>
 {
+	struct
+	{} empty;
 	Head head;
 	oneof_storage<Tail...> tail;
 
-	constexpr oneof_storage() noexcept {}
+	constexpr oneof_storage() noexcept : empty{} {}
 	constexpr oneof_storage( const oneof_storage& ) = default;
 	constexpr oneof_storage& operator=( const oneof_storage& ) = default;
 	constexpr ~oneof_storage() = default;
@@ -276,12 +278,22 @@ struct repeated
 {
 	static constexpr size_t max_size = N;
 
-	constexpr repeated() = default;
+	constexpr repeated() noexcept( std::is_nothrow_default_constructible_v<T> )
+	{
+		if consteval
+		{
+			_items = {};
+		}
+	}
 
 	template <size_t M>
 		requires( M <= N )
 	constexpr repeated( const T ( &items )[M] ) : _count( static_cast<count_type>( M ) )
 	{
+		if consteval
+		{
+			_items = {};
+		}
 		std::copy_n( items, M, _items.data() );
 	}
 
@@ -489,12 +501,22 @@ struct bytes
 {
 	static constexpr size_t max_size = N;
 
-	constexpr bytes() = default;
+	constexpr bytes() noexcept
+	{
+		if consteval
+		{
+			_items = {};
+		}
+	}
 
 	template <size_t M>
 		requires( M <= N )
 	constexpr bytes( const uint8_t ( &data )[M] ) noexcept : _count( static_cast<count_type>( M ) )
 	{
+		if consteval
+		{
+			_items = {};
+		}
 		std::copy_n( data, M, _items.data() );
 	}
 
@@ -502,6 +524,10 @@ struct bytes
 		requires( M <= N )
 	constexpr bytes( const std::array<uint8_t, M>& data ) noexcept : _count( static_cast<count_type>( M ) )
 	{
+		if consteval
+		{
+			_items = {};
+		}
 		std::copy_n( data.data(), M, _items.data() );
 	}
 
@@ -736,6 +762,8 @@ struct optional
 
 	[[nodiscard]] constexpr T& value() & noexcept { return _storage.value; }
 	[[nodiscard]] constexpr const T& value() const& noexcept { return _storage.value; }
+	[[nodiscard]] constexpr T&& value() && noexcept { return std::move( _storage.value ); }
+	[[nodiscard]] constexpr const T&& value() const&& noexcept { return std::move( _storage.value ); }
 
 	template <typename U>
 	[[nodiscard]] constexpr T value_or( U&& fallback ) const&
@@ -743,7 +771,14 @@ struct optional
 		return _has_value ? _storage.value : static_cast<T>( std::forward<U>( fallback ) );
 	}
 
+	template <typename U>
+	[[nodiscard]] constexpr T value_or( U&& fallback ) &&
+	{
+		return _has_value ? std::move( _storage.value ) : static_cast<T>( std::forward<U>( fallback ) );
+	}
+
 	template <typename... Args>
+		requires std::is_constructible_v<T, Args...>
 	constexpr T& emplace( Args&&... args )
 	{
 		std::construct_at( const_cast<std::remove_const_t<T>*>( &_storage.value ), std::forward<Args>( args )... );
@@ -753,33 +788,46 @@ struct optional
 
 	constexpr void reset() noexcept { _has_value = false; }
 
-	[[nodiscard]] friend constexpr bool operator==( const optional& a, const optional& b )
-	{
-		return a._has_value == b._has_value && ( !a._has_value || a._storage.value == b._storage.value );
-	}
-
-	[[nodiscard]] friend constexpr bool operator==( const optional& a, std::nullopt_t ) noexcept
-	{
-		return !a._has_value;
-	}
-
-	template <typename U>
-		requires( !std::is_same_v<std::remove_cvref_t<U>, optional> &&
-		          !std::is_same_v<std::remove_cvref_t<U>, std::nullopt_t> &&
-		          requires( const T& lhs, const U& rhs ) {
-			          { lhs == rhs } -> std::convertible_to<bool>;
-		          } )
-	[[nodiscard]] friend constexpr bool operator==( const optional& a, const U& b )
-	{
-		return a._has_value && a._storage.value == b;
-	}
-
 private:
 	friend struct detail::optional_access;
 
 	detail::optional_storage<T> _storage;
 	bool _has_value = false;
 };
+
+namespace detail {
+
+template <typename T>
+inline constexpr bool is_optional = false;
+template <typename T>
+inline constexpr bool is_optional<optional<T>> = true;
+
+} // namespace detail
+
+template <typename T, typename U>
+	requires requires( const T& lhs, const U& rhs ) {
+		{ lhs == rhs } -> std::convertible_to<bool>;
+	}
+[[nodiscard]] constexpr bool operator==( const optional<T>& a, const optional<U>& b )
+{
+	return a.has_value() == b.has_value() && ( !a.has_value() || *a == *b );
+}
+
+template <typename T>
+[[nodiscard]] constexpr bool operator==( const optional<T>& a, std::nullopt_t ) noexcept
+{
+	return !a.has_value();
+}
+
+template <typename T, typename U>
+	requires( !detail::is_optional<U> && !std::is_same_v<U, std::nullopt_t> &&
+	          requires( const T& lhs, const U& rhs ) {
+		          { lhs == rhs } -> std::convertible_to<bool>;
+	          } )
+[[nodiscard]] constexpr bool operator==( const optional<T>& a, const U& b )
+{
+	return a.has_value() && *a == b;
+}
 
 /// Tagged union for proto3 `oneof` fields. Alternatives use 1-based indices
 /// `1..sizeof...(Ts)` in declaration order; `index()` returns `0` when unset.
