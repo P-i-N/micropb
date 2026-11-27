@@ -567,7 +567,7 @@ ctest --test-dir .build --output-on-failure
 * **Tested toolchains:** GCC 16.2 on Linux and Windows (MSYS2 UCRT64); compile-tested with Arm GNU Toolchain 13.3, 14.2, and 16.2 (`-mcpu=cortex-m4 -mthumb`, not yet executed on hardware); `protoc` 35.1 and 36.2 with Python 3.13 and 3.14.
 * **Out of scope:** proto2, editions, groups, well-known types (`Any`, `Timestamp`), JSON, unknown-field preservation, and streaming I/O.
 * **Runtime-only codec:** `encode`, `decode`, and `encoded_size` read members via byte offsets and cannot run in `constexpr` evaluation.
-* **Build macros:**
+* **Build macros** (define identically across all translation units in a binary):
   * `MICROPB_FAST`: enables speed-oriented fast paths (1-byte varint fast path, inline scalar dispatch in `emit_message`/`decode_message`/`reset_message`, two-pass cursor field lookup, and bulk packed scalar encode/decode). Without it (default), MicroPB minimizes ROM size.
   * `MICROPB_WIDE_TABLES`: enables 5-halfword field entries for schemas that exceed the compact table limits below.
   * `MICROPB_MAX_DEPTH`: maximum nested submessage depth for `encode` and `decode` (default `32`).

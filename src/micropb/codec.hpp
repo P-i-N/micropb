@@ -87,7 +87,7 @@ struct value_desc
 	/// SCALAR: the scalar code. MESSAGE: the number of distinct compound types in `table`.
 	/// ONEOF: size of `_index` in bytes (1 or 2).
 	uint8_t scalar;
-	/// MESSAGE: the number of `uint32_t` words in `table`.
+	/// MESSAGE: the number of `uint16_t` halfwords in `table` (bit 15 is `message_always_emit`).
 	/// ONEOF: byte offset of `_index` inside `pb::oneof`.
 	uint16_t words;
 	union
@@ -129,14 +129,13 @@ inline constexpr uint8_t op_short_sub_limit = 10;
 inline constexpr uint8_t op_sub_limit = 73;
 inline constexpr uint8_t op_oneof_base = 95;
 inline constexpr uint8_t op_oneof_max_alt = 32;
-inline constexpr uint8_t op_wide = 127;
 
 /// Unpacked entry of a message field table.
 struct field_entry
 {
 	uint32_t number;
 	uint16_t offset;
-	/// 0 for a plain member, else the 1-based index of the `std::variant` alternative.
+	/// 0 for a plain member, else the 1-based index of the `pb::oneof` alternative.
 	uint16_t alternative;
 	/// Index into `subs` when `base_op == op_sub_base`.
 	uint16_t sub_idx;
@@ -580,7 +579,7 @@ struct message_table_data<0, 0>
 {};
 
 /// The field table of a message type: distinct compound descriptors followed by
-/// 1- or 3-word field entries in ascending field number.
+/// 1-, 2-, or 5-halfword field entries in ascending field number.
 template <typename L>
 struct field_table;
 
@@ -694,7 +693,7 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 
 		plan p{};
 		std::array<size_t, entry_count> sub_ids{};
-		// Put a `std::variant` descriptor first (`subs[0]`) so its alternatives fit in 1 word.
+		// Put a `pb::oneof` descriptor first (`subs[0]`) so its alternatives fit in 2 halfwords.
 		for ( unsigned pass = 0; pass < 2; ++pass )
 		{
 			for ( size_t i = 0; i < entry_count; ++i )
@@ -745,7 +744,7 @@ struct field_table<field_list<T, field_at<M, Number, Offset, Alternative, Encodi
 	}
 
 	static constexpr plan layout = build_plan();
-	static_assert( layout.subs_n <= 255 && layout.words_n <= 65535 );
+	static_assert( layout.subs_n <= 255 && layout.words_n <= ( message_always_emit - 1u ) );
 #ifndef MICROPB_WIDE_TABLES
 	static_assert( !layout.has_wide,
 	               "pb: wide_table_required: define MICROPB_WIDE_TABLES for tags > 4095, offsets > 4095, "

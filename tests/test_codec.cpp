@@ -621,12 +621,11 @@ struct pb::fields_of<wide_msg> : decltype( make_wide_list( std::make_index_seque
 
 namespace {
 
-/// Exercises 3-word field entries: alternative 33 (> 32), a second `std::variant`
+/// Exercises 5-halfword field entries: alternative 33 (> 32), a second `pb::oneof`
 /// (`sub_idx == 1`), member offsets > 4095, and field numbers 4096 and 2^29 - 1.
 bool test_wide_entries()
 {
 	using wt = d::field_table<d::field_list_of<wide_msg>>;
-	// 32 1-word entries (`first` 1..32) + 1 (`pad`) = 33 1-word entries, plus 5 3-word entries = 48 words.
 	static_assert( wt::entry_count == 38 && wt::layout.words_n == 32 * 2 + 1 + 5 * 5 + 1 );
 
 	wide_msg tx{};
@@ -820,12 +819,195 @@ bool test_maps()
 	       span_rx.s2i[1].key.empty() && span_rx.s2i[1].value == 0;
 }
 
+struct many_compounds
+{
+	std::optional<alt_tag<0>> f0;
+	std::optional<alt_tag<1>> f1;
+	std::optional<alt_tag<2>> f2;
+	std::optional<alt_tag<3>> f3;
+	std::optional<alt_tag<4>> f4;
+	std::optional<alt_tag<5>> f5;
+	std::optional<alt_tag<6>> f6;
+	std::optional<alt_tag<7>> f7;
+	std::optional<alt_tag<8>> f8;
+	std::optional<alt_tag<9>> f9;
+	std::optional<alt_tag<10>> f10;
+	std::optional<alt_tag<11>> f11;
+	std::optional<alt_tag<12>> f12;
+	std::optional<alt_tag<13>> f13;
+	std::optional<alt_tag<14>> f14;
+	std::optional<alt_tag<15>> f15;
+	std::optional<alt_tag<16>> f16;
+	std::optional<alt_tag<17>> f17;
+	std::optional<alt_tag<18>> f18;
+	std::optional<alt_tag<19>> f19;
+	std::optional<alt_tag<20>> f20;
+	std::optional<alt_tag<21>> f21;
+	std::optional<alt_tag<22>> f22;
+	std::optional<alt_tag<23>> f23;
+	std::optional<alt_tag<24>> f24;
+	std::optional<alt_tag<25>> f25;
+	std::optional<alt_tag<26>> f26;
+	std::optional<alt_tag<27>> f27;
+	std::optional<alt_tag<28>> f28;
+	std::optional<alt_tag<29>> f29;
+	std::optional<alt_tag<30>> f30;
+	std::optional<alt_tag<31>> f31;
+	std::optional<alt_tag<32>> f32;
+	std::optional<alt_tag<33>> f33;
+	std::optional<alt_tag<34>> f34;
+	std::optional<alt_tag<35>> f35;
+	std::optional<alt_tag<36>> f36;
+	std::optional<alt_tag<37>> f37;
+	std::optional<alt_tag<38>> f38;
+	std::optional<alt_tag<39>> f39;
+	std::optional<alt_tag<40>> f40;
+	std::optional<alt_tag<41>> f41;
+	std::optional<alt_tag<42>> f42;
+	std::optional<alt_tag<43>> f43;
+	std::optional<alt_tag<44>> f44;
+	std::optional<alt_tag<45>> f45;
+	std::optional<alt_tag<46>> f46;
+	std::optional<alt_tag<47>> f47;
+	std::optional<alt_tag<48>> f48;
+	std::optional<alt_tag<49>> f49;
+	std::optional<alt_tag<50>> f50;
+	std::optional<alt_tag<51>> f51;
+	std::optional<alt_tag<52>> f52;
+	std::optional<alt_tag<53>> f53;
+	std::optional<alt_tag<54>> f54;
+	std::optional<alt_tag<55>> f55;
+	std::optional<alt_tag<56>> f56;
+	std::optional<alt_tag<57>> f57;
+	std::optional<alt_tag<58>> f58;
+	std::optional<alt_tag<59>> f59;
+	std::optional<alt_tag<60>> f60;
+	std::optional<alt_tag<61>> f61;
+	std::optional<alt_tag<62>> f62;
+	std::optional<alt_tag<63>> f63;
+	std::optional<alt_tag<64>> f64;
+	std::optional<alt_tag<65>> f65;
+	std::optional<alt_tag<66>> f66;
+	std::optional<alt_tag<67>> f67;
+	std::optional<alt_tag<68>> f68;
+	std::optional<alt_tag<69>> f69;
+	std::optional<alt_tag<70>> f70;
+	std::optional<alt_tag<71>> f71;
+	std::optional<alt_tag<72>> f72;
+	std::optional<alt_tag<73>> f73;
+};
+
+} // namespace
+
+template <>
+struct pb::fields_of<many_compounds>
+  : pb::field_list<many_compounds,
+                   pb::field_at<decltype( many_compounds::f0 ), 1, offsetof( many_compounds, f0 )>,
+                   pb::field_at<decltype( many_compounds::f1 ), 2, offsetof( many_compounds, f1 )>,
+                   pb::field_at<decltype( many_compounds::f2 ), 3, offsetof( many_compounds, f2 )>,
+                   pb::field_at<decltype( many_compounds::f3 ), 4, offsetof( many_compounds, f3 )>,
+                   pb::field_at<decltype( many_compounds::f4 ), 5, offsetof( many_compounds, f4 )>,
+                   pb::field_at<decltype( many_compounds::f5 ), 6, offsetof( many_compounds, f5 )>,
+                   pb::field_at<decltype( many_compounds::f6 ), 7, offsetof( many_compounds, f6 )>,
+                   pb::field_at<decltype( many_compounds::f7 ), 8, offsetof( many_compounds, f7 )>,
+                   pb::field_at<decltype( many_compounds::f8 ), 9, offsetof( many_compounds, f8 )>,
+                   pb::field_at<decltype( many_compounds::f9 ), 10, offsetof( many_compounds, f9 )>,
+                   pb::field_at<decltype( many_compounds::f10 ), 11, offsetof( many_compounds, f10 )>,
+                   pb::field_at<decltype( many_compounds::f11 ), 12, offsetof( many_compounds, f11 )>,
+                   pb::field_at<decltype( many_compounds::f12 ), 13, offsetof( many_compounds, f12 )>,
+                   pb::field_at<decltype( many_compounds::f13 ), 14, offsetof( many_compounds, f13 )>,
+                   pb::field_at<decltype( many_compounds::f14 ), 15, offsetof( many_compounds, f14 )>,
+                   pb::field_at<decltype( many_compounds::f15 ), 16, offsetof( many_compounds, f15 )>,
+                   pb::field_at<decltype( many_compounds::f16 ), 17, offsetof( many_compounds, f16 )>,
+                   pb::field_at<decltype( many_compounds::f17 ), 18, offsetof( many_compounds, f17 )>,
+                   pb::field_at<decltype( many_compounds::f18 ), 19, offsetof( many_compounds, f18 )>,
+                   pb::field_at<decltype( many_compounds::f19 ), 20, offsetof( many_compounds, f19 )>,
+                   pb::field_at<decltype( many_compounds::f20 ), 21, offsetof( many_compounds, f20 )>,
+                   pb::field_at<decltype( many_compounds::f21 ), 22, offsetof( many_compounds, f21 )>,
+                   pb::field_at<decltype( many_compounds::f22 ), 23, offsetof( many_compounds, f22 )>,
+                   pb::field_at<decltype( many_compounds::f23 ), 24, offsetof( many_compounds, f23 )>,
+                   pb::field_at<decltype( many_compounds::f24 ), 25, offsetof( many_compounds, f24 )>,
+                   pb::field_at<decltype( many_compounds::f25 ), 26, offsetof( many_compounds, f25 )>,
+                   pb::field_at<decltype( many_compounds::f26 ), 27, offsetof( many_compounds, f26 )>,
+                   pb::field_at<decltype( many_compounds::f27 ), 28, offsetof( many_compounds, f27 )>,
+                   pb::field_at<decltype( many_compounds::f28 ), 29, offsetof( many_compounds, f28 )>,
+                   pb::field_at<decltype( many_compounds::f29 ), 30, offsetof( many_compounds, f29 )>,
+                   pb::field_at<decltype( many_compounds::f30 ), 31, offsetof( many_compounds, f30 )>,
+                   pb::field_at<decltype( many_compounds::f31 ), 32, offsetof( many_compounds, f31 )>,
+                   pb::field_at<decltype( many_compounds::f32 ), 33, offsetof( many_compounds, f32 )>,
+                   pb::field_at<decltype( many_compounds::f33 ), 34, offsetof( many_compounds, f33 )>,
+                   pb::field_at<decltype( many_compounds::f34 ), 35, offsetof( many_compounds, f34 )>,
+                   pb::field_at<decltype( many_compounds::f35 ), 36, offsetof( many_compounds, f35 )>,
+                   pb::field_at<decltype( many_compounds::f36 ), 37, offsetof( many_compounds, f36 )>,
+                   pb::field_at<decltype( many_compounds::f37 ), 38, offsetof( many_compounds, f37 )>,
+                   pb::field_at<decltype( many_compounds::f38 ), 39, offsetof( many_compounds, f38 )>,
+                   pb::field_at<decltype( many_compounds::f39 ), 40, offsetof( many_compounds, f39 )>,
+                   pb::field_at<decltype( many_compounds::f40 ), 41, offsetof( many_compounds, f40 )>,
+                   pb::field_at<decltype( many_compounds::f41 ), 42, offsetof( many_compounds, f41 )>,
+                   pb::field_at<decltype( many_compounds::f42 ), 43, offsetof( many_compounds, f42 )>,
+                   pb::field_at<decltype( many_compounds::f43 ), 44, offsetof( many_compounds, f43 )>,
+                   pb::field_at<decltype( many_compounds::f44 ), 45, offsetof( many_compounds, f44 )>,
+                   pb::field_at<decltype( many_compounds::f45 ), 46, offsetof( many_compounds, f45 )>,
+                   pb::field_at<decltype( many_compounds::f46 ), 47, offsetof( many_compounds, f46 )>,
+                   pb::field_at<decltype( many_compounds::f47 ), 48, offsetof( many_compounds, f47 )>,
+                   pb::field_at<decltype( many_compounds::f48 ), 49, offsetof( many_compounds, f48 )>,
+                   pb::field_at<decltype( many_compounds::f49 ), 50, offsetof( many_compounds, f49 )>,
+                   pb::field_at<decltype( many_compounds::f50 ), 51, offsetof( many_compounds, f50 )>,
+                   pb::field_at<decltype( many_compounds::f51 ), 52, offsetof( many_compounds, f51 )>,
+                   pb::field_at<decltype( many_compounds::f52 ), 53, offsetof( many_compounds, f52 )>,
+                   pb::field_at<decltype( many_compounds::f53 ), 54, offsetof( many_compounds, f53 )>,
+                   pb::field_at<decltype( many_compounds::f54 ), 55, offsetof( many_compounds, f54 )>,
+                   pb::field_at<decltype( many_compounds::f55 ), 56, offsetof( many_compounds, f55 )>,
+                   pb::field_at<decltype( many_compounds::f56 ), 57, offsetof( many_compounds, f56 )>,
+                   pb::field_at<decltype( many_compounds::f57 ), 58, offsetof( many_compounds, f57 )>,
+                   pb::field_at<decltype( many_compounds::f58 ), 59, offsetof( many_compounds, f58 )>,
+                   pb::field_at<decltype( many_compounds::f59 ), 60, offsetof( many_compounds, f59 )>,
+                   pb::field_at<decltype( many_compounds::f60 ), 61, offsetof( many_compounds, f60 )>,
+                   pb::field_at<decltype( many_compounds::f61 ), 62, offsetof( many_compounds, f61 )>,
+                   pb::field_at<decltype( many_compounds::f62 ), 63, offsetof( many_compounds, f62 )>,
+                   pb::field_at<decltype( many_compounds::f63 ), 64, offsetof( many_compounds, f63 )>,
+                   pb::field_at<decltype( many_compounds::f64 ), 65, offsetof( many_compounds, f64 )>,
+                   pb::field_at<decltype( many_compounds::f65 ), 66, offsetof( many_compounds, f65 )>,
+                   pb::field_at<decltype( many_compounds::f66 ), 67, offsetof( many_compounds, f66 )>,
+                   pb::field_at<decltype( many_compounds::f67 ), 68, offsetof( many_compounds, f67 )>,
+                   pb::field_at<decltype( many_compounds::f68 ), 69, offsetof( many_compounds, f68 )>,
+                   pb::field_at<decltype( many_compounds::f69 ), 70, offsetof( many_compounds, f69 )>,
+                   pb::field_at<decltype( many_compounds::f70 ), 71, offsetof( many_compounds, f70 )>,
+                   pb::field_at<decltype( many_compounds::f71 ), 72, offsetof( many_compounds, f71 )>,
+                   pb::field_at<decltype( many_compounds::f72 ), 73, offsetof( many_compounds, f72 )>,
+                   pb::field_at<decltype( many_compounds::f73 ), 74, offsetof( many_compounds, f73 )>>
+{};
+
+namespace {
+
+/// Exercises a 5-halfword entry triggered solely by > 73 distinct compound member types.
+bool test_wide_compound_types()
+{
+	using mt = d::field_table<d::field_list_of<many_compounds>>;
+	static_assert( mt::layout.subs_n == 74 && mt::layout.has_wide );
+
+	many_compounds tx{};
+	tx.f0 = alt_tag<0>{ 11 };
+	tx.f72 = alt_tag<72>{ 22 };
+	tx.f73 = alt_tag<73>{ 33 };
+
+	std::array<uint8_t, 64> wire{};
+	const auto n = pb::encode( tx, wire );
+	if ( !n || pb::encoded_size( tx ) != *n )
+		return false;
+
+	many_compounds rx{};
+	if ( !pb::decode( std::span<const uint8_t>( wire ).first( *n ), rx ) )
+		return false;
+	return rx.f0 && rx.f0->v == 11 && !rx.f1.has_value() && rx.f72 && rx.f72->v == 22 && rx.f73 && rx.f73->v == 33;
+}
+
 } // namespace
 
 int main()
 {
 	const bool ok = test_optional_accessor() && test_variant_accessor() && test_sequence_accessor() &&
-	                test_block_bound() && test_all_kinds() && test_wide_entries() && test_encoded_compounds() &&
-	                test_maps();
+	                test_block_bound() && test_all_kinds() && test_wide_entries() && test_wide_compound_types() &&
+	                test_encoded_compounds() && test_maps();
 	return ok ? 0 : 1;
 }
