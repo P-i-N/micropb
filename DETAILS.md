@@ -82,7 +82,7 @@ template <typename T>
 | `pb::bytes<N>` | — | `bytes` | Copies up to `N` bytes into the struct (`data()`, `span()`, `assign()`, `push_back()`, implicit `std::span<const uint8_t>`). |
 | `std::array<uint8_t, N>` | — | `bytes` | Fixed length: encodes all `N` bytes; shorter input zero-pads; longer input fails with `CAPACITY_EXCEEDED`. |
 | `std::span<const uint8_t, N>` | — | `bytes` | Encode-only fixed-extent view. |
-| Aggregate `struct` | — | `message` | Nested message. |
+| Aggregate `struct` | — | `message` | Nested message (hand-written `pb::fields_of`; generator emits `std::optional<T>` for singular message fields to preserve proto3 explicit presence). |
 | `const T*` (`T` aggregate `struct`) | — | `message` (`type:FT_POINTER`) | Indirect/recursive submessage; null means absent; decodes into `pb::arena`. |
 | `std::optional<T>` | *(element encoding)* | `optional T` | Explicit presence. |
 | `pb::oneof<A, B, ...>` | *(per-alternative encoding)* | `oneof` | Alternatives use 1-based indices `1..K` (`index() == 0` when unset); alternatives may share a C++ type (see [`oneof` fields](#oneof-fields-and-duplicate-alternative-types)). |
@@ -98,7 +98,7 @@ Plain `char`, `wchar_t`, `char8_t`, `char16_t`, `char32_t`, `__int128`, non-mess
 | --- | --- |
 | Scalar, `string` (`std::string_view`, `pb::string<N>`), `bytes` (`std::span`, `pb::bytes<N>`) | Value is non-zero or non-empty (`-0.0` is non-zero) |
 | `std::array<uint8_t, N>` (`FIXED_BYTES`) | `N > 0` (writes all `N` bytes) |
-| Nested `struct` | Always |
+| Nested `struct` | Always (generated singular message fields use `std::optional<T>`) |
 | `const T*` (message pointer) | Non-null (including an empty submessage) |
 | `std::optional<T>` | Engaged (including zero or empty values) |
 | `pb::oneof` | An alternative is active (`index() != 0`) |
@@ -183,7 +183,7 @@ The plugin searches for `<stem>.options` relative to the current directory first
 | `max_size:N` | `bytes` / `string` (including `repeated` and `map` key/value) | `pb::bytes<N>` on `bytes`; `pb::string<N - 1>` on `string` (matches NanoPB buffer size including `'\0'`) |
 | `max_size:N fixed_length:true` | `bytes` | `std::array<uint8_t, N>` |
 | `type:FT_POINTER` | `message`, `repeated`, `map`, `bytes`, or `string` | `const T*` (singular `message`; also automatic on cycle edges unless pinned with `type:FT_STATIC`), `std::span<const T>`, `std::span<const pb::kv_pair<K, V>>`, `std::span<const uint8_t>`, or `std::string_view` (overrides wildcard `max_count`/`max_size`/`max_length`) |
-| `type:FT_STATIC`, `type:FT_DEFAULT` | `message`, `repeated`, `map`, `bytes`, `string` | `FT_STATIC` keeps a singular `message` by value (disabling auto-pointer on cycles); otherwise uses the other options on the field |
+| `type:FT_STATIC`, `type:FT_DEFAULT` | `message`, `repeated`, `map`, `bytes`, or `string` | `FT_STATIC` keeps a singular `message` by value (`std::optional<T>`, disabling auto-pointer on cycles); otherwise uses the other options on the field |
 | `int_size:IS_8`, `IS_16`, `IS_32`, `IS_64` | `int32`, `int64`, `uint32`, `uint64`, `sint32`, `sint64` | Narrow or wide `intN_t` / `uintN_t` |
 | `enum_intsize:IS_8`, `IS_16`, `IS_32` | `enum` | `enum class E : intN_t` (fails generation if a `.proto` enumerator does not fit) |
 

@@ -169,7 +169,7 @@ void on_packet( std::span<const uint8_t> packet )
 | `bytes` | *(none)* / `max_size:N` / `max_size:N fixed_length:true` | `std::span<const uint8_t>` / `pb::bytes<N>` / `std::array<uint8_t, N>` |
 | `repeated T` | *(none)* / `max_count:N` / `max_count:N fixed_count:true` | `std::span<const T>` / `pb::repeated<T, N>` / `std::array<T, N>` |
 | `map<K, V>` | *(none)* / `max_count:N` / `max_count:N fixed_count:true` | `std::span<const pb::kv_pair<K, V>>` / `pb::map<K, V, N>` / `std::array<pb::kv_pair<K, V>, N>` |
-| `message T` | *(none)* / `type:FT_POINTER` (auto on cycles) | `T` / `const T*` (allocated in scratch/arena) |
+| `message T` | *(none)* / `type:FT_POINTER` (auto on cycles) | `std::optional<T>` / `const T*` (allocated in scratch/arena) |
 | `optional T` / `oneof` | — | `std::optional<T>` / `pb::oneof<...>` |
 
 ## API

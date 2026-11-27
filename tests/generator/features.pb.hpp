@@ -24,21 +24,21 @@ enum class Device_State : int8_t {
     BUSY = 1,
 };
 
-struct limits {
-    int32_t low = 0;
-    int32_t high = 0;
-};
-
 struct Device_Slot {
     uint32_t index = 0;
     pb::bytes<16> key = {};
 };
 
+struct limits {
+    int32_t low = 0;
+    int32_t high = 0;
+};
+
 struct Device {
     int32_t class_ = 0;
     Device_State state = Device_State::IDLE;
-    ::features::limits limits = {};
-    ::features::limits backup = {};
+    std::optional<::features::limits> limits = {};
+    std::optional<::features::limits> backup = {};
     uint32_t serial = 0;
     int16_t offset = 0;
     std::optional<pb::bytes<8>> token = {};
@@ -56,9 +56,9 @@ struct Device {
 };
 
 struct Frame {
-    Device device = {};
-    Device_Slot slot = {};
-    ::shared::types::Point origin = {};
+    std::optional<Device> device = {};
+    std::optional<Device_Slot> slot = {};
+    std::optional<::shared::types::Point> origin = {};
     ::shared::types::Unit unit = ::shared::types::Unit::NONE;
     RxMode mode = RxMode::FIXED;
 };
@@ -93,14 +93,14 @@ struct Log {
 // Field lists.
 
 template <>
-struct pb::fields_of<::features::limits> : pb::field_list<::features::limits,
-    pb::field_at<decltype(::features::limits::low), 1, offsetof(::features::limits, low)>,
-    pb::field_at<decltype(::features::limits::high), 2, offsetof(::features::limits, high)>> {};
-
-template <>
 struct pb::fields_of<::features::Device_Slot> : pb::field_list<::features::Device_Slot,
     pb::field_at<decltype(::features::Device_Slot::index), 1, offsetof(::features::Device_Slot, index)>,
     pb::field_at<decltype(::features::Device_Slot::key), 2, offsetof(::features::Device_Slot, key)>> {};
+
+template <>
+struct pb::fields_of<::features::limits> : pb::field_list<::features::limits,
+    pb::field_at<decltype(::features::limits::low), 1, offsetof(::features::limits, low)>,
+    pb::field_at<decltype(::features::limits::high), 2, offsetof(::features::limits, high)>> {};
 
 template <>
 struct pb::fields_of<::features::Device> : pb::field_list<::features::Device,

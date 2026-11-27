@@ -587,7 +587,8 @@ class Header:
                 text = self.field_type(message, field, member_names)
                 if text.endswith("*"):
                     default = "nullptr"
-                elif field.proto3_optional:
+                elif field.proto3_optional or (
+                        field.type == Field.TYPE_MESSAGE and field.label != Field.LABEL_REPEATED):
                     text = f"std::optional<{text}>"
                     default = "{}"
                 elif field.label == Field.LABEL_REPEATED:

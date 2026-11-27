@@ -50,7 +50,7 @@ struct inner {
 };
 
 struct outer {
-    inner child = {};
+    std::optional<inner> child = {};
     std::optional<int32_t> maybe = {};
     std::optional<inner> maybe_child = {};
     int32_t gap = 0;

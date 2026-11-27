@@ -28,12 +28,13 @@ static_assert( std::is_same_v<decltype( gen::lists::names ), pb::repeated<std::s
 static_assert(
   std::is_same_v<decltype( gen::envelope::payload ), pb::oneof<gen::pose, gen::ping, gen::text>> );
 
-static_assert( std::is_same_v<decltype( features::Device::limits ), features::limits> );
+static_assert( std::is_same_v<decltype( gen::outer::child ), std::optional<gen::inner>> );
+static_assert( std::is_same_v<decltype( features::Device::limits ), std::optional<features::limits>> );
 static_assert( std::is_same_v<decltype( features::Device_Slot::key ), pb::bytes<16>> );
 static_assert( std::is_same_v<decltype( features::Device::token ), std::optional<pb::bytes<8>>> );
 static_assert( std::is_same_v<decltype( features::Device::trims ), pb::repeated<int8_t, 4>> );
 static_assert( std::is_same_v<decltype( features::Device::trim_delta ), int16_t> );
-static_assert( std::is_same_v<decltype( features::Frame::origin ), shared::types::Point> );
+static_assert( std::is_same_v<decltype( features::Frame::origin ), std::optional<shared::types::Point>> );
 static_assert( std::is_same_v<decltype( features::Calibration::gains ), std::array<float, 4>> );
 static_assert( std::is_same_v<decltype( features::Batch::slots ), std::span<const features::Device_Slot>> );
 static_assert( std::is_same_v<decltype( features::Batch::blob ), std::span<const uint8_t>> );
@@ -111,11 +112,28 @@ bool test_reference_values()
 	       values.c == gen::color::NEG;
 }
 
+/// Singular proto3 message fields preserve presence even without `optional`:
+/// unset omits the field (0 bytes), engaged empty writes `tag, 0x00`.
+bool test_singular_message_presence()
+{
+	const gen::outer absent{};
+	const gen::outer present_empty{ .child = gen::inner{} };
+	gen::outer rx_absent{ .child = gen::inner{ 9, "old" } };
+	gen::outer rx_empty{};
+	const auto a = pb::decode( std::span<const uint8_t>{}, rx_absent );
+	const auto b = pb::decode( std::span<const uint8_t>( vectors::outer_unset ), rx_empty );
+	return encodes_to( absent, std::array<uint8_t, 0>{} ) && encodes_to( present_empty, vectors::outer_unset ) && a &&
+	       *a == 0 && !rx_absent.child.has_value() && b && *b == vectors::outer_unset.size() &&
+	       rx_empty.child.has_value() && rx_empty.child->x == 0 && rx_empty.child->label.empty();
+}
+
 /// `class: 1 limits {} backup {} serial: 5 text: "hi" ready: true`
 bool test_field_numbers()
 {
 	features::Device device{};
 	device.class_ = 1;
+	device.limits.emplace();
+	device.backup.emplace();
 	device.serial = 5;
 	device.event = std::string_view( "hi" );
 	device.ready = true;
@@ -186,10 +204,11 @@ constexpr auto frame_wire = std::to_array<uint8_t>(
 bool test_frame_encode()
 {
 	features::Frame frame{};
-	features::Device& device = frame.device;
+	features::Device& device = frame.device.emplace();
 	device.class_ = -2;
 	device.state = features::Device_State::BUSY;
-	device.limits = { 1, 2 };
+	device.limits = features::limits{ 1, 2 };
+	device.backup.emplace();
 	device.serial = 7;
 	device.offset = -300;
 	device.trim_delta = -300;
@@ -203,8 +222,8 @@ bool test_frame_encode()
 	          device.history.push_back( features::Device_State::IDLE ) && device.trims.push_back( -1 ) &&
 	          device.trims.push_back( 5 ) && device.history_delta.push_back( -1 ) &&
 	          device.history_delta.push_back( 2 ) && device.history_delta.push_back( -32768 ) &&
-	          frame.slot.key.push_back( 'k' );
-	frame.origin = { -4, 4 };
+	          frame.slot.emplace().key.push_back( 'k' );
+	frame.origin = shared::types::Point{ -4, 4 };
 	frame.unit = shared::types::Unit::METER;
 	frame.mode = features::RxMode::VARIABLE;
 
@@ -215,19 +234,20 @@ bool test_frame_decode()
 {
 	features::Frame frame{};
 	if ( !round_trips<features::Frame>( frame_wire ) ||
-	     !pb::decode( std::span<const uint8_t>( frame_wire ), frame ) )
+	     !pb::decode( std::span<const uint8_t>( frame_wire ), frame ) || !frame.device || !frame.slot || !frame.origin )
 		return false;
 
-	const features::Device& device = frame.device;
+	const features::Device& device = *frame.device;
 	const auto* moved = pb::get_if<features::Device_Slot>( &device.event );
-	return device.class_ == -2 && device.state == features::Device_State::BUSY && device.limits.high == 2 &&
-	       device.serial == 7 && device.offset == -300 && device.token && device.token->empty() && device.spare &&
-	       device.spare->index == 3 && device.slots.size() == 2 && device.slots[0].key.size() == 2 &&
-	       device.slots[0].key[1] == 'b' && device.history.size() == 2 &&
-	       device.history[0] == features::Device_State::BUSY && device.trims.size() == 2 && device.trims[0] == -1 &&
-	       device.trim_delta == -300 && device.history_delta.size() == 3 && device.history_delta[2] == -32768 && moved &&
-	       moved->index == 9 && !device.ready && frame.slot.key.size() == 1 && frame.origin.x == -4 &&
-	       frame.origin.y == 4 && frame.unit == shared::types::Unit::METER && frame.mode == features::RxMode::VARIABLE;
+	return device.class_ == -2 && device.state == features::Device_State::BUSY && device.limits &&
+	       device.limits->high == 2 && device.backup.has_value() && device.serial == 7 && device.offset == -300 &&
+	       device.token && device.token->empty() && device.spare && device.spare->index == 3 &&
+	       device.slots.size() == 2 && device.slots[0].key.size() == 2 && device.slots[0].key[1] == 'b' &&
+	       device.history.size() == 2 && device.history[0] == features::Device_State::BUSY && device.trims.size() == 2 &&
+	       device.trims[0] == -1 && device.trim_delta == -300 && device.history_delta.size() == 3 &&
+	       device.history_delta[2] == -32768 && moved && moved->index == 9 && !device.ready &&
+	       frame.slot->key.size() == 1 && frame.origin->x == -4 && frame.origin->y == 4 &&
+	       frame.unit == shared::types::Unit::METER && frame.mode == features::RxMode::VARIABLE;
 }
 
 /// Unbraced declarations (`T msg;`) initialize every generated field to its proto3 default.
@@ -239,17 +259,15 @@ bool test_default_initialization()
 	features::Frame f;
 	return encodes_to( s, vectors::scalars_zero ) && s.c == gen::color::NONE && t.name.empty() && t.data.empty() &&
 	       t.mac == std::array<uint8_t, 6>{} && cal.gains == std::array<float, 4>{} &&
-	       cal.id == std::array<uint8_t, 6>{} && f.device.class_ == 0 &&
-	       f.device.state == features::Device_State::IDLE && !f.device.token.has_value() && !f.device.spare.has_value() &&
-	       f.device.slots.empty() && !f.device.event.has_value() && !f.device.ready &&
-	       f.unit == shared::types::Unit::NONE && f.mode == features::RxMode::FIXED;
+	       cal.id == std::array<uint8_t, 6>{} && !f.device.has_value() && !f.slot.has_value() &&
+	       !f.origin.has_value() && f.unit == shared::types::Unit::NONE && f.mode == features::RxMode::FIXED;
 }
 
 /// `detail.proto` has names that the namespace `pb` also has. `tag { error: 5 } repeated { error: 1 }`
 bool test_names_of_the_library()
 {
 	::detail::reader message{};
-	message.tag.error = 5;
+	message.tag = ::detail::tag{ 5 };
 	return message.repeated.push_back( { 1 } ) &&
 	       encodes_to( message, std::array<uint8_t, 8>{ 0x0a, 0x02, 0x08, 0x05, 0x12, 0x02, 0x08, 0x01 } ) &&
 	       round_trips<::detail::reader>( std::array<uint8_t, 8>{ 0x0a, 0x02, 0x08, 0x05, 0x12, 0x02, 0x08, 0x01 } );
@@ -283,7 +301,8 @@ bool test_duplicate_oneof()
 int main()
 {
 	const bool ok = test_default_initialization() && test_reference_vectors() && test_reference_values() &&
-	                test_field_numbers() && test_fixed_arrays() && test_views() && test_views_decode() &&
-	                test_frame_encode() && test_frame_decode() && test_names_of_the_library() && test_duplicate_oneof();
+	                test_singular_message_presence() && test_field_numbers() && test_fixed_arrays() && test_views() &&
+	                test_views_decode() && test_frame_encode() && test_frame_decode() && test_names_of_the_library() &&
+	                test_duplicate_oneof();
 	return ok ? 0 : 1;
 }
