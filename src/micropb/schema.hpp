@@ -38,7 +38,7 @@ inline constexpr size_t max_offset = 65535;
 template <typename T>
 inline constexpr bool is_optional = false;
 template <typename T>
-inline constexpr bool is_optional<std::optional<T>> = true;
+inline constexpr bool is_optional<optional<T>> = true;
 
 template <typename T>
 inline constexpr bool is_oneof = false;
@@ -184,7 +184,7 @@ template <typename T>
 		return field_kind::MESSAGE;
 }
 
-/// Wire type of a field of type `T`. A `std::optional` has the wire type of its value.
+/// Wire type of a field of type `T`. A `pb::optional` has the wire type of its value.
 template <typename T, int_encoding Encoding = int_encoding::VARINT>
 [[nodiscard]] consteval wire_type wire_type_of()
 {

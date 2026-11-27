@@ -20,7 +20,7 @@ struct message
 {
 	uint32_t id;
 	pb::repeated<float, 3> values;
-	std::optional<inner> child;
+	pb::optional<inner> child;
 	pb::oneof<inner, uint32_t> choice;
 	std::array<uint8_t, 4> key;
 	int32_t delta;
@@ -46,7 +46,7 @@ struct fixed
 struct constants
 {
 	const uint32_t id;
-	const std::optional<int32_t> maybe;
+	const pb::optional<int32_t> maybe;
 	const pb::oneof<uint32_t, float> choice;
 	const pb::repeated<uint8_t, 4> data;
 	const std::string_view name;
@@ -130,7 +130,7 @@ struct opt_link
 
 struct opt_node
 {
-	std::optional<opt_link> link;
+	pb::optional<opt_link> link;
 };
 
 /// A cycle through a `std::variant` alternative: `var_node`, `var_link`, `var_node`.

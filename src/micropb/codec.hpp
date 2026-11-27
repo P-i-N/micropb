@@ -6,7 +6,6 @@
 #include <cstring>
 #include <expected>
 #include <new>
-#include <optional>
 #include <span>
 #include <stddef.h>
 #include <stdint.h>
@@ -77,7 +76,7 @@ template <typename T, int_encoding Encoding = int_encoding::VARINT>
 }
 
 struct sequence_desc;
-struct optional_desc;
+struct pointer_desc;
 
 /// How to read and write a value of one type. All members, elements, optional
 /// values and alternatives of the same type share one descriptor.
@@ -88,6 +87,7 @@ struct value_desc
 	/// ONEOF: size of `_index` in bytes (1 or 2).
 	uint8_t scalar;
 	/// MESSAGE: the number of `uint16_t` halfwords in `table` (bit 15 is `message_always_emit`).
+	/// OPTIONAL: byte offset of `_has_value` inside `pb::optional`.
 	/// ONEOF: byte offset of `_index` inside `pb::oneof`.
 	uint16_t words;
 	union
@@ -98,8 +98,10 @@ struct value_desc
 		const void* table;
 		/// REPEATED, BYTES and `pb::string`. Null for the views `std::string_view` and `std::span<const uint8_t>`.
 		const sequence_desc* sequence;
-		/// OPTIONAL and POINTER (`const T*`).
-		const optional_desc* optional;
+		/// OPTIONAL: descriptor of the held value type.
+		const value_desc* inner;
+		/// POINTER (`const T*`).
+		const pointer_desc* pointer;
 		/// ONEOF: array of `const value_desc*` for alternatives `1..K` (at index `alt - 1`).
 		const value_desc* const* oneof;
 	};
@@ -213,22 +215,13 @@ struct sequence_desc
 	sequence_storage storage;
 };
 
-enum class optional_op : uint8_t
-{
-	/// Gives the address of the value, or null when there is no value.
-	GET,
-	/// Makes a value-initialized value if there is none. Gives its address.
-	ENGAGE,
-	/// Removes the value. Gives null.
-	RESET,
-};
+/// Allocates and default-constructs a message of type `T` in `memory`.
+using pointer_allocator = void* ( * )( arena* memory );
 
-using optional_accessor = void* ( * )( void* optional, optional_op op, arena* memory );
-
-struct optional_desc
+struct pointer_desc
 {
 	const value_desc* value;
-	optional_accessor access;
+	pointer_allocator allocate;
 };
 
 static_assert( sizeof( value_desc ) <= 2 * sizeof( void* ) );
@@ -265,6 +258,16 @@ struct oneof_access
 	static constexpr size_t index_size = sizeof( typename O::index_type );
 };
 
+/// The storage and flag members of `pb::optional` are private. The codec reads
+/// and writes them through this friend of the type.
+struct optional_access
+{
+	template <typename O>
+	static constexpr size_t storage_offset = offsetof( O, _storage );
+	template <typename O>
+	static constexpr size_t flag_offset = offsetof( O, _has_value );
+};
+
 /// Accessor of `std::span<const T>`. The span keeps its items in a different
 /// object, so the interpreter cannot find the items from an offset.
 template <typename S>
@@ -291,52 +294,17 @@ void construct_item( void* item )
 	::new ( item ) E();
 }
 
-/// Accessor of `std::optional`. The codec cannot make a value with a `const`
-/// member again in its place. Such a value type is encode-only
-/// (`check_decodable`), and `ENGAGE` does nothing for it.
-template <typename O>
-[[nodiscard]] void* access_optional( void* optional, optional_op op, arena* )
-{
-	O& value = *static_cast<O*>( optional );
-	if ( op == optional_op::RESET )
-	{
-		if constexpr ( std::is_trivially_destructible_v<O> )
-			::new ( optional ) O();
-		else
-			value.reset();
-		return nullptr;
-	}
-	if ( op == optional_op::ENGAGE && !value )
-	{
-		if constexpr ( requires { value.emplace(); } )
-			value.emplace();
-	}
-	return value ? &*value : nullptr;
-}
-
-/// Accessor of a `const T*` message pointer. Uses the same `optional_desc`
-/// dispatch as `std::optional`: `GET` returns the target or null, `RESET`
-/// nulls the pointer, and `ENGAGE` allocates `T` in `memory`.
+/// Allocator of a `const T*` message pointer in `memory`.
 template <typename T>
-[[nodiscard]] void* access_pointer( void* slot, optional_op op, arena* memory )
+[[nodiscard]] void* allocate_pointer( arena* memory )
 {
-	if ( op == optional_op::RESET )
-	{
-		const void* empty = nullptr;
-		std::memcpy( slot, &empty, sizeof empty );
+	if ( memory == nullptr )
 		return nullptr;
-	}
-	void* target = nullptr;
-	std::memcpy( &target, slot, sizeof target );
-	if ( op == optional_op::ENGAGE && target == nullptr && memory != nullptr )
+	void* target = memory->allocate( sizeof( T ), alignof( T ) );
+	if ( target != nullptr )
 	{
-		target = memory->allocate( sizeof( T ), alignof( T ) );
-		if ( target != nullptr )
-		{
-			if constexpr ( std::is_default_constructible_v<T> )
-				::new ( target ) T();
-			std::memcpy( slot, &target, sizeof target );
-		}
+		if constexpr ( std::is_default_constructible_v<T> )
+			::new ( target ) T();
 	}
 	return target;
 }
@@ -461,12 +429,8 @@ template <typename S, int_encoding Encoding = int_encoding::VARINT>
 template <typename S, int_encoding Encoding = int_encoding::VARINT>
 inline constexpr sequence_desc sequence_descriptor = describe_sequence<S, Encoding>();
 
-template <typename O, int_encoding Encoding = int_encoding::VARINT>
-inline constexpr optional_desc optional_descriptor{ &value_descriptor<typename O::value_type, Encoding>::value,
-                                                    access_optional<O> };
-
 template <typename T>
-inline constexpr optional_desc pointer_descriptor{ &value_descriptor<T>::value, access_pointer<T> };
+inline constexpr pointer_desc pointer_descriptor{ &value_descriptor<T>::value, allocate_pointer<T> };
 
 template <typename V, int_encoding... AltEncodings>
 struct oneof_alternatives;
@@ -840,12 +804,20 @@ template <typename T, int_encoding Encoding>
 		};
 	}
 	else if constexpr ( kind == field_kind::POINTER )
-		return { .kind = field_kind::OPTIONAL,
+		return { .kind = field_kind::POINTER,
 		         .scalar = 0,
 		         .words = 0,
-		         .optional = &pointer_descriptor<std::remove_const_t<std::remove_pointer_t<T>>> };
+		         .pointer = &pointer_descriptor<std::remove_const_t<std::remove_pointer_t<T>>> };
 	else if constexpr ( kind == field_kind::OPTIONAL )
-		return { .kind = kind, .scalar = 0, .words = 0, .optional = &optional_descriptor<T, Encoding> };
+	{
+		static_assert( optional_access::storage_offset<T> == 0 );
+		static_assert( optional_access::flag_offset<T> <= max_offset,
+		               "pb: member_offset_too_large: a member must be at an offset of 65535 bytes or less" );
+		return { .kind = kind,
+		         .scalar = 0,
+		         .words = static_cast<uint16_t>( optional_access::flag_offset<T> ),
+		         .inner = &value_descriptor<typename T::value_type, Encoding>::value };
+	}
 	else
 		return default_oneof_value_desc<T>::value;
 }
@@ -939,12 +911,12 @@ constexpr value_desc value_descriptor<T, Encoding>::value = describe_value<T, En
 	return ( code & scalar_size_mask ) == 2 ? wire_type::FIXED32 : wire_type::FIXED64;
 }
 
-/// Wire type of a field of this type. A `std::optional` has the wire type of
+/// Wire type of a field of this type. A `pb::optional` has the wire type of
 /// its value. A repeated field has the wire type of one unpacked element.
 [[nodiscard]] inline wire_type wire_of( const value_desc& type )
 {
 	if ( type.kind == field_kind::OPTIONAL )
-		return wire_of( *type.optional->value );
+		return wire_of( *type.inner );
 	if ( type.kind == field_kind::REPEATED )
 		return wire_of( *type.sequence->element );
 	if ( type.kind == field_kind::SCALAR )
@@ -1237,10 +1209,24 @@ inline void emit_value( writer& sink, uint32_t number, const value_desc& type, c
 			break;
 		}
 		case field_kind::MESSAGE: emit_submessage( sink, number, type, value ); break;
-		case field_kind::OPTIONAL: {
-			const optional_desc& optional = *type.optional;
-			if ( const void* held = optional.access( const_cast<void*>( value ), optional_op::GET, nullptr ) )
-				emit_value( sink, number, *optional.value, held, true );
+		case field_kind::OPTIONAL:
+		case field_kind::POINTER: {
+			const value_desc* inner;
+			const void* held = value;
+			if ( type.kind == field_kind::OPTIONAL )
+			{
+				if ( !*static_cast<const bool*>( member_at( value, type.words ) ) )
+					break;
+				inner = type.inner;
+			}
+			else
+			{
+				std::memcpy( &held, value, sizeof held );
+				if ( held == nullptr )
+					break;
+				inner = type.pointer->value;
+			}
+			emit_value( sink, number, *inner, held, true );
 			break;
 		}
 		case field_kind::REPEATED: {
@@ -1260,9 +1246,8 @@ inline void emit_value( writer& sink, uint32_t number, const value_desc& type, c
 			emit_packed( sink, number, sequence, items );
 			break;
 		}
-		case field_kind::POINTER:
 		case field_kind::ONEOF:
-			// `emit_message` writes the active alternative of a oneof; pointers use `OPTIONAL`.
+			// `emit_message` writes the active alternative of a oneof.
 			break;
 	}
 }
@@ -1418,9 +1403,13 @@ inline void reset_value( const value_desc& type, void* value )
 				store_count( *type.sequence, value, 0 );
 			break;
 		case field_kind::MESSAGE: reset_message( type, value ); break;
-		case field_kind::OPTIONAL: static_cast<void>( type.optional->access( value, optional_op::RESET, nullptr ) ); break;
+		case field_kind::OPTIONAL: *static_cast<bool*>( member_at( value, type.words ) ) = false; break;
 		case field_kind::ONEOF: set_oneof_index( type, value, 0 ); break;
-		case field_kind::POINTER: break;
+		case field_kind::POINTER: {
+			const void* empty = nullptr;
+			std::memcpy( value, &empty, sizeof empty );
+			break;
+		}
 	}
 }
 
@@ -1740,19 +1729,38 @@ inline void decode_value( reader& in, wire_type wire, const value_desc& type, vo
 			store_scalar( value, type.scalar, bits );
 		return;
 	}
-	if ( type.kind == field_kind::OPTIONAL )
+	if ( type.kind == field_kind::OPTIONAL || type.kind == field_kind::POINTER )
 	{
 		// A new value starts from the reset state, as each member of `msg` does.
-		const optional_desc& optional = *type.optional;
-		void* held = optional.access( value, optional_op::GET, nullptr );
-		if ( held == nullptr )
+		const value_desc* inner;
+		void* held = value;
+		bool fresh = false;
+		if ( type.kind == field_kind::OPTIONAL )
 		{
-			held = optional.access( value, optional_op::ENGAGE, memory );
-			if ( held == nullptr )
-				return in.fail( error::ARENA_FULL );
-			reset_value( *optional.value, held );
+			inner = type.inner;
+			auto* has = static_cast<bool*>( member_at( value, type.words ) );
+			if ( !*has )
+			{
+				*has = true;
+				fresh = true;
+			}
 		}
-		return decode_value( in, wire, *optional.value, held, memory );
+		else
+		{
+			inner = type.pointer->value;
+			std::memcpy( &held, value, sizeof held );
+			if ( held == nullptr )
+			{
+				held = type.pointer->allocate( memory );
+				if ( held == nullptr )
+					return in.fail( error::ARENA_FULL );
+				std::memcpy( value, &held, sizeof held );
+				fresh = true;
+			}
+		}
+		if ( fresh )
+			reset_value( *inner, held );
+		return decode_value( in, wire, *inner, held, memory );
 	}
 
 	// All other kinds are length-delimited. The bytes are a view into the input.

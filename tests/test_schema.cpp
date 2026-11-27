@@ -102,8 +102,8 @@ struct bounded_containers
 	pb::repeated<pb::string<5>, 3> names;
 	pb::map<pb::string<4>, uint32_t, 2> table;
 	pb::string<0> zero_plain;
-	std::optional<pb::string<0>> zero_opt;
-	std::optional<empty_msg> empty_child;
+	pb::optional<pb::string<0>> zero_opt;
+	pb::optional<empty_msg> empty_child;
 	const empty_msg* ptr_child;
 };
 
@@ -135,7 +135,7 @@ struct unbounded_oneof
 
 struct unbounded_nested
 {
-	std::optional<unbounded_sv> child;
+	pb::optional<unbounded_sv> child;
 };
 
 struct rec_node
@@ -302,7 +302,8 @@ consteval bool test_kinds()
 	       kind_of<bytes<16>>() == field_kind::BYTES &&
 	       kind_of<std::array<uint8_t, 6>>() == field_kind::FIXED_BYTES &&
 	       kind_of<repeated<float, 4>>() == field_kind::REPEATED && kind_of<pose>() == field_kind::MESSAGE &&
-	       kind_of<std::optional<int>>() == field_kind::OPTIONAL &&
+	       kind_of<pb::optional<int>>() == field_kind::OPTIONAL &&
+	       kind_of<std::optional<int>>() == field_kind::MESSAGE &&
 	       kind_of<repeated<uint8_t, 4>>() == field_kind::BYTES &&
 	       kind_of<repeated<bytes<8>, 4>>() == field_kind::REPEATED &&
 	       kind_of<repeated<string<8>, 4>>() == field_kind::REPEATED &&

@@ -76,7 +76,7 @@ constexpr bool test_string()
 	if ( s != "sensor12" || s.c_str()[8] != '\0' )
 		return false;
 
-	const std::optional<string<8>> opt = "ok";
+	const pb::optional<string<8>> opt = "ok";
 	const pb::oneof<bool, string<8>> var = "ok";
 	if ( !opt || *opt != "ok" || !pb::holds_alternative<string<8>>( var ) || *pb::get_if<string<8>>( &var ) != "ok" )
 		return false;
@@ -84,6 +84,39 @@ constexpr bool test_string()
 	const string<0> zero = "";
 	s.clear();
 	return s.empty() && s.c_str()[0] == '\0' && zero.empty() && zero.c_str()[0] == '\0';
+}
+
+constexpr bool test_optional()
+{
+	optional<int32_t> a;
+	if ( a.has_value() || static_cast<bool>( a ) || a != std::nullopt || std::nullopt != a || a.value_or( 9 ) != 9 )
+		return false;
+
+	optional<int32_t> b = std::nullopt;
+	if ( b != a || b.has_value() )
+		return false;
+
+	a = 42;
+	if ( !a.has_value() || !a || *a != 42 || a.value() != 42 || a != 42 || 42 != a || a == std::nullopt ||
+	     a.value_or( 9 ) != 42 || a == b )
+		return false;
+
+	b = a;
+	if ( b != a || *b != 42 )
+		return false;
+
+	a = std::nullopt;
+	if ( a.has_value() || a == 42 || a == b )
+		return false;
+
+	optional<string<8>> text( std::in_place, "hi" );
+	if ( !text || text->size() != 2 || *text != "hi" )
+		return false;
+	text.emplace( "ok" );
+	if ( *text != "ok" )
+		return false;
+	text.reset();
+	return !text.has_value() && text == std::nullopt;
 }
 
 constexpr bool test_oneof()
@@ -209,9 +242,14 @@ constexpr bool test_map()
 static_assert( test_repeated() );
 static_assert( test_bytes() );
 static_assert( test_string() );
+static_assert( test_optional() );
 static_assert( test_oneof() );
 static_assert( test_map() );
 static_assert( test_arena_empty() );
+static_assert( std::is_trivially_copyable_v<optional<int32_t>> && std::is_trivially_destructible_v<optional<int32_t>> );
+static_assert( std::is_trivially_copyable_v<optional<string<8>>> &&
+               std::is_trivially_destructible_v<optional<string<8>>> );
+static_assert( sizeof( optional<uint32_t> ) == 8 );
 static_assert( std::is_trivially_copyable_v<oneof<int32_t, string<8>>> &&
                std::is_trivially_destructible_v<oneof<int32_t, string<8>>> );
 static_assert( std::is_trivially_copyable_v<repeated<int, 4>> && std::is_trivially_destructible_v<repeated<int, 4>> );
@@ -236,7 +274,7 @@ int main()
 {
 	pb::string<8> runtime_empty;
 	const bool ok = runtime_empty.c_str()[0] == '\0' && std::strlen( runtime_empty.c_str() ) == 0 && test_repeated() &&
-	                test_bytes() && test_string() && test_arena_empty() && test_arena_allocate() &&
+	                test_bytes() && test_string() && test_optional() && test_arena_empty() && test_arena_allocate() &&
 	                test_arena_odd_start() && test_arena_full() && test_arena_overflow();
 	return ok ? 0 : 1;
 }

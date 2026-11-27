@@ -220,7 +220,6 @@ SIZED_INTEGERS = (Field.TYPE_INT32, Field.TYPE_INT64, Field.TYPE_UINT32, Field.T
 # The headers that the generated text can need, each with a pattern that shows the need.
 INCLUDES = [
     ("<array>", r"std::array<"),
-    ("<optional>", r"std::optional<"),
     ("<span>", r"std::span<"),
     ("<stddef.h>", r"\b(offsetof\(|size_t\b)"),
     ("<stdint.h>", r"\bu?int\d+_t\b"),
@@ -473,7 +472,7 @@ class Header:
         return "::" + "::".join(filter(None, [namespace_of(target.file.package, self.namespace_prefix), target.name]))
 
     def field_type(self, message, field, member_names):
-        """The C++ type for `field`, without `std::optional`."""
+        """The C++ type for `field`, without `pb::optional`."""
         name = f"{message.proto_name}.{field.name}"
         found = self.options.of(name, self.file.package)
         used = set()
@@ -592,7 +591,7 @@ class Header:
                     default = "nullptr"
                 elif field.proto3_optional or (
                         field.type == Field.TYPE_MESSAGE and field.label != Field.LABEL_REPEATED):
-                    text = f"std::optional<{text}>"
+                    text = f"pb::optional<{text}>"
                     default = "{}"
                 elif field.label == Field.LABEL_REPEATED:
                     default = "{}"

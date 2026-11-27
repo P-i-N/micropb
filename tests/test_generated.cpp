@@ -29,13 +29,13 @@ static_assert( std::is_same_v<decltype( gen::lists::names ), pb::repeated<std::s
 static_assert(
   std::is_same_v<decltype( gen::envelope::payload ), pb::oneof<gen::pose, gen::ping, gen::text>> );
 
-static_assert( std::is_same_v<decltype( gen::outer::child ), std::optional<gen::inner>> );
-static_assert( std::is_same_v<decltype( features::Device::limits ), std::optional<features::limits>> );
+static_assert( std::is_same_v<decltype( gen::outer::child ), pb::optional<gen::inner>> );
+static_assert( std::is_same_v<decltype( features::Device::limits ), pb::optional<features::limits>> );
 static_assert( std::is_same_v<decltype( features::Device_Slot::key ), pb::bytes<16>> );
-static_assert( std::is_same_v<decltype( features::Device::token ), std::optional<pb::bytes<8>>> );
+static_assert( std::is_same_v<decltype( features::Device::token ), pb::optional<pb::bytes<8>>> );
 static_assert( std::is_same_v<decltype( features::Device::trims ), pb::repeated<int8_t, 4>> );
 static_assert( std::is_same_v<decltype( features::Device::trim_delta ), int16_t> );
-static_assert( std::is_same_v<decltype( features::Frame::origin ), std::optional<shared::types::Point>> );
+static_assert( std::is_same_v<decltype( features::Frame::origin ), pb::optional<shared::types::Point>> );
 static_assert( std::is_same_v<decltype( features::Calibration::gains ), std::array<float, 4>> );
 static_assert( std::is_same_v<decltype( features::Batch::slots ), std::span<const features::Device_Slot>> );
 static_assert( std::is_same_v<decltype( features::Batch::blob ), std::span<const uint8_t>> );

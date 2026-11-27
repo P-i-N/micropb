@@ -121,7 +121,7 @@ struct const_middle
 
 struct const_holder
 {
-	std::optional<const_middle> maybe;
+	pb::optional<const_middle> maybe;
 	pb::oneof<const_middle> choice;
 };
 

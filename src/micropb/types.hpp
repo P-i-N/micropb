@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <array>
+#include <concepts>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stddef.h>
 #include <stdint.h>
@@ -133,6 +135,22 @@ struct sequence_access;
 
 /// Gives the codec the `_storage` and `_index` members of `oneof`.
 struct oneof_access;
+
+/// Gives the codec the `_storage` and `_has_value` members of `optional`.
+struct optional_access;
+
+template <typename T>
+union optional_storage
+{
+	struct
+	{} empty;
+	T value;
+
+	constexpr optional_storage() noexcept : empty{} {}
+	constexpr optional_storage( const optional_storage& ) = default;
+	constexpr optional_storage& operator=( const optional_storage& ) = default;
+	constexpr ~optional_storage() = default;
+};
 
 /// Smallest unsigned integer type that holds counts `0..N`.
 template <size_t N>
@@ -644,6 +662,116 @@ private:
 
 	std::array<char, N + 1> _items;
 	count_type _count = 0;
+};
+
+/// Fixed-layout optional value for proto3 explicit presence. Does not allocate
+/// and does not zero-initialize `T` when disengaged. Supports `std::nullopt`.
+template <typename T>
+struct optional
+{
+	static_assert( std::is_trivially_destructible_v<T>, "pb::optional value must be trivially destructible" );
+
+	using value_type = T;
+
+	constexpr optional() noexcept = default;
+	constexpr optional( std::nullopt_t ) noexcept {}
+	constexpr optional( const optional& ) = default;
+	constexpr optional( optional&& ) = default;
+	constexpr optional& operator=( const optional& ) = default;
+	constexpr optional& operator=( optional&& ) = default;
+	constexpr ~optional() = default;
+
+	template <typename... Args>
+		requires std::is_constructible_v<T, Args...>
+	constexpr explicit optional( std::in_place_t, Args&&... args )
+	{
+		emplace( std::forward<Args>( args )... );
+	}
+
+	template <typename U = T>
+		requires( !std::is_same_v<std::remove_cvref_t<U>, optional> &&
+		          !std::is_same_v<std::remove_cvref_t<U>, std::in_place_t> &&
+		          !std::is_same_v<std::remove_cvref_t<U>, std::nullopt_t> && std::is_constructible_v<T, U> )
+	constexpr explicit( !std::is_convertible_v<U, T> ) optional( U&& value )
+	{
+		emplace( std::forward<U>( value ) );
+	}
+
+	constexpr optional& operator=( std::nullopt_t ) noexcept
+	{
+		reset();
+		return *this;
+	}
+
+	template <typename U = T>
+		requires( !std::is_same_v<std::remove_cvref_t<U>, optional> &&
+		          !std::is_same_v<std::remove_cvref_t<U>, std::nullopt_t> && std::is_constructible_v<T, U> &&
+		          std::is_assignable_v<T&, U> )
+	constexpr optional& operator=( U&& value )
+	{
+		if ( _has_value )
+			_storage.value = std::forward<U>( value );
+		else
+			emplace( std::forward<U>( value ) );
+		return *this;
+	}
+
+	[[nodiscard]] constexpr bool has_value() const noexcept { return _has_value; }
+	[[nodiscard]] constexpr explicit operator bool() const noexcept { return _has_value; }
+
+	[[nodiscard]] constexpr T* operator->() noexcept { return &_storage.value; }
+	[[nodiscard]] constexpr const T* operator->() const noexcept { return &_storage.value; }
+
+	[[nodiscard]] constexpr T& operator*() & noexcept { return _storage.value; }
+	[[nodiscard]] constexpr const T& operator*() const& noexcept { return _storage.value; }
+	[[nodiscard]] constexpr T&& operator*() && noexcept { return std::move( _storage.value ); }
+	[[nodiscard]] constexpr const T&& operator*() const&& noexcept { return std::move( _storage.value ); }
+
+	[[nodiscard]] constexpr T& value() & noexcept { return _storage.value; }
+	[[nodiscard]] constexpr const T& value() const& noexcept { return _storage.value; }
+
+	template <typename U>
+	[[nodiscard]] constexpr T value_or( U&& fallback ) const&
+	{
+		return _has_value ? _storage.value : static_cast<T>( std::forward<U>( fallback ) );
+	}
+
+	template <typename... Args>
+	constexpr T& emplace( Args&&... args )
+	{
+		std::construct_at( const_cast<std::remove_const_t<T>*>( &_storage.value ), std::forward<Args>( args )... );
+		_has_value = true;
+		return _storage.value;
+	}
+
+	constexpr void reset() noexcept { _has_value = false; }
+
+	[[nodiscard]] friend constexpr bool operator==( const optional& a, const optional& b )
+	{
+		return a._has_value == b._has_value && ( !a._has_value || a._storage.value == b._storage.value );
+	}
+
+	[[nodiscard]] friend constexpr bool operator==( const optional& a, std::nullopt_t ) noexcept
+	{
+		return !a._has_value;
+	}
+
+	template <typename U>
+		requires( !std::is_same_v<std::remove_cvref_t<U>, optional> &&
+		          !std::is_same_v<std::remove_cvref_t<U>, std::nullopt_t> &&
+		          requires( const T& lhs, const U& rhs ) {
+			          { lhs == rhs } -> std::convertible_to<bool>;
+		          } )
+	[[nodiscard]] friend constexpr bool operator==( const optional& a, const U& b )
+	{
+		return a._has_value && a._storage.value == b;
+	}
+
+private:
+	friend struct detail::optional_access;
+
+	detail::optional_storage<T> _storage;
+	bool _has_value = false;
 };
 
 /// Tagged union for proto3 `oneof` fields. Alternatives use 1-based indices

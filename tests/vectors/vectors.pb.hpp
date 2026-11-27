@@ -2,7 +2,6 @@
 #pragma once
 
 #include <array>
-#include <optional>
 #include <span>
 #include <stddef.h>
 #include <stdint.h>
@@ -75,9 +74,9 @@ struct outer {
     static constexpr uint32_t maybe_tag = 2;
     static constexpr uint32_t maybe_child_tag = 3;
     static constexpr uint32_t gap_tag = 10;
-    std::optional<inner> child = {};
-    std::optional<int32_t> maybe = {};
-    std::optional<inner> maybe_child = {};
+    pb::optional<inner> child = {};
+    pb::optional<int32_t> maybe = {};
+    pb::optional<inner> maybe_child = {};
     int32_t gap = 0;
 };
 

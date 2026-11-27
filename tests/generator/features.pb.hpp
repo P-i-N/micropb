@@ -2,7 +2,6 @@
 #pragma once
 
 #include <array>
-#include <optional>
 #include <span>
 #include <stddef.h>
 #include <stdint.h>
@@ -58,12 +57,12 @@ struct Device {
     static constexpr uint32_t ready_tag = 26;
     int32_t class_ = 0;
     Device_State state = Device_State::IDLE;
-    std::optional<::features::limits> limits = {};
-    std::optional<::features::limits> backup = {};
+    pb::optional<::features::limits> limits = {};
+    pb::optional<::features::limits> backup = {};
     uint32_t serial = 0;
     int16_t offset = 0;
-    std::optional<pb::bytes<8>> token = {};
-    std::optional<Device_Slot> spare = {};
+    pb::optional<pb::bytes<8>> token = {};
+    pb::optional<Device_Slot> spare = {};
     pb::repeated<Device_Slot, 2> slots = {};
     pb::repeated<Device_State, 3> history = {};
     pb::repeated<int8_t, 4> trims = {};
@@ -82,9 +81,9 @@ struct Frame {
     static constexpr uint32_t origin_tag = 3;
     static constexpr uint32_t unit_tag = 4;
     static constexpr uint32_t mode_tag = 5;
-    std::optional<Device> device = {};
-    std::optional<Device_Slot> slot = {};
-    std::optional<::shared::types::Point> origin = {};
+    pb::optional<Device> device = {};
+    pb::optional<Device_Slot> slot = {};
+    pb::optional<::shared::types::Point> origin = {};
     ::shared::types::Unit unit = ::shared::types::Unit::NONE;
     RxMode mode = RxMode::FIXED;
 };

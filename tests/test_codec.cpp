@@ -30,7 +30,7 @@ struct holder
 {
 	uint32_t id;
 	plain child;
-	std::optional<float> maybe;
+	pb::optional<float> maybe;
 	pb::repeated<float, 4> floats;
 	pb::repeated<uint8_t, 16> blob;
 	std::array<uint8_t, 6> mac;
@@ -123,7 +123,7 @@ static_assert( entry_at<holder_table>( 1 ).number == 5 && entry_at<holder_table>
                entry_at<holder_table>( 10 ).number == 14 );
 static_assert( type_at<holder_table>( 1 ).kind == K::MESSAGE && type_at<holder_table>( 1 ).table == p.table );
 static_assert( type_at<holder_table>( 2 ).kind == K::OPTIONAL &&
-               type_at<holder_table>( 2 ).optional->value == &d::value_descriptor<float>::value );
+               type_at<holder_table>( 2 ).inner == &d::value_descriptor<float>::value );
 static_assert( type_at<holder_table>( 3 ).kind == K::REPEATED &&
                type_at<holder_table>( 3 ).sequence->storage == d::sequence_storage::REPEATED_8 &&
                type_at<holder_table>( 3 ).sequence->capacity == 4 &&
@@ -163,22 +163,19 @@ static_assert( sizeof( d::value_desc ) <= 2 * sizeof( void* ) );
 
 bool test_optional_accessor()
 {
-	const d::optional_desc& desc = *d::value_descriptor<std::optional<plain>>::value.optional;
-	std::optional<plain> value;
-	if ( desc.access( &value, d::optional_op::GET, nullptr ) != nullptr )
+	using opt = pb::optional<plain>;
+	const d::value_desc& desc = d::value_descriptor<opt>::value;
+	opt value;
+	if ( desc.kind != K::OPTIONAL || desc.inner != &d::value_descriptor<plain>::value ||
+	     *static_cast<const bool*>( d::member_at( &value, desc.words ) ) )
 		return false;
 
-	auto* first = static_cast<plain*>( desc.access( &value, d::optional_op::ENGAGE, nullptr ) );
-	if ( first == nullptr || !value || value->b != 0 )
+	value.emplace().b = 7;
+	if ( !*static_cast<const bool*>( d::member_at( &value, desc.words ) ) || value->b != 7 )
 		return false;
 
-	first->b = 7;
-	if ( desc.access( &value, d::optional_op::ENGAGE, nullptr ) != first || value->b != 7 )
-		return false;
-	if ( desc.access( &value, d::optional_op::GET, nullptr ) != first )
-		return false;
-
-	return desc.access( &value, d::optional_op::RESET, nullptr ) == nullptr && !value;
+	d::reset_value( desc, &value );
+	return !value.has_value() && !*static_cast<const bool*>( d::member_at( &value, desc.words ) );
 }
 
 bool test_variant_accessor()
@@ -307,8 +304,8 @@ struct all
 	std::array<uint8_t, 6> mac;
 	pb::repeated<uint8_t, 16> blob;
 	inner child;
-	std::optional<int32_t> maybe;
-	std::optional<inner> maybe_child;
+	pb::optional<int32_t> maybe;
+	pb::optional<inner> maybe_child;
 	pb::repeated<int32_t, 8> ints;
 	pb::repeated<int32_t, 4> zz;
 	pb::repeated<double, 2> ds;
@@ -346,8 +343,8 @@ struct all_views
 	std::array<uint8_t, 6> mac;
 	pb::repeated<uint8_t, 16> blob;
 	inner child;
-	std::optional<int32_t> maybe;
-	std::optional<inner> maybe_child;
+	pb::optional<int32_t> maybe;
+	pb::optional<inner> maybe_child;
 	std::span<const int32_t> ints;
 	std::span<const int32_t> zz;
 	std::array<double, 2> ds;
@@ -653,8 +650,8 @@ bool test_wide_entries()
 
 struct encoded_compounds
 {
-	std::optional<int32_t> opt_zz;
-	std::optional<uint32_t> opt_fx;
+	pb::optional<int32_t> opt_zz;
+	pb::optional<uint32_t> opt_fx;
 	pb::oneof<int32_t, uint32_t> oneof_enc;
 };
 
@@ -821,80 +818,80 @@ bool test_maps()
 
 struct many_compounds
 {
-	std::optional<alt_tag<0>> f0;
-	std::optional<alt_tag<1>> f1;
-	std::optional<alt_tag<2>> f2;
-	std::optional<alt_tag<3>> f3;
-	std::optional<alt_tag<4>> f4;
-	std::optional<alt_tag<5>> f5;
-	std::optional<alt_tag<6>> f6;
-	std::optional<alt_tag<7>> f7;
-	std::optional<alt_tag<8>> f8;
-	std::optional<alt_tag<9>> f9;
-	std::optional<alt_tag<10>> f10;
-	std::optional<alt_tag<11>> f11;
-	std::optional<alt_tag<12>> f12;
-	std::optional<alt_tag<13>> f13;
-	std::optional<alt_tag<14>> f14;
-	std::optional<alt_tag<15>> f15;
-	std::optional<alt_tag<16>> f16;
-	std::optional<alt_tag<17>> f17;
-	std::optional<alt_tag<18>> f18;
-	std::optional<alt_tag<19>> f19;
-	std::optional<alt_tag<20>> f20;
-	std::optional<alt_tag<21>> f21;
-	std::optional<alt_tag<22>> f22;
-	std::optional<alt_tag<23>> f23;
-	std::optional<alt_tag<24>> f24;
-	std::optional<alt_tag<25>> f25;
-	std::optional<alt_tag<26>> f26;
-	std::optional<alt_tag<27>> f27;
-	std::optional<alt_tag<28>> f28;
-	std::optional<alt_tag<29>> f29;
-	std::optional<alt_tag<30>> f30;
-	std::optional<alt_tag<31>> f31;
-	std::optional<alt_tag<32>> f32;
-	std::optional<alt_tag<33>> f33;
-	std::optional<alt_tag<34>> f34;
-	std::optional<alt_tag<35>> f35;
-	std::optional<alt_tag<36>> f36;
-	std::optional<alt_tag<37>> f37;
-	std::optional<alt_tag<38>> f38;
-	std::optional<alt_tag<39>> f39;
-	std::optional<alt_tag<40>> f40;
-	std::optional<alt_tag<41>> f41;
-	std::optional<alt_tag<42>> f42;
-	std::optional<alt_tag<43>> f43;
-	std::optional<alt_tag<44>> f44;
-	std::optional<alt_tag<45>> f45;
-	std::optional<alt_tag<46>> f46;
-	std::optional<alt_tag<47>> f47;
-	std::optional<alt_tag<48>> f48;
-	std::optional<alt_tag<49>> f49;
-	std::optional<alt_tag<50>> f50;
-	std::optional<alt_tag<51>> f51;
-	std::optional<alt_tag<52>> f52;
-	std::optional<alt_tag<53>> f53;
-	std::optional<alt_tag<54>> f54;
-	std::optional<alt_tag<55>> f55;
-	std::optional<alt_tag<56>> f56;
-	std::optional<alt_tag<57>> f57;
-	std::optional<alt_tag<58>> f58;
-	std::optional<alt_tag<59>> f59;
-	std::optional<alt_tag<60>> f60;
-	std::optional<alt_tag<61>> f61;
-	std::optional<alt_tag<62>> f62;
-	std::optional<alt_tag<63>> f63;
-	std::optional<alt_tag<64>> f64;
-	std::optional<alt_tag<65>> f65;
-	std::optional<alt_tag<66>> f66;
-	std::optional<alt_tag<67>> f67;
-	std::optional<alt_tag<68>> f68;
-	std::optional<alt_tag<69>> f69;
-	std::optional<alt_tag<70>> f70;
-	std::optional<alt_tag<71>> f71;
-	std::optional<alt_tag<72>> f72;
-	std::optional<alt_tag<73>> f73;
+	pb::optional<alt_tag<0>> f0;
+	pb::optional<alt_tag<1>> f1;
+	pb::optional<alt_tag<2>> f2;
+	pb::optional<alt_tag<3>> f3;
+	pb::optional<alt_tag<4>> f4;
+	pb::optional<alt_tag<5>> f5;
+	pb::optional<alt_tag<6>> f6;
+	pb::optional<alt_tag<7>> f7;
+	pb::optional<alt_tag<8>> f8;
+	pb::optional<alt_tag<9>> f9;
+	pb::optional<alt_tag<10>> f10;
+	pb::optional<alt_tag<11>> f11;
+	pb::optional<alt_tag<12>> f12;
+	pb::optional<alt_tag<13>> f13;
+	pb::optional<alt_tag<14>> f14;
+	pb::optional<alt_tag<15>> f15;
+	pb::optional<alt_tag<16>> f16;
+	pb::optional<alt_tag<17>> f17;
+	pb::optional<alt_tag<18>> f18;
+	pb::optional<alt_tag<19>> f19;
+	pb::optional<alt_tag<20>> f20;
+	pb::optional<alt_tag<21>> f21;
+	pb::optional<alt_tag<22>> f22;
+	pb::optional<alt_tag<23>> f23;
+	pb::optional<alt_tag<24>> f24;
+	pb::optional<alt_tag<25>> f25;
+	pb::optional<alt_tag<26>> f26;
+	pb::optional<alt_tag<27>> f27;
+	pb::optional<alt_tag<28>> f28;
+	pb::optional<alt_tag<29>> f29;
+	pb::optional<alt_tag<30>> f30;
+	pb::optional<alt_tag<31>> f31;
+	pb::optional<alt_tag<32>> f32;
+	pb::optional<alt_tag<33>> f33;
+	pb::optional<alt_tag<34>> f34;
+	pb::optional<alt_tag<35>> f35;
+	pb::optional<alt_tag<36>> f36;
+	pb::optional<alt_tag<37>> f37;
+	pb::optional<alt_tag<38>> f38;
+	pb::optional<alt_tag<39>> f39;
+	pb::optional<alt_tag<40>> f40;
+	pb::optional<alt_tag<41>> f41;
+	pb::optional<alt_tag<42>> f42;
+	pb::optional<alt_tag<43>> f43;
+	pb::optional<alt_tag<44>> f44;
+	pb::optional<alt_tag<45>> f45;
+	pb::optional<alt_tag<46>> f46;
+	pb::optional<alt_tag<47>> f47;
+	pb::optional<alt_tag<48>> f48;
+	pb::optional<alt_tag<49>> f49;
+	pb::optional<alt_tag<50>> f50;
+	pb::optional<alt_tag<51>> f51;
+	pb::optional<alt_tag<52>> f52;
+	pb::optional<alt_tag<53>> f53;
+	pb::optional<alt_tag<54>> f54;
+	pb::optional<alt_tag<55>> f55;
+	pb::optional<alt_tag<56>> f56;
+	pb::optional<alt_tag<57>> f57;
+	pb::optional<alt_tag<58>> f58;
+	pb::optional<alt_tag<59>> f59;
+	pb::optional<alt_tag<60>> f60;
+	pb::optional<alt_tag<61>> f61;
+	pb::optional<alt_tag<62>> f62;
+	pb::optional<alt_tag<63>> f63;
+	pb::optional<alt_tag<64>> f64;
+	pb::optional<alt_tag<65>> f65;
+	pb::optional<alt_tag<66>> f66;
+	pb::optional<alt_tag<67>> f67;
+	pb::optional<alt_tag<68>> f68;
+	pb::optional<alt_tag<69>> f69;
+	pb::optional<alt_tag<70>> f70;
+	pb::optional<alt_tag<71>> f71;
+	pb::optional<alt_tag<72>> f72;
+	pb::optional<alt_tag<73>> f73;
 };
 
 } // namespace

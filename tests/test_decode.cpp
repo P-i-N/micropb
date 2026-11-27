@@ -125,7 +125,7 @@ struct owned_buffers
 {
 	pb::string<6> name;
 	pb::bytes<4> data;
-	std::optional<pb::string<4>> tag;
+	pb::optional<pb::string<4>> tag;
 	pb::repeated<pb::string<4>, 2> labels;
 };
 
@@ -172,7 +172,7 @@ struct arena_holder
 
 struct arena_choices
 {
-	std::optional<arena_lists> maybe;
+	pb::optional<arena_lists> maybe;
 	pb::oneof<arena_lists, uint32_t> choice;
 };
 
@@ -190,7 +190,7 @@ struct byte_lists
 /// Members with bytes that are not all valid: a `bool`, the flag of a `std::optional`, the index of a `std::variant`.
 struct fragile
 {
-	std::optional<int32_t> o;
+	pb::optional<int32_t> o;
 	pb::oneof<uint32_t, float> c;
 	bool flag;
 };
@@ -408,7 +408,7 @@ struct defaulted
 
 struct defaulted_optional
 {
-	std::optional<defaulted> o;
+	pb::optional<defaulted> o;
 };
 
 struct defaulted_choice

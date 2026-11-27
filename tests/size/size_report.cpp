@@ -16,18 +16,18 @@ struct m0
 {
 	bool f0;
 	uint32_t f1;
-	std::optional<float> f2;
+	pb::optional<float> f2;
 	double f3;
 	int32_t f4;
 	uint8_t f5;
 	pb::repeated<uint8_t, 16> f6;
-	std::optional<uint32_t> f7;
+	pb::optional<uint32_t> f7;
 };
 
 struct m1
 {
 	pb::repeated<int32_t, 8> f0;
-	std::optional<uint32_t> f1;
+	pb::optional<uint32_t> f1;
 	int16_t f2;
 	pb::repeated<float, 4> f3;
 	float f4;
@@ -43,7 +43,7 @@ struct m2
 	uint32_t f2;
 	uint8_t f3;
 	uint32_t f4;
-	std::optional<uint32_t> f5;
+	pb::optional<uint32_t> f5;
 	bool f6;
 	float f7;
 };
@@ -69,13 +69,13 @@ struct m4
 	pb::repeated<uint8_t, 16> f4;
 	uint32_t f5;
 	uint64_t f6;
-	std::optional<float> f7;
+	pb::optional<float> f7;
 };
 
 struct m5
 {
 	pb::repeated<int32_t, 8> f0;
-	std::optional<uint32_t> f1;
+	pb::optional<uint32_t> f1;
 	uint64_t f2;
 	float f3;
 	std::string_view f4;
@@ -102,7 +102,7 @@ struct m7
 	int32_t f1;
 	pb::repeated<uint8_t, 16> f2;
 	std::string_view f3;
-	std::optional<float> f4;
+	pb::optional<float> f4;
 	uint64_t f5;
 	pb::repeated<float, 4> f6;
 	int16_t f7;
@@ -114,7 +114,7 @@ struct m8
 	bool f1;
 	pb::repeated<int32_t, 8> f2;
 	uint32_t f3;
-	std::optional<uint32_t> f4;
+	pb::optional<uint32_t> f4;
 	uint64_t f5;
 	uint8_t f6;
 	uint32_t f7;
@@ -127,7 +127,7 @@ struct m9
 	pb::repeated<uint8_t, 16> f2;
 	double f3;
 	pb::repeated<float, 4> f4;
-	std::optional<float> f5;
+	pb::optional<float> f5;
 	int32_t f6;
 	std::string_view f7;
 };
@@ -136,7 +136,7 @@ struct m10
 {
 	pb::repeated<uint8_t, 16> f0;
 	int32_t f1;
-	std::optional<uint32_t> f2;
+	pb::optional<uint32_t> f2;
 	int16_t f3;
 	uint64_t f4;
 	pb::repeated<int32_t, 8> f5;
@@ -148,10 +148,10 @@ struct m11
 {
 	double f0;
 	std::string_view f1;
-	std::optional<uint32_t> f2;
+	pb::optional<uint32_t> f2;
 	pb::repeated<uint8_t, 16> f3;
 	uint32_t f4;
-	std::optional<float> f5;
+	pb::optional<float> f5;
 	uint8_t f6;
 	bool f7;
 };
@@ -161,7 +161,7 @@ struct m12
 	double f0;
 	int16_t f1;
 	int32_t f2;
-	std::optional<float> f3;
+	pb::optional<float> f3;
 	uint64_t f4;
 	float f5;
 	uint32_t f6;
@@ -170,7 +170,7 @@ struct m12
 
 struct m13
 {
-	std::optional<uint32_t> f0;
+	pb::optional<uint32_t> f0;
 	pb::repeated<float, 4> f1;
 	uint64_t f2;
 	std::string_view f3;
@@ -188,7 +188,7 @@ struct m14
 	pb::repeated<uint8_t, 16> f3;
 	uint64_t f4;
 	int32_t f5;
-	std::optional<float> f6;
+	pb::optional<float> f6;
 	uint32_t f7;
 };
 
@@ -197,7 +197,7 @@ struct m15
 	pb::repeated<float, 4> f0;
 	uint8_t f1;
 	uint32_t f2;
-	std::optional<uint32_t> f3;
+	pb::optional<uint32_t> f3;
 	std::string_view f4;
 	uint32_t f5;
 	uint64_t f6;
@@ -206,8 +206,8 @@ struct m15
 
 struct m16
 {
-	std::optional<float> f0;
-	std::optional<uint32_t> f1;
+	pb::optional<float> f0;
+	pb::optional<uint32_t> f1;
 	uint8_t f2;
 	std::string_view f3;
 	pb::repeated<float, 4> f4;
@@ -219,7 +219,7 @@ struct m16
 struct m17
 {
 	int16_t f0;
-	std::optional<uint32_t> f1;
+	pb::optional<uint32_t> f1;
 	uint32_t f2;
 	uint32_t f3;
 	float f4;
@@ -231,7 +231,7 @@ struct m17
 struct m18
 {
 	std::string_view f0;
-	std::optional<float> f1;
+	pb::optional<float> f1;
 	int32_t f2;
 	double f3;
 	uint64_t f4;
@@ -243,9 +243,9 @@ struct m18
 struct m19
 {
 	int32_t f0;
-	std::optional<float> f1;
+	pb::optional<float> f1;
 	uint32_t f2;
-	std::optional<uint32_t> f3;
+	pb::optional<uint32_t> f3;
 	pb::repeated<int32_t, 8> f4;
 	bool f5;
 	float f6;
@@ -273,13 +273,13 @@ struct m21
 	int16_t f4;
 	pb::repeated<int32_t, 8> f5;
 	pb::repeated<uint8_t, 16> f6;
-	std::optional<uint32_t> f7;
+	pb::optional<uint32_t> f7;
 };
 
 struct m22
 {
 	int16_t f0;
-	std::optional<uint32_t> f1;
+	pb::optional<uint32_t> f1;
 	pb::repeated<int32_t, 8> f2;
 	int32_t f3;
 	uint32_t f4;
@@ -290,7 +290,7 @@ struct m22
 
 struct m23
 {
-	std::optional<float> f0;
+	pb::optional<float> f0;
 	double f1;
 	float f2;
 	bool f3;
@@ -302,7 +302,7 @@ struct m23
 
 struct m24
 {
-	std::optional<float> f0;
+	pb::optional<float> f0;
 	uint8_t f1;
 	uint32_t f2;
 	float f3;
@@ -315,7 +315,7 @@ struct m24
 struct m25
 {
 	std::string_view f0;
-	std::optional<uint32_t> f1;
+	pb::optional<uint32_t> f1;
 	pb::repeated<uint8_t, 16> f2;
 	uint64_t f3;
 	int16_t f4;
@@ -338,7 +338,7 @@ struct m26
 
 struct m27
 {
-	std::optional<float> f0;
+	pb::optional<float> f0;
 	uint32_t f1;
 	pb::repeated<uint8_t, 16> f2;
 	bool f3;
@@ -351,7 +351,7 @@ struct m27
 struct m28
 {
 	int32_t f0;
-	std::optional<float> f1;
+	pb::optional<float> f1;
 	int32_t f2;
 	bool f3;
 	double f4;
@@ -369,13 +369,13 @@ struct m29
 	uint32_t f4;
 	float f5;
 	pb::repeated<uint8_t, 16> f6;
-	std::optional<uint32_t> f7;
+	pb::optional<uint32_t> f7;
 };
 
 struct m30
 {
 	std::string_view f0;
-	std::optional<float> f1;
+	pb::optional<float> f1;
 	pb::repeated<int32_t, 8> f2;
 	double f3;
 	pb::repeated<uint8_t, 16> f4;

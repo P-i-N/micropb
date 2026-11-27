@@ -57,7 +57,7 @@ struct Reading
 	uint32_t id = 0;
 	int32_t temperature_mc = 0;
 	Mode mode = Mode::IDLE;
-	std::optional<pb::string<15>> label = {};
+	pb::optional<pb::string<15>> label = {};
 	pb::repeated<float, 4> channels = {};
 	pb::bytes<8> token = {};
 	std::array<uint8_t, 6> mac = {};
@@ -110,7 +110,7 @@ bool round_trip()
 
 ## Why MicroPB
 
-* **Plain C++23 types, no callbacks:** structs use `int32_t`/`uint32_t`, `enum class`, `std::optional`, `pb::oneof`, `pb::string<N>`, `pb::bytes<N>`, `pb::repeated<T, N>`, `pb::map<K, V, N>`, `std::string_view`, `std::span`, and `std::array`, default-initialized to their proto3 defaults. No `has_x` booleans, manual union tags, integer wrapper structs, or stream callbacks.
+* **Plain C++23 types, no callbacks:** structs use `int32_t`/`uint32_t`, `enum class`, `pb::optional`, `pb::oneof`, `pb::string<N>`, `pb::bytes<N>`, `pb::repeated<T, N>`, `pb::map<K, V, N>`, `std::string_view`, `std::span`, and `std::array`, default-initialized to their proto3 defaults. No `has_x` booleans, manual union tags, integer wrapper structs, or stream callbacks.
 * **Smaller Flash footprint than NanoPB on Arm Cortex-M:** one non-template interpreter handles all messages from compact `constexpr` halfword tables in ROM. By default, MicroPB optimizes for minimum ROM size; define `MICROPB_FAST` to enable speed-oriented fast paths. Measured on Arm Cortex-M4 / Cortex-M33 (`arm-none-eabi-gcc 16.2.0 -Os -mthumb --gc-sections`; x86-64 tables in [DETAILS.md](DETAILS.md#binary-size-comparison)):
 
   | Configuration (Cortex-M4 / M33) | 1&nbsp;type | 16&nbsp;types | 32&nbsp;types | Extra 8-field type |
@@ -178,8 +178,8 @@ void on_packet( std::span<const uint8_t> packet )
 | `bytes` | *(none)* / `max_size:N` / `max_size:N fixed_length:true` | `std::span<const uint8_t>` / `pb::bytes<N>` / `std::array<uint8_t, N>` |
 | `repeated T` | *(none)* / `max_count:N` / `max_count:N fixed_count:true` | `std::span<const T>` / `pb::repeated<T, N>` / `std::array<T, N>` |
 | `map<K, V>` | *(none)* / `max_count:N` / `max_count:N fixed_count:true` | `std::span<const pb::kv_pair<K, V>>` / `pb::map<K, V, N>` / `std::array<pb::kv_pair<K, V>, N>` |
-| `message T` | *(none)* / `type:FT_POINTER` (auto on cycles) | `std::optional<T>` / `const T*` (allocated in scratch/arena) |
-| `optional T` / `oneof` | — | `std::optional<T>` / `pb::oneof<...>` |
+| `message T` | *(none)* / `type:FT_POINTER` (auto on cycles) | `pb::optional<T>` / `const T*` (allocated in scratch/arena) |
+| `optional T` / `oneof` | — | `pb::optional<T>` / `pb::oneof<...>` |
 
 ## API
 
