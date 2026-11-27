@@ -32,55 +32,6 @@ using depth_t = std::conditional_t<( max_depth < 255 ), uint8_t, uint16_t>;
 /// Gives the codec access to the submessage nesting depth of `writer` and `reader`.
 struct depth_access;
 
-/// Largest field number of proto3.
-inline constexpr uint32_t max_field_number = ( 1u << 29 ) - 1;
-
-template <typename T, typename... U>
-inline constexpr bool is_one_of = ( std::is_same_v<T, U> || ... );
-
-/// A standard integer type: any integer type by size and sign, but not `bool` and not the character types.
-/// `int32_t` is `int` on a PC and `long` on `arm-none-eabi`. The rule accepts both.
-template <typename T>
-[[nodiscard]] consteval bool is_standard_integer()
-{
-	return std::is_integral_v<T> && !std::is_volatile_v<T> &&
-	       ( sizeof( T ) == 1 || sizeof( T ) == 2 || sizeof( T ) == 4 || sizeof( T ) == 8 ) &&
-	       !is_one_of<std::remove_cv_t<T>, bool, char, wchar_t, char8_t, char16_t, char32_t>;
-}
-
-/// Number of bytes that `value` uses as a varint (1 to 10).
-template <typename T>
-[[nodiscard]] constexpr size_t varint_size( T value )
-{
-	size_t size = 1;
-	while ( value >= 0x80 )
-	{
-		value >>= 7;
-		++size;
-	}
-	return size;
-}
-
-[[nodiscard]] constexpr uint32_t zigzag_encode( int32_t value )
-{
-	return ( static_cast<uint32_t>( value ) << 1 ) ^ static_cast<uint32_t>( value >> 31 );
-}
-
-[[nodiscard]] constexpr uint64_t zigzag_encode( int64_t value )
-{
-	return ( static_cast<uint64_t>( value ) << 1 ) ^ static_cast<uint64_t>( value >> 63 );
-}
-
-[[nodiscard]] constexpr int32_t zigzag_decode( uint32_t value )
-{
-	return static_cast<int32_t>( ( value >> 1 ) ^ ( ~( value & 1 ) + 1 ) );
-}
-
-[[nodiscard]] constexpr int64_t zigzag_decode( uint64_t value )
-{
-	return static_cast<int64_t>( ( value >> 1 ) ^ ( ~( value & 1 ) + 1 ) );
-}
-
 } // namespace detail
 
 ////////////////////////////////////////////////////////////////////////////////

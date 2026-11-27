@@ -45,15 +45,6 @@ enum class Mode : int32_t
 
 struct Reading
 {
-	static constexpr uint32_t id_tag = 1;
-	static constexpr uint32_t temperature_mc_tag = 2;
-	static constexpr uint32_t mode_tag = 3;
-	static constexpr uint32_t label_tag = 4;
-	static constexpr uint32_t channels_tag = 5;
-	static constexpr uint32_t token_tag = 6;
-	static constexpr uint32_t mac_tag = 7;
-	static constexpr uint32_t uptime_s_tag = 8;
-	static constexpr uint32_t fault_tag = 9;
 	uint32_t id = 0;
 	int32_t temperature_mc = 0;
 	Mode mode = Mode::IDLE;
@@ -61,12 +52,14 @@ struct Reading
 	pb::repeated<float, 4> channels = {};
 	pb::bytes<8> token = {};
 	std::array<uint8_t, 6> mac = {};
-	static constexpr size_t detail_uptime_s = 1;
-	static constexpr size_t detail_fault = 2;
 	pb::oneof<uint32_t, std::string_view> detail = {};
 };
 
 } // namespace sensor
+
+// Generated compile-time traits (field tags, oneof indices, enum min/max, max_encoded_size):
+// pb::traits<sensor::Mode>::min / ::max
+// pb::traits<sensor::Reading>::id_tag, ::detail_uptime_s, ::has_max_encoded_size, ::max_encoded_size
 ```
 
 Encode, size, and decode any message with three functions (`pb::encode`, `pb::decode`, `pb::encoded_size`):
@@ -185,16 +178,7 @@ void on_packet( std::span<const uint8_t> packet )
 
 ```cpp
 template <typename T>
-inline constexpr bool pb::has_max_encoded_size;
-
-template <typename T>
-inline constexpr size_t pb::max_encoded_size;
-
-template <typename E>
-inline constexpr E pb::enum_min;
-
-template <typename E>
-inline constexpr E pb::enum_max;
+struct pb::traits; // messages: <field>_tag, <oneof>_<field>, has_max_encoded_size, max_encoded_size; enums: min, max
 
 template <typename T>
 [[nodiscard]] size_t pb::encoded_size( const T& msg );
@@ -222,7 +206,7 @@ template <typename T>
 **Requirements:** a C++23 compiler (GCC 12+ for `std::expected`), plus Python 3.8+ and `protoc` to generate headers.
 
 * **CMake:** `add_subdirectory(micropb)` and `target_link_libraries(firmware PRIVATE micropb)`.
-* **Header-only:** add `src/` to your include path and compile with `-std=c++23`. Include `<micropb/micropb.hpp>` where you call `pb::encode`/`pb::decode`; generated `.pb.hpp` headers include `<micropb/types.hpp>` only.
+* **Header-only:** add `src/` to your include path and compile with `-std=c++23`. Include `<micropb/micropb.hpp>` where you call `pb::encode`/`pb::decode`; generated `.pb.hpp` headers include `<micropb/schema.hpp>` (types and `pb::traits`, no codec).
 * **Generate `.pb.hpp` headers** (use `tools\protoc-gen-micropb.bat` on Windows):
 
   ```sh

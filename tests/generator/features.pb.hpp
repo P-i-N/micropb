@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <string_view>
 
-#include <micropb/types.hpp>
+#include <micropb/schema.hpp>
 
 #include "shared.pb.hpp"
 
@@ -24,37 +24,16 @@ enum class Device_State : int8_t {
 };
 
 struct Device_Slot {
-    static constexpr uint32_t index_tag = 1;
-    static constexpr uint32_t key_tag = 2;
     uint32_t index = 0;
     pb::bytes<16> key = {};
 };
 
 struct limits {
-    static constexpr uint32_t low_tag = 1;
-    static constexpr uint32_t high_tag = 2;
     int32_t low = 0;
     int32_t high = 0;
 };
 
 struct Device {
-    static constexpr uint32_t class_tag = 1;
-    static constexpr uint32_t state_tag = 2;
-    static constexpr uint32_t limits_tag = 3;
-    static constexpr uint32_t backup_tag = 4;
-    static constexpr uint32_t serial_tag = 10;
-    static constexpr uint32_t offset_tag = 11;
-    static constexpr uint32_t token_tag = 12;
-    static constexpr uint32_t spare_tag = 13;
-    static constexpr uint32_t slots_tag = 14;
-    static constexpr uint32_t history_tag = 15;
-    static constexpr uint32_t trims_tag = 16;
-    static constexpr uint32_t trim_delta_tag = 17;
-    static constexpr uint32_t history_delta_tag = 18;
-    static constexpr uint32_t code_tag = 20;
-    static constexpr uint32_t text_tag = 22;
-    static constexpr uint32_t moved_tag = 25;
-    static constexpr uint32_t ready_tag = 26;
     int32_t class_ = 0;
     Device_State state = Device_State::IDLE;
     pb::optional<::features::limits> limits = {};
@@ -68,19 +47,11 @@ struct Device {
     pb::repeated<int8_t, 4> trims = {};
     int16_t trim_delta = 0;
     pb::repeated<int16_t, 3> history_delta = {};
-    static constexpr size_t event_code = 1;
-    static constexpr size_t event_text = 2;
-    static constexpr size_t event_moved = 3;
     pb::oneof<uint32_t, std::string_view, Device_Slot> event = {};
     bool ready = false;
 };
 
 struct Frame {
-    static constexpr uint32_t device_tag = 1;
-    static constexpr uint32_t slot_tag = 2;
-    static constexpr uint32_t origin_tag = 3;
-    static constexpr uint32_t unit_tag = 4;
-    static constexpr uint32_t mode_tag = 5;
     pb::optional<Device> device = {};
     pb::optional<Device_Slot> slot = {};
     pb::optional<::shared::types::Point> origin = {};
@@ -89,38 +60,22 @@ struct Frame {
 };
 
 struct Calibration {
-    static constexpr uint32_t gains_tag = 1;
-    static constexpr uint32_t id_tag = 2;
     std::array<float, 4> gains = {};
     std::array<uint8_t, 6> id = {};
 };
 
 struct Batch {
-    static constexpr uint32_t slots_tag = 1;
-    static constexpr uint32_t deltas_tag = 2;
-    static constexpr uint32_t blob_tag = 3;
     std::span<const Device_Slot> slots = {};
     std::span<const int16_t> deltas = {};
     std::span<const uint8_t> blob = {};
 };
 
 struct Report {
-    static constexpr uint32_t code_tag = 1;
-    static constexpr uint32_t batch_tag = 2;
-    static constexpr size_t body_code = 1;
-    static constexpr size_t body_batch = 2;
     pb::oneof<uint32_t, Batch> body = {};
 };
 
 struct Log {
-    static constexpr uint32_t id_tag = 1;
-    static constexpr uint32_t err_tag = 2;
-    static constexpr uint32_t info_tag = 3;
-    static constexpr uint32_t html_tag = 4;
     uint32_t id = 0;
-    static constexpr size_t msg_err = 1;
-    static constexpr size_t msg_info = 2;
-    static constexpr size_t msg_html = 3;
     pb::oneof<std::string_view, std::string_view, std::string_view> msg = {};
 };
 
@@ -129,13 +84,13 @@ struct Log {
 // Enum traits.
 
 template <>
-struct pb::enum_traits<::features::RxMode> {
+struct pb::traits<::features::RxMode> {
     static constexpr ::features::RxMode min = ::features::RxMode::FIXED;
     static constexpr ::features::RxMode max = ::features::RxMode::VARIABLE;
 };
 
 template <>
-struct pb::enum_traits<::features::Device_State> {
+struct pb::traits<::features::Device_State> {
     static constexpr ::features::Device_State min = ::features::Device_State::IDLE;
     static constexpr ::features::Device_State max = ::features::Device_State::BUSY;
 };
@@ -202,3 +157,82 @@ struct pb::fields_of<::features::Log> : pb::field_list<::features::Log,
     pb::field_at<decltype(::features::Log::msg), 2, offsetof(::features::Log, msg), 1>,
     pb::field_at<decltype(::features::Log::msg), 3, offsetof(::features::Log, msg), 2>,
     pb::field_at<decltype(::features::Log::msg), 4, offsetof(::features::Log, msg), 3>> {};
+
+// Message traits.
+
+template <>
+struct pb::traits<::features::Device_Slot> : pb::detail::message_traits<::features::Device_Slot> {
+    static constexpr uint32_t index_tag = 1;
+    static constexpr uint32_t key_tag = 2;
+};
+
+template <>
+struct pb::traits<::features::limits> : pb::detail::message_traits<::features::limits> {
+    static constexpr uint32_t low_tag = 1;
+    static constexpr uint32_t high_tag = 2;
+};
+
+template <>
+struct pb::traits<::features::Device> : pb::detail::message_traits<::features::Device> {
+    static constexpr uint32_t class_tag = 1;
+    static constexpr uint32_t state_tag = 2;
+    static constexpr uint32_t limits_tag = 3;
+    static constexpr uint32_t backup_tag = 4;
+    static constexpr uint32_t serial_tag = 10;
+    static constexpr uint32_t offset_tag = 11;
+    static constexpr uint32_t token_tag = 12;
+    static constexpr uint32_t spare_tag = 13;
+    static constexpr uint32_t slots_tag = 14;
+    static constexpr uint32_t history_tag = 15;
+    static constexpr uint32_t trims_tag = 16;
+    static constexpr uint32_t trim_delta_tag = 17;
+    static constexpr uint32_t history_delta_tag = 18;
+    static constexpr uint32_t code_tag = 20;
+    static constexpr uint32_t text_tag = 22;
+    static constexpr uint32_t moved_tag = 25;
+    static constexpr uint32_t ready_tag = 26;
+    static constexpr size_t event_code = 1;
+    static constexpr size_t event_text = 2;
+    static constexpr size_t event_moved = 3;
+};
+
+template <>
+struct pb::traits<::features::Frame> : pb::detail::message_traits<::features::Frame> {
+    static constexpr uint32_t device_tag = 1;
+    static constexpr uint32_t slot_tag = 2;
+    static constexpr uint32_t origin_tag = 3;
+    static constexpr uint32_t unit_tag = 4;
+    static constexpr uint32_t mode_tag = 5;
+};
+
+template <>
+struct pb::traits<::features::Calibration> : pb::detail::message_traits<::features::Calibration> {
+    static constexpr uint32_t gains_tag = 1;
+    static constexpr uint32_t id_tag = 2;
+};
+
+template <>
+struct pb::traits<::features::Batch> : pb::detail::message_traits<::features::Batch> {
+    static constexpr uint32_t slots_tag = 1;
+    static constexpr uint32_t deltas_tag = 2;
+    static constexpr uint32_t blob_tag = 3;
+};
+
+template <>
+struct pb::traits<::features::Report> : pb::detail::message_traits<::features::Report> {
+    static constexpr uint32_t code_tag = 1;
+    static constexpr uint32_t batch_tag = 2;
+    static constexpr size_t body_code = 1;
+    static constexpr size_t body_batch = 2;
+};
+
+template <>
+struct pb::traits<::features::Log> : pb::detail::message_traits<::features::Log> {
+    static constexpr uint32_t id_tag = 1;
+    static constexpr uint32_t err_tag = 2;
+    static constexpr uint32_t info_tag = 3;
+    static constexpr uint32_t html_tag = 4;
+    static constexpr size_t msg_err = 1;
+    static constexpr size_t msg_info = 2;
+    static constexpr size_t msg_html = 3;
+};

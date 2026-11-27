@@ -4,18 +4,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <micropb/types.hpp>
+#include <micropb/schema.hpp>
 
 namespace detail {
 
 struct tag {
-    static constexpr uint32_t error_tag = 1;
     uint32_t error = 0;
 };
 
 struct reader {
-    static constexpr uint32_t tag_tag = 1;
-    static constexpr uint32_t repeated_tag = 2;
     pb::optional<::detail::tag> tag = {};
     pb::repeated<::detail::tag, 2> repeated = {};
 };
@@ -32,3 +29,16 @@ template <>
 struct pb::fields_of<::detail::reader> : pb::field_list<::detail::reader,
     pb::field_at<decltype(::detail::reader::tag), 1, offsetof(::detail::reader, tag)>,
     pb::field_at<decltype(::detail::reader::repeated), 2, offsetof(::detail::reader, repeated)>> {};
+
+// Message traits.
+
+template <>
+struct pb::traits<::detail::tag> : pb::detail::message_traits<::detail::tag> {
+    static constexpr uint32_t error_tag = 1;
+};
+
+template <>
+struct pb::traits<::detail::reader> : pb::detail::message_traits<::detail::reader> {
+    static constexpr uint32_t tag_tag = 1;
+    static constexpr uint32_t repeated_tag = 2;
+};

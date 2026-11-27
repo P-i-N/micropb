@@ -125,7 +125,7 @@ class CoreTest(unittest.TestCase):
             #include <stdint.h>
             #include <string_view>
 
-            #include <micropb/types.hpp>
+            #include <micropb/schema.hpp>
 
             namespace app::link {
 
@@ -135,16 +135,10 @@ class CoreTest(unittest.TestCase):
             };
 
             struct Inner {
-                static constexpr uint32_t x_tag = 1;
                 int32_t x = 0;
             };
 
             struct Outer {
-                static constexpr uint32_t child_tag = 1;
-                static constexpr uint32_t mode_tag = 2;
-                static constexpr uint32_t name_tag = 3;
-                static constexpr uint32_t data_tag = 4;
-                static constexpr uint32_t delta_tag = 5;
                 pb::optional<Inner> child = {};
                 Mode mode = Mode::OFF;
                 std::string_view name = {};
@@ -157,7 +151,7 @@ class CoreTest(unittest.TestCase):
             // Enum traits.
 
             template <>
-            struct pb::enum_traits<::app::link::Mode> {
+            struct pb::traits<::app::link::Mode> {
                 static constexpr ::app::link::Mode min = ::app::link::Mode::OFF;
                 static constexpr ::app::link::Mode max = ::app::link::Mode::ON;
             };
@@ -175,6 +169,22 @@ class CoreTest(unittest.TestCase):
                 pb::field_at<decltype(::app::link::Outer::name), 3, offsetof(::app::link::Outer, name)>,
                 pb::field_at<decltype(::app::link::Outer::data), 4, offsetof(::app::link::Outer, data)>,
                 pb::field_at<decltype(::app::link::Outer::delta), 5, offsetof(::app::link::Outer, delta), 0, pb::int_encoding::ZIGZAG>> {};
+
+            // Message traits.
+
+            template <>
+            struct pb::traits<::app::link::Inner> : pb::detail::message_traits<::app::link::Inner> {
+                static constexpr uint32_t x_tag = 1;
+            };
+
+            template <>
+            struct pb::traits<::app::link::Outer> : pb::detail::message_traits<::app::link::Outer> {
+                static constexpr uint32_t child_tag = 1;
+                static constexpr uint32_t mode_tag = 2;
+                static constexpr uint32_t name_tag = 3;
+                static constexpr uint32_t data_tag = 4;
+                static constexpr uint32_t delta_tag = 5;
+            };
             """))
 
     def test_scalar_types(self):
@@ -195,16 +205,17 @@ class CoreTest(unittest.TestCase):
     def test_no_package_has_no_namespace(self):
         text = header("message m { bool a = 1; }")
         self.assertNotIn("namespace", text)
-        self.assertIn("\n\nstruct m {\n    static constexpr uint32_t a_tag = 1;\n    bool a = false;\n};\n\n// Field lists", text)
+        self.assertIn("\n\nstruct m {\n    bool a = false;\n};\n\n// Field lists", text)
         self.assertEqual(field_list(text, "m"), ["a = 1"])
+        self.assertEqual(traits(text, "m"), ["static constexpr uint32_t a_tag = 1;"])
 
     def test_includes_only_what_the_header_uses(self):
         text = header("message m {}")
-        self.assertEqual(includes(text), ["<micropb/types.hpp>"])
+        self.assertEqual(includes(text), ["<micropb/schema.hpp>"])
         text = header("message m { bool a = 1; }")
-        self.assertEqual(includes(text), ["<stddef.h>", "<stdint.h>", "<micropb/types.hpp>"])
+        self.assertEqual(includes(text), ["<stddef.h>", "<stdint.h>", "<micropb/schema.hpp>"])
         text = header("enum e { E_A = 0; }")
-        self.assertEqual(includes(text), ["<stdint.h>", "<micropb/types.hpp>"])
+        self.assertEqual(includes(text), ["<stdint.h>", "<micropb/schema.hpp>"])
         self.assertNotIn("Field lists", text)
 
     def test_empty_message(self):
@@ -241,11 +252,13 @@ class CoreTest(unittest.TestCase):
               }
             }
             """)
-        self.assertEqual(tags(text, "m"), [
+        self.assertEqual(traits(text, "m"), [
             "static constexpr uint32_t class_tag = 1;",
             "static constexpr uint32_t flag_tag = 10;",
             "static constexpr uint32_t err_tag = 20;",
             "static constexpr uint32_t code_tag = 536870911;",
+            "static constexpr size_t payload_err = 1;",
+            "static constexpr size_t payload_code = 2;",
         ])
 
     def test_enum_traits_min_max(self):
@@ -258,25 +271,25 @@ class CoreTest(unittest.TestCase):
             """)
         self.assertIn(textwrap.dedent("""\
             template <>
-            struct pb::enum_traits<::p::Unsorted> {
+            struct pb::traits<::p::Unsorted> {
                 static constexpr ::p::Unsorted min = ::p::Unsorted::NEG;
                 static constexpr ::p::Unsorted max = ::p::Unsorted::HIGH;
             };"""), text)
         self.assertIn(textwrap.dedent("""\
             template <>
-            struct pb::enum_traits<::p::Single> {
+            struct pb::traits<::p::Single> {
                 static constexpr ::p::Single min = ::p::Single::ONLY;
                 static constexpr ::p::Single max = ::p::Single::ONLY;
             };"""), text)
         self.assertIn(textwrap.dedent("""\
             template <>
-            struct pb::enum_traits<::p::Aliased> {
+            struct pb::traits<::p::Aliased> {
                 static constexpr ::p::Aliased min = ::p::Aliased::A_MIN;
                 static constexpr ::p::Aliased max = ::p::Aliased::A_MAX;
             };"""), text)
         self.assertIn(textwrap.dedent("""\
             template <>
-            struct pb::enum_traits<::p::M_Nested> {
+            struct pb::traits<::p::M_Nested> {
                 static constexpr ::p::M_Nested min = ::p::M_Nested::A;
                 static constexpr ::p::M_Nested max = ::p::M_Nested::B;
             };"""), text)
@@ -290,15 +303,15 @@ class CoreTest(unittest.TestCase):
 
 
 def members(text, name):
-    """The member lines (excluding `_tag` constants) of the struct `name` in the header `text`."""
-    lines = [line.strip() for line in text.split(f"struct {name} {{\n")[1].split("\n};")[0].splitlines()]
-    return [line for line in lines if not re.match(r"static constexpr uint32_t \w+_tag = \d+;$", line)]
+    """The member lines of the struct `name` in the header `text`."""
+    return [line.strip() for line in text.split(f"struct {name} {{\n")[1].split("\n};")[0].splitlines()]
 
 
-def tags(text, name):
-    """The `_tag` constant lines of the struct `name` in the header `text`."""
-    lines = [line.strip() for line in text.split(f"struct {name} {{\n")[1].split("\n};")[0].splitlines()]
-    return [line for line in lines if re.match(r"static constexpr uint32_t \w+_tag = \d+;$", line)]
+def traits(text, name):
+    """The constant lines of `pb::traits<::name>` in the header `text`."""
+    full = "::" + name
+    head = f"struct pb::traits<{full}> : pb::detail::message_traits<{full}> {{\n"
+    return [line.strip() for line in text.split(head)[1].split("\n};")[0].splitlines()]
 
 
 def field_list(text, name):
@@ -513,9 +526,9 @@ class StructureTest(unittest.TestCase):
             "const inner* c = nullptr;",
             "pb::repeated<inner, 2> d = {};",
             "pb::map<uint32_t, inner, 2> e = {};",
-            "static constexpr size_t v_f = 1;",
             "pb::oneof<inner> v = {};",
         ])
+        self.assertIn("static constexpr size_t v_f = 1;", traits(text, "m"))
         self.assertNotIn("#include <optional>\n", text)
 
     def test_oneof_with_consecutive_numbers(self):
@@ -526,10 +539,15 @@ class StructureTest(unittest.TestCase):
             """)
         self.assertEqual(members(text, "m"), [
             "uint32_t id = 0;",
-            "static constexpr size_t payload_first = 1;",
-            "static constexpr size_t payload_second = 2;",
             "pb::oneof<a, b> payload = {};",
             "bool last = false;"])
+        self.assertEqual(traits(text, "m"), [
+            "static constexpr uint32_t id_tag = 1;",
+            "static constexpr uint32_t first_tag = 2;",
+            "static constexpr uint32_t second_tag = 3;",
+            "static constexpr uint32_t last_tag = 4;",
+            "static constexpr size_t payload_first = 1;",
+            "static constexpr size_t payload_second = 2;"])
         self.assertEqual(field_list(text, "m"), ["id = 1", "payload = 2/1", "payload = 3/2", "last = 4"])
         self.assertNotIn("#include <variant>\n", text)
 
@@ -539,8 +557,6 @@ class StructureTest(unittest.TestCase):
             """)
         self.assertEqual(members(text, "m"), [
             "uint32_t id = 0;",
-            "static constexpr size_t payload_first = 1;",
-            "static constexpr size_t payload_second = 2;",
             "pb::oneof<int32_t, std::string_view> payload = {};",
             "bool last = false;"])
         self.assertEqual(field_list(text, "m"), ["id = 1", "payload = 5/1", "payload = 7/2", "last = 8"])
@@ -549,8 +565,6 @@ class StructureTest(unittest.TestCase):
         text = header("message m { optional bool a = 1; oneof v { int32 b = 2; bool c = 3; } optional bool d = 4; }")
         self.assertEqual(members(text, "m"), [
             "pb::optional<bool> a = {};",
-            "static constexpr size_t v_b = 1;",
-            "static constexpr size_t v_c = 2;",
             "pb::oneof<int32_t, bool> v = {};",
             "pb::optional<bool> d = {};"])
         self.assertEqual(field_list(text, "m"), ["a = 1", "v = 2/1", "v = 3/2", "d = 4"])
@@ -565,14 +579,22 @@ class StructureTest(unittest.TestCase):
             """)
         self.assertEqual(members(text, "m"), [
             "uint32_t id = 0;",
+            "pb::oneof<std::string_view, std::string_view, std::string_view> msg = {};",
+            "pb::oneof<int32_t, int32_t, int32_t> delta = {};"])
+        self.assertEqual(traits(text, "m"), [
+            "static constexpr uint32_t id_tag = 1;",
+            "static constexpr uint32_t err_tag = 2;",
+            "static constexpr uint32_t info_tag = 3;",
+            "static constexpr uint32_t html_tag = 4;",
+            "static constexpr uint32_t raw_tag = 5;",
+            "static constexpr uint32_t zz_tag = 6;",
+            "static constexpr uint32_t fx_tag = 7;",
             "static constexpr size_t msg_err = 1;",
             "static constexpr size_t msg_info = 2;",
             "static constexpr size_t msg_html = 3;",
-            "pb::oneof<std::string_view, std::string_view, std::string_view> msg = {};",
             "static constexpr size_t delta_raw = 1;",
             "static constexpr size_t delta_zz = 2;",
-            "static constexpr size_t delta_fx = 3;",
-            "pb::oneof<int32_t, int32_t, int32_t> delta = {};"])
+            "static constexpr size_t delta_fx = 3;"])
         self.assertEqual(field_list(text, "m"), [
             "id = 1", "msg = 2/1", "msg = 3/2", "msg = 4/3",
             "delta = 5/1", "delta = 6/2:ZIGZAG", "delta = 7/3:FIXED"])
@@ -635,8 +657,8 @@ class StructureTest(unittest.TestCase):
         text = result.headers["a.pb.hpp"]
         self.assertEqual(members(text, "m"),
                          ["pb::optional<::lib::types::point> p = {};", "::lib::types::kind k = ::lib::types::kind::A;", "int32_t d = 0;"])
-        self.assertEqual(includes(text), ["<stddef.h>", "<stdint.h>", "<micropb/types.hpp>", '"lib/b.pb.hpp"'])
-        self.assertIn('#include <micropb/types.hpp>\n\n#include "lib/b.pb.hpp"\n\nnamespace app {', text)
+        self.assertEqual(includes(text), ["<stddef.h>", "<stdint.h>", "<micropb/schema.hpp>", '"lib/b.pb.hpp"'])
+        self.assertIn('#include <micropb/schema.hpp>\n\n#include "lib/b.pb.hpp"\n\nnamespace app {', text)
         self.assertEqual(field_list(text, "app::m"), ["p = 1", "k = 2", "d = 3:ZIGZAG"])
         self.assertEqual(field_list(result.headers["lib/b.pb.hpp"], "lib::types::point"), ["x = 1"])
         self.assertIn("struct point {", result.headers["lib/b.pb.hpp"])
@@ -648,7 +670,7 @@ class StructureTest(unittest.TestCase):
         self.assertEqual(result.rc, 0, result.stderr)
         self.assertEqual(members(result.headers["a.pb.hpp"], "m"), ["pb::optional<point> p = {};"])
         self.assertEqual(includes(result.headers["a.pb.hpp"]),
-                         ["<stddef.h>", "<stdint.h>", "<micropb/types.hpp>", '"b.pb.hpp"'])
+                         ["<stddef.h>", "<stdint.h>", "<micropb/schema.hpp>", '"b.pb.hpp"'])
 
     def test_import_that_is_not_used_gives_no_include(self):
         result = run({
@@ -734,31 +756,30 @@ class NameTest(unittest.TestCase):
     def test_oneof_name_equal_to_a_type_name(self):
         text = header("message payload { int32 x = 1; } message m { oneof payload { payload p = 1; int32 q = 2; } }")
         self.assertEqual(members(text, "m"), [
-            "static constexpr size_t payload_p = 1;",
-            "static constexpr size_t payload_q = 2;",
             "pb::oneof<::payload, int32_t> payload = {};"])
 
     def test_oneof_member_type_equal_to_a_field_name(self):
         text = header("enum mode { MODE_A = 0; } message m { mode mode = 1; oneof v { mode x = 4; int32 y = 5; } }")
         self.assertEqual(members(text, "m"), [
             "::mode mode = ::mode::A;",
-            "static constexpr size_t v_x = 1;",
-            "static constexpr size_t v_y = 2;",
             "pb::oneof<::mode, int32_t> v = {};"])
 
-    def test_oneof_index_name_equal_to_a_type_name(self):
+    def test_oneof_index_name_does_not_shadow_struct_type(self):
         text = header("message msg_err { int32 x = 1; } message m { msg_err first = 1; oneof msg { string err = 2; } }")
         self.assertEqual(members(text, "m"), [
-            "pb::optional<::msg_err> first = {};",
-            "static constexpr size_t msg_err = 1;",
+            "pb::optional<msg_err> first = {};",
             "pb::oneof<std::string_view> msg = {};"])
+        self.assertIn("static constexpr size_t msg_err = 1;", traits(text, "m"))
 
     def test_oneof_with_a_keyword_name(self):
         text = header("message m { oneof union { int32 a = 1; bool b = 2; } }")
         self.assertEqual(members(text, "m"), [
-            "static constexpr size_t union_a = 1;",
-            "static constexpr size_t union_b = 2;",
             "pb::oneof<int32_t, bool> union_ = {};"])
+        self.assertEqual(traits(text, "m"), [
+            "static constexpr uint32_t a_tag = 1;",
+            "static constexpr uint32_t b_tag = 2;",
+            "static constexpr size_t union_a = 1;",
+            "static constexpr size_t union_b = 2;"])
         self.assertEqual(field_list(text, "m"), ["union_ = 1/1", "union_ = 2/2"])
 
     def test_keyword_field_name_equal_to_a_type_name_after_the_suffix(self):
@@ -783,10 +804,14 @@ class NumberTest(unittest.TestCase):
     def test_oneof_with_descending_numbers(self):
         text = header("message m { oneof w { bool d = 9; float e = 4; } int32 last = 1; }")
         self.assertEqual(members(text, "m"), [
-            "static constexpr size_t w_d = 1;",
-            "static constexpr size_t w_e = 2;",
             "pb::oneof<bool, float> w = {};",
             "int32_t last = 0;"])
+        self.assertEqual(traits(text, "m"), [
+            "static constexpr uint32_t d_tag = 9;",
+            "static constexpr uint32_t e_tag = 4;",
+            "static constexpr uint32_t last_tag = 1;",
+            "static constexpr size_t w_d = 1;",
+            "static constexpr size_t w_e = 2;"])
         self.assertEqual(field_list(text, "m"), ["w = 9/1", "w = 4/2", "last = 1"])
 
     def test_optional_field_after_a_gap(self):
@@ -825,7 +850,7 @@ class PackageTest(unittest.TestCase):
     def test_each_used_import_gives_an_include(self):
         _, headers = self.members_of('import "top.proto"; import "ab.proto"; import "a.proto"; '
                                      'message m { top x = 1; a.b.t y = 2; }')
-        self.assertEqual(headers, ["<stddef.h>", "<stdint.h>", "<micropb/types.hpp>", '"ab.pb.hpp"', '"top.pb.hpp"'])
+        self.assertEqual(headers, ["<stddef.h>", "<stdint.h>", "<micropb/schema.hpp>", '"ab.pb.hpp"', '"top.pb.hpp"'])
 
     def test_namespace_prefix_with_package(self):
         text = header("package app.link; message inner { int32 x = 1; } message m { inner inner = 1; }",
@@ -924,9 +949,13 @@ class RecursiveTest(unittest.TestCase):
     def test_oneof_auto_pointer_recursive(self):
         text = header("package p; message node { oneof child { node left = 1; int32 leaf = 2; } }")
         self.assertEqual(members(text, "node"), [
+            "pb::oneof<const node*, int32_t> child = {};",
+        ])
+        self.assertEqual(traits(text, "p::node"), [
+            "static constexpr uint32_t left_tag = 1;",
+            "static constexpr uint32_t leaf_tag = 2;",
             "static constexpr size_t child_left = 1;",
             "static constexpr size_t child_leaf = 2;",
-            "pb::oneof<const node*, int32_t> child = {};",
         ])
 
     def test_mutual_recursion_forward_decl(self):
@@ -1022,12 +1051,12 @@ class ErrorTest(unittest.TestCase):
                 self.assertNotIn("Traceback", text)
 
     def test_two_members_with_the_same_cpp_name(self):
-        self.assertIn("a.proto: m: two members have the C++ name msg_err",
-                      error(PROTO3 + "message m { int32 msg_err = 1; oneof msg { string err = 2; } }"))
-        self.assertIn("a.proto: m: two members have the C++ name a_b_c",
+        self.assertIn("a.proto: m: two members have the C++ name class_",
+                      error(PROTO3 + "message m { int32 class = 1; oneof class_ { int32 x = 2; } }"))
+        self.assertIn("a.proto: m: two traits have the C++ name a_b_c",
                       error(PROTO3 + "message m { oneof a { int32 b_c = 1; } oneof a_b { int32 c = 2; } }"))
-        self.assertIn("a.proto: m: two members have the C++ name foo_tag",
-                      error(PROTO3 + "message m { int32 foo = 1; int32 foo_tag = 2; }"))
+        self.assertIn("a.proto: m: two traits have the C++ name max_encoded_size",
+                      error(PROTO3 + "message m { oneof max { int32 encoded_size = 1; } }"))
 
     def test_two_types_with_the_same_flat_name(self):
         self.assertIn("a.proto: two types have the C++ name A_B",

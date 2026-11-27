@@ -40,34 +40,43 @@ static_assert( std::is_same_v<decltype( features::Calibration::gains ), std::arr
 static_assert( std::is_same_v<decltype( features::Batch::slots ), std::span<const features::Device_Slot>> );
 static_assert( std::is_same_v<decltype( features::Batch::blob ), std::span<const uint8_t>> );
 
-// Generated field tag constants (regular fields, oneof arms, and keyword names).
-static_assert( gen::scalars::i32_tag == 1 && gen::scalars::u16_tag == 16 );
-static_assert( gen::envelope::id_tag == 1 && gen::envelope::pose_tag == 2 && gen::envelope::ping_tag == 3 &&
-               gen::envelope::text_tag == 4 );
-static_assert( features::Device::class_tag == 1 && features::Device::serial_tag == 10 &&
-               features::Device::code_tag == 20 && features::Device::text_tag == 22 &&
-               features::Device::moved_tag == 25 && features::Device::ready_tag == 26 );
-static_assert( ::detail::reader::tag_tag == 1 && ::detail::reader::repeated_tag == 2 );
+// Generated field tag and oneof index constants under `pb::traits<T>`.
+static_assert( pb::traits<gen::scalars>::i32_tag == 1 && pb::traits<gen::scalars>::u16_tag == 16 );
+static_assert( pb::traits<gen::envelope>::id_tag == 1 && pb::traits<gen::envelope>::pose_tag == 2 &&
+               pb::traits<gen::envelope>::ping_tag == 3 && pb::traits<gen::envelope>::text_tag == 4 &&
+               pb::traits<gen::envelope>::payload_pose == 1 && pb::traits<gen::envelope>::payload_ping == 2 &&
+               pb::traits<gen::envelope>::payload_text == 3 );
+static_assert( pb::traits<features::Device>::class_tag == 1 && pb::traits<features::Device>::serial_tag == 10 &&
+               pb::traits<features::Device>::code_tag == 20 && pb::traits<features::Device>::text_tag == 22 &&
+               pb::traits<features::Device>::moved_tag == 25 && pb::traits<features::Device>::ready_tag == 26 &&
+               pb::traits<features::Device>::event_code == 1 && pb::traits<features::Device>::event_text == 2 &&
+               pb::traits<features::Device>::event_moved == 3 );
+static_assert( pb::traits<::detail::reader>::tag_tag == 1 && pb::traits<::detail::reader>::repeated_tag == 2 );
 
-// Generated enum min/max traits.
-static_assert( pb::enum_min<gen::color> == gen::color::NEG && pb::enum_max<gen::color> == gen::color::BLUE );
-static_assert( pb::enum_min<features::RxMode> == features::RxMode::FIXED &&
-               pb::enum_max<features::RxMode> == features::RxMode::VARIABLE );
-static_assert( pb::enum_min<features::Device_State> == features::Device_State::IDLE &&
-               pb::enum_max<features::Device_State> == features::Device_State::BUSY );
-static_assert( pb::enum_min<shared::types::Unit> == shared::types::Unit::NONE &&
-               pb::enum_max<shared::types::Unit> == shared::types::Unit::METER );
+// Generated enum min/max traits under `pb::traits<E>`.
+static_assert( pb::traits<gen::color>::min == gen::color::NEG && pb::traits<gen::color>::max == gen::color::BLUE );
+static_assert( pb::traits<features::RxMode>::min == features::RxMode::FIXED &&
+               pb::traits<features::RxMode>::max == features::RxMode::VARIABLE );
+static_assert( pb::traits<features::Device_State>::min == features::Device_State::IDLE &&
+               pb::traits<features::Device_State>::max == features::Device_State::BUSY );
+static_assert( pb::traits<shared::types::Unit>::min == shared::types::Unit::NONE &&
+               pb::traits<shared::types::Unit>::max == shared::types::Unit::METER );
 
 // Compile-time boundedness and max encoded size checks on generated messages.
-static_assert( pb::has_max_encoded_size<gen::scalars> && pb::has_max_encoded_size<gen::pose> &&
-               pb::has_max_encoded_size<gen::ping> && pb::has_max_encoded_size<shared::types::Point> &&
-               pb::has_max_encoded_size<features::Calibration> && pb::has_max_encoded_size<features::Device_Slot> &&
-               pb::has_max_encoded_size<features::limits> && pb::has_max_encoded_size<::detail::reader> );
-static_assert( !pb::has_max_encoded_size<gen::text> && !pb::has_max_encoded_size<gen::inner> &&
-               !pb::has_max_encoded_size<gen::outer> && !pb::has_max_encoded_size<gen::lists> &&
-               !pb::has_max_encoded_size<gen::envelope> && !pb::has_max_encoded_size<features::Device> &&
-               !pb::has_max_encoded_size<features::Frame> && !pb::has_max_encoded_size<features::Batch> &&
-               !pb::has_max_encoded_size<features::Report> && !pb::has_max_encoded_size<features::Log> );
+static_assert( pb::traits<gen::scalars>::has_max_encoded_size && pb::traits<gen::pose>::has_max_encoded_size &&
+               pb::traits<gen::ping>::has_max_encoded_size && pb::traits<shared::types::Point>::has_max_encoded_size &&
+               pb::traits<features::Calibration>::has_max_encoded_size &&
+               pb::traits<features::Device_Slot>::has_max_encoded_size &&
+               pb::traits<features::limits>::has_max_encoded_size &&
+               pb::traits<::detail::reader>::has_max_encoded_size );
+static_assert( !pb::traits<gen::text>::has_max_encoded_size && !pb::traits<gen::inner>::has_max_encoded_size &&
+               !pb::traits<gen::outer>::has_max_encoded_size && !pb::traits<gen::lists>::has_max_encoded_size &&
+               !pb::traits<gen::envelope>::has_max_encoded_size &&
+               !pb::traits<features::Device>::has_max_encoded_size &&
+               !pb::traits<features::Frame>::has_max_encoded_size &&
+               !pb::traits<features::Batch>::has_max_encoded_size &&
+               !pb::traits<features::Report>::has_max_encoded_size &&
+               !pb::traits<features::Log>::has_max_encoded_size );
 
 namespace d = pb::detail;
 
@@ -310,23 +319,24 @@ bool test_duplicate_oneof()
 	constexpr std::array<uint8_t, 6> info_wire{ 0x08, 0x07, 0x1a, 0x02, 0x6f, 0x6b };
 	constexpr std::array<uint8_t, 7> html_wire{ 0x08, 0x07, 0x22, 0x03, 0x3c, 0x62, 0x3e };
 
-	const features::Log err{ .id = 7, .msg{ std::in_place_index<features::Log::msg_err>, "bad" } };
+	using log_traits = pb::traits<features::Log>;
+	const features::Log err{ .id = 7, .msg{ std::in_place_index<log_traits::msg_err>, "bad" } };
 	features::Log info{ .id = 7 };
-	info.msg.emplace<features::Log::msg_info>( "ok" );
+	info.msg.emplace<log_traits::msg_info>( "ok" );
 	features::Log html{ .id = 7 };
-	html.msg.emplace<features::Log::msg_html>( "<b>" );
+	html.msg.emplace<log_traits::msg_html>( "<b>" );
 
 	features::Log rx{};
 	if ( !pb::decode( std::span<const uint8_t>( html_wire ), rx ) )
 		return false;
-	const auto* html_text = pb::get_if<features::Log::msg_html>( &rx.msg );
+	const auto* html_text = pb::get_if<log_traits::msg_html>( &rx.msg );
 
 	return encodes_to( err, err_wire ) && encodes_to( info, info_wire ) && encodes_to( html, html_wire ) &&
 	       round_trips<features::Log>( err_wire ) && round_trips<features::Log>( info_wire ) && rx.id == 7 &&
-	       rx.msg.index() == features::Log::msg_html && html_text && *html_text == "<b>";
+	       rx.msg.index() == log_traits::msg_html && html_text && *html_text == "<b>";
 }
 
-/// Worst-case values of bounded generated messages hit `pb::max_encoded_size<T>` exactly.
+/// Worst-case values of bounded generated messages hit `pb::traits<T>::max_encoded_size` exactly.
 bool test_max_encoded_size_tight()
 {
 	const gen::scalars worst_scalars{
@@ -356,14 +366,14 @@ bool test_max_encoded_size_tight()
 		if ( !worst_slot.key.push_back( 0xFF ) )
 			return false;
 
-	std::array<uint8_t, pb::max_encoded_size<gen::scalars>> buf{};
+	std::array<uint8_t, pb::traits<gen::scalars>::max_encoded_size> buf{};
 	const auto written = pb::encode( worst_scalars, buf );
-	return written && *written == pb::max_encoded_size<gen::scalars> &&
-	       pb::encoded_size( worst_scalars ) == pb::max_encoded_size<gen::scalars> &&
-	       pb::encoded_size( worst_pose ) == pb::max_encoded_size<gen::pose> &&
-	       pb::encoded_size( worst_point ) == pb::max_encoded_size<shared::types::Point> &&
-	       pb::encoded_size( worst_cal ) == pb::max_encoded_size<features::Calibration> &&
-	       pb::encoded_size( worst_slot ) == pb::max_encoded_size<features::Device_Slot>;
+	return written && *written == pb::traits<gen::scalars>::max_encoded_size &&
+	       pb::encoded_size( worst_scalars ) == pb::traits<gen::scalars>::max_encoded_size &&
+	       pb::encoded_size( worst_pose ) == pb::traits<gen::pose>::max_encoded_size &&
+	       pb::encoded_size( worst_point ) == pb::traits<shared::types::Point>::max_encoded_size &&
+	       pb::encoded_size( worst_cal ) == pb::traits<features::Calibration>::max_encoded_size &&
+	       pb::encoded_size( worst_slot ) == pb::traits<features::Device_Slot>::max_encoded_size;
 }
 
 } // namespace

@@ -457,6 +457,7 @@ class Header:
         self.namespace_prefix = namespace_prefix
         self.imports = set()
         self.field_lists = []
+        self.message_traits = []
         self.auto_pointers = set()
 
     def error(self, text):
@@ -570,19 +571,20 @@ class Header:
             return field.oneof_index if "oneof_index" in field.present and not field.proto3_optional else None
 
         all_names = ([ident(field.name) for field in desc.field if oneof_of(field) is None] +
-                     [ident(f"{field.name}_tag") for field in desc.field] +
                      [ident(desc.oneof_decl[idx].name) for idx in dict.fromkeys(
-                         oneof_of(field) for field in desc.field if oneof_of(field) is not None)] +
-                     [ident(f"{desc.oneof_decl[oneof_of(field)].name}_{field.name}")
-                      for field in desc.field if oneof_of(field) is not None])
+                         oneof_of(field) for field in desc.field if oneof_of(field) is not None)])
         for cname in all_names:
             if all_names.count(cname) > 1:
                 raise self.error(f"{message.proto_name}: two members have the C++ name {cname}")
         member_names = set(all_names)
 
-        lines = [f"    static constexpr uint32_t {ident(f'{field.name}_tag')} = {field.number};"
-                 for field in desc.field]
-        entries, done = [], set()  # an entry: member name, field number, alternative index, encoding
+        trait_lines, trait_names = [], []
+        for field in desc.field:
+            cname = ident(f"{field.name}_tag")
+            trait_names.append(cname)
+            trait_lines.append(f"    static constexpr uint32_t {cname} = {field.number};")
+
+        lines, entries, done = [], [], set()  # an entry: member name, field number, alternative index, encoding
         for field in desc.field:
             index = oneof_of(field)
             if index is None:
@@ -611,12 +613,18 @@ class Header:
                 types = [self.field_type(message, other, member_names) for other in group]
                 for position, other in enumerate(group, 1):
                     const_name = ident(f"{name}_{other.name}")
-                    lines.append(f"    static constexpr size_t {const_name} = {position};")
+                    trait_names.append(const_name)
+                    trait_lines.append(f"    static constexpr size_t {const_name} = {position};")
                 lines.append(f"    pb::oneof<{', '.join(types)}> {ident(name)} = {{}};")
                 entries += [(ident(name), other.number, position, ENCODINGS.get(other.type))
                             for position, other in enumerate(group, 1)]
 
+        for cname in trait_names:
+            if cname in ("has_max_encoded_size", "max_encoded_size") or trait_names.count(cname) > 1:
+                raise self.error(f"{message.proto_name}: two traits have the C++ name {cname}")
+
         self.field_lists.append(self.field_list_text(message, entries))
+        self.message_traits.append(self.message_traits_text(message, trait_lines))
         if not lines:
             return f"struct {message.name} {{}};"
         return "\n".join([f"struct {message.name} {{"] + lines + ["};"])
@@ -626,15 +634,23 @@ class Header:
         return "::" + "::".join(filter(None, [namespace_of(self.file.package, self.namespace_prefix), target.name]))
 
     def enum_traits_text(self, enum):
-        """The `pb::enum_traits` specialization of `enum`: its min and max declared enumerators."""
+        """The `pb::traits` specialization of `enum`: its min and max declared enumerators."""
         name = self.full_name(enum)
         pairs = list(zip(enum_names(enum.desc), enum.desc.value))
         low = min(pairs, key=lambda pair: pair[1].number)[0]
         high = max(pairs, key=lambda pair: pair[1].number)[0]
-        return (f"template <>\nstruct pb::enum_traits<{name}> {{\n"
+        return (f"template <>\nstruct pb::traits<{name}> {{\n"
                 f"    static constexpr {name} min = {name}::{low};\n"
                 f"    static constexpr {name} max = {name}::{high};\n"
                 f"}};")
+
+    def message_traits_text(self, message, trait_lines):
+        """The `pb::traits` specialization of `message`: tags, oneof indices, and max encoded size."""
+        name = self.full_name(message)
+        head = f"template <>\nstruct pb::traits<{name}> : pb::detail::message_traits<{name}>"
+        if not trait_lines:
+            return head + " {};"
+        return "\n".join([head + " {"] + trait_lines + ["};"])
 
     def field_list_text(self, message, entries):
         """The `pb::fields_of` specialization of `message`: the type, field number, offset and encoding."""
@@ -787,16 +803,17 @@ class Header:
             blocks.append("\n".join(f"struct {each.name};" for each in forward))
         blocks += [self.struct_text(each) for each in ordered]
         body = "\n\n".join(blocks)
-        traits = "\n\n".join(self.enum_traits_text(each) for each in enums)
+        enum_traits = "\n\n".join(self.enum_traits_text(each) for each in enums)
         lists = "\n\n".join(self.field_lists)
+        msg_traits = "\n\n".join(self.message_traits)
 
         out = [f"// Generated by protoc-gen-micropb from {self.file.name}. Do not edit.", "#pragma once", ""]
-        all_code = body + traits + lists
+        all_code = body + enum_traits + lists + msg_traits
         includes = [f"#include {name}" for name, pattern in INCLUDES if re.search(pattern, all_code)]
         if includes:
             out += includes + [""]
         if "pb::" in all_code:
-            out += ["#include <micropb/types.hpp>", ""]
+            out += ["#include <micropb/schema.hpp>", ""]
         if self.imports:
             out += [f'#include "{stem(name)}.pb.hpp"' for name in sorted(self.imports)] + [""]
 
@@ -805,10 +822,12 @@ class Header:
             out += [f"namespace {namespace} {{", "", body, "", f"}} // namespace {namespace}"]
         else:
             out += [body]
-        if traits:
-            out += ["", "// Enum traits.", "", traits]
+        if enum_traits:
+            out += ["", "// Enum traits.", "", enum_traits]
         if lists:
             out += ["", "// Field lists.", "", lists]
+        if msg_traits:
+            out += ["", "// Message traits.", "", msg_traits]
         return "\n".join(out) + "\n"
 
 

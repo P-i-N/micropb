@@ -159,21 +159,21 @@ struct mut_b
 } // namespace
 
 template <>
-struct pb::enum_traits<trait_small>
+struct pb::traits<trait_small>
 {
 	static constexpr trait_small min = trait_small::RED;
 	static constexpr trait_small max = trait_small::BLUE;
 };
 
 template <>
-struct pb::enum_traits<trait_wide>
+struct pb::traits<trait_wide>
 {
 	static constexpr trait_wide min = trait_wide::ZERO;
 	static constexpr trait_wide max = trait_wide::BIG;
 };
 
 template <>
-struct pb::enum_traits<trait_neg>
+struct pb::traits<trait_neg>
 {
 	static constexpr trait_neg min = trait_neg::NEG;
 	static constexpr trait_neg max = trait_neg::ZERO;
@@ -334,6 +334,12 @@ consteval bool test_packed()
 	       !is_packed<const pose*>();
 }
 
+template <typename T>
+inline constexpr bool has_enum_min_trait = requires { traits<T>::min; };
+
+template <typename T>
+inline constexpr bool has_max_size_member = requires { traits<T>::max_encoded_size; };
+
 consteval bool test_max_encoded_size()
 {
 	// bounded_scalars:
@@ -363,16 +369,23 @@ consteval bool test_max_encoded_size()
 	// total = 22
 	constexpr size_t expected_trait_enums = 22;
 
-	return has_max_encoded_size<empty_msg> && max_encoded_size<empty_msg> == 0 &&
-	       has_max_encoded_size<const empty_msg> && max_encoded_size<const empty_msg> == 0 &&
-	       has_max_encoded_size<bounded_scalars> && max_encoded_size<bounded_scalars> == expected_scalars &&
-	       has_max_encoded_size<bounded_containers> && max_encoded_size<bounded_containers> == expected_containers &&
-	       has_max_encoded_size<multi_oneof_msg> && max_encoded_size<multi_oneof_msg> == expected_oneof &&
-	       has_max_encoded_size<trait_enum_msg> && max_encoded_size<trait_enum_msg> == expected_trait_enums &&
-	       !has_max_encoded_size<unbounded_sv> && !has_max_encoded_size<unbounded_bytes> &&
-	       !has_max_encoded_size<unbounded_repeated> && !has_max_encoded_size<unbounded_oneof> &&
-	       !has_max_encoded_size<unbounded_nested> && !has_max_encoded_size<rec_node> &&
-	       !has_max_encoded_size<mut_a> && !has_max_encoded_size<mut_b>;
+	return traits<empty_msg>::has_max_encoded_size && traits<empty_msg>::max_encoded_size == 0 &&
+	       traits<const empty_msg>::has_max_encoded_size && traits<const empty_msg>::max_encoded_size == 0 &&
+	       traits<bounded_scalars>::has_max_encoded_size &&
+	       traits<bounded_scalars>::max_encoded_size == expected_scalars &&
+	       traits<bounded_containers>::has_max_encoded_size &&
+	       traits<bounded_containers>::max_encoded_size == expected_containers &&
+	       traits<multi_oneof_msg>::has_max_encoded_size &&
+	       traits<multi_oneof_msg>::max_encoded_size == expected_oneof &&
+	       traits<trait_enum_msg>::has_max_encoded_size &&
+	       traits<trait_enum_msg>::max_encoded_size == expected_trait_enums &&
+	       traits<const trait_small>::min == trait_small::RED &&
+	       traits<const trait_small>::max == trait_small::BLUE &&
+	       !has_enum_min_trait<signed_e8> && !has_max_size_member<unbounded_sv> && has_max_size_member<empty_msg> &&
+	       !traits<unbounded_sv>::has_max_encoded_size && !traits<unbounded_bytes>::has_max_encoded_size &&
+	       !traits<unbounded_repeated>::has_max_encoded_size && !traits<unbounded_oneof>::has_max_encoded_size &&
+	       !traits<unbounded_nested>::has_max_encoded_size && !traits<rec_node>::has_max_encoded_size &&
+	       !traits<mut_a>::has_max_encoded_size && !traits<mut_b>::has_max_encoded_size;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

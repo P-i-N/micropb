@@ -11,9 +11,11 @@
 #include <utility>
 
 #include <micropb/types.hpp>
-#include <micropb/wire.hpp>
 
 namespace pb {
+
+template <typename T>
+struct traits;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -235,6 +237,12 @@ template <typename T, uint32_t Number, int_encoding Encoding, bool Always, typen
 	return key_size( number ) + varint_size( uint64_t{ payload } ) + payload;
 }
 
+template <typename E>
+inline constexpr bool has_enum_traits = requires {
+	traits<E>::min;
+	traits<E>::max;
+};
+
 template <typename T, int_encoding Encoding>
 [[nodiscard]] consteval size_t max_scalar_value_size()
 {
@@ -248,10 +256,10 @@ template <typename T, int_encoding Encoding>
 	{
 		if constexpr ( has_enum_traits<T> )
 		{
-			if constexpr ( static_cast<int64_t>( enum_traits<T>::min ) < 0 )
+			if constexpr ( static_cast<int64_t>( traits<T>::min ) < 0 )
 				return 10;
 			else
-				return varint_size( static_cast<uint64_t>( enum_traits<T>::max ) );
+				return varint_size( static_cast<uint64_t>( traits<T>::max ) );
 		}
 		else
 		{
@@ -603,15 +611,26 @@ template <typename T>
 	return list_traits<field_list_of<T>>::template max_size<T>();
 }
 
-template <typename T>
-[[nodiscard]] consteval size_t checked_max_encoded_size()
+template <typename T, bool Bounded = max_encoded_size_of<T>().has_value()>
+struct message_traits
 {
-	constexpr std::optional<size_t> bound = max_encoded_size_of<T>();
-	static_assert( bound.has_value(),
-	               "pb: unbounded_encoded_size: message contains an unbounded view or recursive field; check "
-	               "pb::has_max_encoded_size<T>" );
-	return bound.value_or( 0 );
-}
+	static constexpr bool has_max_encoded_size = false;
+};
+
+template <typename T>
+struct message_traits<T, true>
+{
+	static constexpr bool has_max_encoded_size = true;
+	static constexpr size_t max_encoded_size = *max_encoded_size_of<T>();
+};
+
+template <typename T, bool IsClass = std::is_class_v<T>>
+struct default_traits
+{};
+
+template <typename T>
+struct default_traits<T, true> : message_traits<T>
+{};
 
 } // namespace detail
 
@@ -624,14 +643,25 @@ struct fields_of
 	               "pb: no_field_list: this message type has no pb::fields_of. Generate it with protoc-gen-micropb" );
 };
 
-/// `true` when every field of message `T` has a compile-time upper bound on its encoded size.
+/// Compile-time metadata for a proto3 enum or message type `T`.
+/// Generated enums specialize `pb::traits<E>` with `min` and `max`.
+/// Messages expose `has_max_encoded_size`, `max_encoded_size` (when bounded),
+/// field number constants (`<field>_tag`), and 1-based `oneof` alternative indices
+/// (`<oneof>_<field>`).
 template <typename T>
-inline constexpr bool has_max_encoded_size = detail::max_encoded_size_of<std::remove_cv_t<T>>().has_value();
+struct traits : detail::default_traits<T>
+{};
 
-/// Upper bound in bytes on `pb::encoded_size( msg )` for any value of message `T`.
-/// Fails at compile time (`pb: unbounded_encoded_size`) when `T` contains an unbounded view
-/// or a recursive pointer.
 template <typename T>
-inline constexpr size_t max_encoded_size = detail::checked_max_encoded_size<std::remove_cv_t<T>>();
+struct traits<const T> : traits<T>
+{};
+
+template <typename T>
+struct traits<volatile T> : traits<T>
+{};
+
+template <typename T>
+struct traits<const volatile T> : traits<T>
+{};
 
 } // namespace pb

@@ -86,50 +86,57 @@ struct field_list
 template <typename T>
 struct fields_of;
 
-/// Declared minimum and maximum enumerators of a generated proto3 enum type `E`.
-template <typename E>
-struct enum_traits
-{};
-
 namespace detail {
 
-template <typename E>
-inline constexpr bool has_enum_traits = requires {
-	enum_traits<E>::min;
-	enum_traits<E>::max;
-};
+/// Largest field number of proto3.
+inline constexpr uint32_t max_field_number = ( 1u << 29 ) - 1;
 
-template <typename E>
-[[nodiscard]] consteval E checked_enum_min()
+template <typename T, typename... U>
+inline constexpr bool is_one_of = ( std::is_same_v<T, U> || ... );
+
+/// A standard integer type: any integer type by size and sign, but not `bool` and not the character types.
+/// `int32_t` is `int` on a PC and `long` on `arm-none-eabi`. The rule accepts both.
+template <typename T>
+[[nodiscard]] consteval bool is_standard_integer()
 {
-	static_assert( has_enum_traits<E>,
-	               "pb: no_enum_traits: this enum type has no pb::enum_traits. Generate it with protoc-gen-micropb" );
-	if constexpr ( has_enum_traits<E> )
-		return enum_traits<E>::min;
-	else
-		return E{};
+	return std::is_integral_v<T> && !std::is_volatile_v<T> &&
+	       ( sizeof( T ) == 1 || sizeof( T ) == 2 || sizeof( T ) == 4 || sizeof( T ) == 8 ) &&
+	       !is_one_of<std::remove_cv_t<T>, bool, char, wchar_t, char8_t, char16_t, char32_t>;
 }
 
-template <typename E>
-[[nodiscard]] consteval E checked_enum_max()
+/// Number of bytes that `value` uses as a varint (1 to 10).
+template <typename T>
+[[nodiscard]] constexpr size_t varint_size( T value )
 {
-	static_assert( has_enum_traits<E>,
-	               "pb: no_enum_traits: this enum type has no pb::enum_traits. Generate it with protoc-gen-micropb" );
-	if constexpr ( has_enum_traits<E> )
-		return enum_traits<E>::max;
-	else
-		return E{};
+	size_t size = 1;
+	while ( value >= 0x80 )
+	{
+		value >>= 7;
+		++size;
+	}
+	return size;
 }
 
-} // namespace detail
+[[nodiscard]] constexpr uint32_t zigzag_encode( int32_t value )
+{
+	return ( static_cast<uint32_t>( value ) << 1 ) ^ static_cast<uint32_t>( value >> 31 );
+}
 
-template <typename E>
-inline constexpr E enum_min = detail::checked_enum_min<E>();
+[[nodiscard]] constexpr uint64_t zigzag_encode( int64_t value )
+{
+	return ( static_cast<uint64_t>( value ) << 1 ) ^ static_cast<uint64_t>( value >> 63 );
+}
 
-template <typename E>
-inline constexpr E enum_max = detail::checked_enum_max<E>();
+[[nodiscard]] constexpr int32_t zigzag_decode( uint32_t value )
+{
+	return static_cast<int32_t>( ( value >> 1 ) ^ ( ~( value & 1 ) + 1 ) );
+}
 
-namespace detail {
+[[nodiscard]] constexpr int64_t zigzag_decode( uint64_t value )
+{
+	return static_cast<int64_t>( ( value >> 1 ) ^ ( ~( value & 1 ) + 1 ) );
+}
+
 /// Gives the codec the `_items` and `_count` members of `repeated`, `bytes` and `string`.
 struct sequence_access;
 

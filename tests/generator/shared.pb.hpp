@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <micropb/types.hpp>
+#include <micropb/schema.hpp>
 
 namespace shared::types {
 
@@ -14,8 +14,6 @@ enum class Unit : int32_t {
 };
 
 struct Point {
-    static constexpr uint32_t x_tag = 1;
-    static constexpr uint32_t y_tag = 2;
     int32_t x = 0;
     int32_t y = 0;
 };
@@ -25,7 +23,7 @@ struct Point {
 // Enum traits.
 
 template <>
-struct pb::enum_traits<::shared::types::Unit> {
+struct pb::traits<::shared::types::Unit> {
     static constexpr ::shared::types::Unit min = ::shared::types::Unit::NONE;
     static constexpr ::shared::types::Unit max = ::shared::types::Unit::METER;
 };
@@ -36,3 +34,11 @@ template <>
 struct pb::fields_of<::shared::types::Point> : pb::field_list<::shared::types::Point,
     pb::field_at<decltype(::shared::types::Point::x), 1, offsetof(::shared::types::Point, x), 0, pb::int_encoding::ZIGZAG>,
     pb::field_at<decltype(::shared::types::Point::y), 2, offsetof(::shared::types::Point, y), 0, pb::int_encoding::ZIGZAG>> {};
+
+// Message traits.
+
+template <>
+struct pb::traits<::shared::types::Point> : pb::detail::message_traits<::shared::types::Point> {
+    static constexpr uint32_t x_tag = 1;
+    static constexpr uint32_t y_tag = 2;
+};
